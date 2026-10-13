@@ -397,8 +397,7 @@ void playNote(char c) {
       const float pick=0.22f*expf(-(float)i/85.0f)*sinf(phase*6.7f);
       v=(body*decay+pick)*0.72f;
     }
-    const float envelope=(i<80)?((float)i/80.0f):1.0f;
-    v*=envelope;
+    const float envelope=(i<80)?((float)i/80.0f):1.0f;    v*=envelope;
     synthBuffer[i]=(int8_t)constrain((int)lroundf(v*gain),-127,127);
   }
   static int16_t synthEqBuffer[8192];
@@ -797,8 +796,7 @@ void stopAudioLocked() {
 }
 void stopAudio() {
   if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
-  stopAudioLocked();
-  audioTaskEnded=false;
+  stopAudioLocked();  audioTaskEnded=false;
   if(audioMutex) xSemaphoreGive(audioMutex);
   // Let the SD writer finish the WAV header before another app accesses the card.  uint32_t started=millis();
   while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);}
@@ -1197,8 +1195,7 @@ void saveLife(){
   file.write((const uint8_t*)&lifeIntervalMs,sizeof(lifeIntervalMs));
   file.write((const uint8_t*)lifeGrid,sizeof(lifeGrid));file.flush();file.close();
 }
-bool loadLife(){
-  if(!sdReady)return false;File file=SD.open("/JOHNNY/life.sav",FILE_READ);if(!file)return false;
+bool loadLife(){  if(!sdReady)return false;File file=SD.open("/JOHNNY/life.sav",FILE_READ);if(!file)return false;
   uint8_t magic[4]{};uint32_t generation=0;uint16_t interval=180;
   bool ok=file.read(magic,4)==4&&memcmp(magic,"JLIF",4)==0;
   ok=ok&&file.read((uint8_t*)&generation,sizeof(generation))==sizeof(generation);
@@ -1420,6 +1417,7 @@ void loop() {
     if(screen==HOME) drawHome();
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) drawCategoryMenu();
     else if(screen==UPDATEINFO) drawUpdateInfo();
+    else if(screen==MICREC) drawMicRecorder();
     else if(screen==PIANO) pianoScreen();
     else if(screen==TUNER) tunerScreen();
     else if(screen==FILES) drawFiles(false);
