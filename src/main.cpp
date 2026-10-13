@@ -238,23 +238,35 @@ void pianoScreen() {
 void playNote(char c) {
   const char* keys="qwertyu";
   const char* pos=strchr(keys,(char)tolower((unsigned char)c));
-  if(!pos)return;
+  if(!pos) return;
   const int scale[7]={0,2,4,5,7,9,11};
-  int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
-  float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
+  const int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
+  const float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
   M5Cardputer.Speaker.stop();
   M5Cardputer.Speaker.setVolume(255);
-  const float outputGain=(float)pianoVolume*1.27f;
-  for(int i=0;i<2048;i++){
-    float phase=6.2831853f*hz*((float)i/22050.0f);
+  const float gain=(float)pianoVolume*1.27f;
+  const float guitarDecay=0.30f+0.34f*(82.0f/max(hz,82.0f));
+  for(size_t i=0;i<8192;i++) {
+    const float phase=6.2831853f*hz*((float)i/22050.0f);
     float v=sinf(phase);
-    if(pianoEffect==1)v=tanhf(v*3.8f)/tanhf(3.8f);
-    else if(pianoEffect==2)v=tanhf((sinf(phase)+0.55f*sinf(phase*2)+0.28f*sinf(phase*3))*5.0f);
-    else if(pianoEffect==3)v=(v>=0)?0.72f:-0.72f;
-    float envelope=1.0f-(float)i/2048.0f; envelope*=envelope;
-    v*=envelope; synthBuffer[i]=(int8_t)constrain((int)lroundf(v*outputGain),-127,127);
+    if(pianoEffect==1) {
+      v=tanhf(v*3.8f)/tanhf(3.8f);
+    } else if(pianoEffect==2) {
+      v=tanhf((sinf(phase)+0.55f*sinf(phase*2.0f)+0.28f*sinf(phase*3.0f))*5.0f);
+    } else if(pianoEffect==3) {
+      v=(v>=0.0f)?0.72f:-0.72f;
+    } else if(pianoEffect==4) {
+      // Plucked-string patch: a short pick transient and decaying harmonics.
+      const float body=sinf(phase)+0.42f*sinf(phase*2.0f)+0.18f*sinf(phase*3.0f)+0.07f*sinf(phase*4.0f);
+      const float decay=expf(-(float)i/(22050.0f*guitarDecay));
+      const float pick=0.22f*expf(-(float)i/85.0f)*sinf(phase*6.7f);
+      v=(body*decay+pick)*0.72f;
+    }
+    const float envelope=(i<80)?((float)i/80.0f):1.0f;
+    v*=envelope;
+    synthBuffer[i]=(int8_t)constrain((int)lroundf(v*gain),-127,127);
   }
-  M5Cardputer.Speaker.playRaw(synthBuffer,2048,22050,false,1,0,true);
+  M5Cardputer.Speaker.playRaw(synthBuffer,8192,22050,false,1,0,true);
 }
 void stopMicCapture() {
   if(micStarted) M5Cardputer.Mic.end();
@@ -307,25 +319,41 @@ int nearestMidi(float hz, float* cents) {
 void tunerScreen() {
   header("CHROMATIC TUNER");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(tunerInstrument==0?UI_PINK:UI_MUTED,BG); d.setCursor(8,43); d.print("GUITAR");
-  d.setTextColor(tunerInstrument==1?UI_PINK:UI_MUTED,BG); d.setCursor(152,43); d.print("UKULELE");
-  if(tunerMidi>=0) {
-    int note=((tunerMidi%12)+12)%12, octave=tunerMidi/12-1;
-    d.setTextSize(3); d.setTextColor(UI_LAVENDER,BG); d.setCursor(9,61); d.printf("%s%d",noteNames[note],octave);
-    d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(146,65); d.printf("%.1f Hz",tunerFrequency);
-    d.setTextColor(fabsf(tunerCents)<5?UI_LAVENDER:UI_PINK,BG); d.setCursor(146,82); d.printf("%+.0f cents",tunerCents);
-    d.drawFastHLine(16,101,208,UI_PURPLE); d.drawFastVLine(120,96,11,UI_LAVENDER);
-    int marker=120+(int)constrain(tunerCents,-50.0f,50.0f)*2;
-    d.fillCircle(marker,101,3,UI_PINK);
-  } else {
-    d.setTextColor(UI_MUTED,BG); d.setCursor(8,70); d.print("PLAY A SINGLE NOTE");
-    d.setCursor(8,85); d.print("LISTENING TO INTERNAL MIC...");
+  const char* modeNames[]={"GUITAR","VIOLAO","UKULELE"};
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,43);
+  d.printf("MODE: %s",modeNames[tunerInstrument]);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(166,43); d.print("<  >");
+  if(!tunerHasSignal) {
+    d.setTextColor(UI_LAVENDER,BG); d.setTextSize(2); d.setCursor(8,63); d.print("TOQUE UMA CORDA");
+    d.setTextSize(1); d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("MANTENHA A NOTA SOANDO");
+    d.setCursor(8,101); d.print("A LEITURA FICA NA TELA POR 3s");
+    footer(", /  TROCAR INSTRUMENTO");
+    return;
   }
-  const char* ref=tunerInstrument==0?"E2 A2 D3 G3 B3 E4":"G4 C4 E4 A4";
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,111); d.print(ref);
-  footer(", / ; CHANGE INSTRUMENT");
+  const float* hzTable=(tunerInstrument==2)?ukeHz:guitarHz;
+  const char** nameTable=(tunerInstrument==2)?ukeNames:guitarNames;
+  const int count=(tunerInstrument==2)?4:6;
+  int nearest=0;
+  float cents=1200.0f*log2f(tunerFrequency/hzTable[0]);
+  for(int i=1;i<count;i++) {
+    float candidate=1200.0f*log2f(tunerFrequency/hzTable[i]);
+    if(fabsf(candidate)<fabsf(cents)) { cents=candidate; nearest=i; }
+  }
+  const uint16_t statusColor=(fabsf(cents)<=5.0f)?UI_LAVENDER:UI_PINK;
+  d.fillRoundRect(8,56,224,51,4,PANEL);
+  d.setTextColor(UI_MUTED,PANEL); d.setCursor(16,63); d.printf("CORDA %s  /  ALVO %.1f Hz",nameTable[nearest],hzTable[nearest]);
+  d.setTextColor(WHITE,PANEL); d.setTextSize(2); d.setCursor(16,78); d.printf("%+.0f CENT",cents);
+  d.setTextSize(1); d.setTextColor(UI_LAVENDER,PANEL); d.setCursor(156,83); d.printf("%.1f Hz",tunerFrequency);
+  d.drawFastHLine(18,113,204,UI_PURPLE);
+  d.drawFastVLine(120,109,9,UI_LAVENDER);
+  int marker=120+(int)constrain(cents,-50.0f,50.0f)*2;
+  d.fillCircle(marker,113,3,statusColor);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,101);
+  if(cents < -5.0f) { d.setTextColor(UI_PINK,BG); d.setCursor(8,101); d.print("GRAVE DEMAIS  ->  APERTE"); }
+  else if(cents > 5.0f) { d.setTextColor(UI_PINK,BG); d.setCursor(8,101); d.print("AGUDA DEMAIS  ->  AFROUXE"); }
+  else { d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,101); d.print("AFINADA  /  MANTENHA"); }
+  footer(", /  TROCAR INSTRUMENTO");
 }
-
 void drawNetworkScreen() {
   header("WI-FI");
   auto &d=M5Cardputer.Display;
