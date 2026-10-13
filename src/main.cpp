@@ -3,11 +3,26 @@
 #include <SPI.h>
 #include <SD.h>
 #include <math.h>
+#include <WiFi.h>
+#include <Preferences.h>
+#include <ctype.h>
+#include "sdkconfig.h"
+#ifndef ARDUINO_USB_MODE
+#define ARDUINO_USB_MODE 1
+#endif
+#if defined(CONFIG_TINYUSB_MSC_ENABLED) && CONFIG_TINYUSB_MSC_ENABLED && (ARDUINO_USB_MODE == 0)
+  #include "USB.h"
+  #include "USBMSC.h"
+  #include <SdFat.h>
+  #define JOHNNY_USB_MSC 1
+#else
+  #define JOHNNY_USB_MSC 0
+#endif
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
-constexpr uint16_t BG = 0x080B, PANEL = 0x190F, UI_PURPLE = 0x895F, UI_PINK = 0xF19F, UI_CYAN = 0x4EFF, UI_MUTED = 0x9CB0;
-enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, GALLERY, ABOUT };
+constexpr uint16_t BG = 0x1243, PANEL = 0x24C7, UI_PURPLE = 0xA2DF, UI_PINK = 0xF19F, UI_CYAN = 0x6EFF, UI_MUTED = 0xB5B4;
+enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, GALLERY, VOICE, NETWORK, USBMODE, ABOUT };
 Screen screen = HOME;
 SPIClass sdBus(FSPI);
 bool sdReady = false;
@@ -16,64 +31,115 @@ String entries[48];
 bool entryIsDir[48];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
 int pianoOctave=0,pianoEffect=0,pianoVolume=85;
+Preferences preferences;
+String savedSsid, savedPassword, wifiEntry;
+uint8_t wifiConfigStage=0;
+int voiceEffect=0, voiceGain=2;
+uint32_t tunerLastSample=0;
+float tunerFrequency=0.0f, tunerCents=0.0f;
+int tunerMidi=-1;
+int16_t tunerSamples[2048];
+int16_t voiceInput[512], voiceOutput[512], voiceDelay[8192];
+size_t voiceDelayPos=0;
+uint32_t voicePhase=0;
+bool usbActive=false, usbHostEjected=false;
 int8_t synthBuffer[2048];
 const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
 String selectedFile;
 uint8_t* wavBuffer = nullptr;
 size_t wavLength = 0;
 bool audioStarted = false;
-const char* apps[] = {"POCKET PIANO", "CHROMATIC TUNER", "MUSIC LIBRARY", "SD EXPLORER", "PHOTO VIEWER", "SYSTEM"};
-constexpr int APP_COUNT = 6;
+const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "PHOTOS", "MIC FX", "WI-FI", "USB DRIVE", "SYSTEM"};
+constexpr int APP_COUNT = 9;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
 const float ukeHz[] = {196.00f,261.63f,329.63f,392.00f};
 const char* ukeNames[] = {"G4","C4","E4","A4"};
+
+#if JOHNNY_USB_MSC
+SdFat32 usbSd;
+USBMSC msc;
+bool usbStarted=false;
+int32_t mscRead(uint32_t lba, uint32_t offset, void* buffer, uint32_t bufsize) {
+  if (!usbSd.card() || !buffer) return 0;
+  uint8_t sector[512], *out=(uint8_t*)buffer;
+  uint32_t done=0;
+  while(done<bufsize) {
+    if(!usbSd.card()->readSector(lba,sector)) return (int32_t)done;
+    uint32_t n=min((uint32_t)(512-offset),bufsize-done);
+    memcpy(out+done,sector+offset,n);
+    done+=n; lba++; offset=0;
+  }
+  return (int32_t)done;
+}
+int32_t mscWrite(uint32_t lba, uint32_t offset, uint8_t* buffer, uint32_t bufsize) {
+  if (!usbSd.card() || !buffer) return 0;
+  uint8_t sector[512];
+  uint32_t done=0;
+  while(done<bufsize) {
+    uint32_t n=min((uint32_t)(512-offset),bufsize-done);
+    if(offset!=0 || n!=512) if(!usbSd.card()->readSector(lba,sector)) return (int32_t)done;
+    memcpy(sector+offset,buffer+done,n);
+    if(!usbSd.card()->writeSector(lba,sector)) return (int32_t)done;
+    done+=n; lba++; offset=0;
+  }
+  return (int32_t)done;
+}
+bool mscStartStop(uint8_t, bool start, bool loadEject) {
+  if(loadEject) { usbHostEjected=!start; msc.mediaPresent(start); }
+  return true;
+}
+#endif
+
 }
 
 void header(const char* title) {
-  auto &d = M5Cardputer.Display;
+  auto &d=M5Cardputer.Display;
   d.fillScreen(BG);
   d.setTextSize(1);
-  d.setTextColor(UI_CYAN, BG); d.setCursor(7,5); d.print("J / JOHNNY");
-  d.setTextColor(UI_MUTED, BG); d.setCursor(178,5); d.print("ADV");
+  d.setTextColor(UI_PINK,BG); d.setCursor(7,5); d.print("JOHNNY");
   d.drawFastHLine(7,18,226,UI_PURPLE);
   d.setTextSize(2); d.setTextColor(WHITE,BG); d.setCursor(8,25); d.print(title);
   d.setTextSize(1);
 }
-void footer(const char* s="ESC  BACK") {
+void footer(const char* s="ESC / '  BACK") {
   auto &d=M5Cardputer.Display;
-  d.drawFastHLine(7,117,226,0x392B);
+  d.drawFastHLine(7,117,226,0x5140);
   d.setTextColor(UI_MUTED,BG); d.setCursor(8,124); d.print(s);
 }
 void drawHome() {
-  header("JOHNNY DECK");
+  header("JOHNNY");
   auto &d=M5Cardputer.Display;
-  const int xs[2]={8,124}, ys[3]={43,68,93};
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,29); d.print("WAKE THE FUCK UP, SAMURAI.");
+  const int xs[3]={5,83,161}, ys[3]={43,68,93};
   for(int i=0;i<APP_COUNT;i++){
-    int col=i%2,row=i/2,x=xs[col],y=ys[row]; bool on=i==selected;
-    uint16_t fill=on?0x3920:PANEL;
-    d.fillRoundRect(x,y,108,21,3,fill);
-    d.drawRoundRect(x,y,108,21,3,on?UI_PINK:0x392B);
+    int col=i%3,row=i/3,x=xs[col],y=ys[row]; bool on=i==selected;
+    uint16_t fill=on?0x5148:PANEL;
+    d.fillRoundRect(x,y,73,22,3,fill);
+    d.drawRoundRect(x,y,73,22,3,on?UI_PINK:UI_PURPLE);
     d.setTextColor(on?WHITE:UI_MUTED,fill);
-    d.setCursor(x+7,y+7); d.printf("%02d %s",i+1,apps[i]);
+    d.setCursor(x+5,y+8); d.printf("%s",apps[i]);
   }
-  footer(",./; ARROWS   ENTER SELECT");
+  footer(", . / ;  ARROWS  ENTER");
 }
 void splash() {
   auto &d=M5Cardputer.Display;
-  d.fillScreen(BG); d.setTextSize(3); d.setTextColor(WHITE,BG);
-  d.setCursor(36,48); d.print("JOHNNY"); delay(260);
-  for(int i=0;i<8;i++){
-    int y=random(36,98);
-    d.fillRect(23,y,random(40,194),random(1,4),i%2?UI_PINK:UI_CYAN);
+  d.fillScreen(BG);
+  d.setTextSize(3);
+  d.setTextColor(UI_PURPLE,BG);
+  d.setCursor(38,48); d.print("JOHNNY");
+  delay(350);
+  for(int i=0;i<10;i++) {
+    int y=random(43,87), x=random(12,45), w=random(70,205);
+    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_CYAN);
     d.setTextColor(i%2?UI_PINK:UI_CYAN,BG);
-    d.setCursor(35+random(-4,5),47+random(-2,3)); d.print("JOHNNY");
-    delay(42);
+    d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
+    delay(32);
   }
-  d.fillScreen(BG); d.setTextColor(WHITE,BG); d.setCursor(36,48); d.print("JOHNNY");
-  d.setTextSize(1); d.setTextColor(UI_PURPLE,BG); d.setCursor(65,83); d.print("PERSONAL DECK / 01");
-  delay(550);
+  d.fillScreen(BG);
+  d.setTextColor(WHITE,BG); d.setCursor(38,48); d.print("JOHNNY");
+  delay(650);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
