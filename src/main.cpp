@@ -81,8 +81,6 @@ String radioMessage="SELECT A STATION";
 String audioStatusMessage="STOPPED";
 String audioNowTitle;
 int audioVolume=14;
-bool audioPaused=false;
-bool audioIsRadio=false;
 AudioFileSource* audioRawSource=nullptr;
 AudioFileSourceBuffer* audioInputBuffer=nullptr;
 AudioGenerator* audioDecoder=nullptr;
