@@ -1,6 +1,6 @@
 # JOHNNY — Cardputer-Adv
 
-Firmware experimental para o M5Stack Cardputer-Adv (ESP32-S3), com interface roxa, navegação pelo teclado e ferramentas locais.
+Firmware experimental para o M5Stack Cardputer-Adv (ESP32-S3), com identidade visual roxa e rosa, navegação pelo teclado e ferramentas locais.
 
 ## Módulos disponíveis
 
