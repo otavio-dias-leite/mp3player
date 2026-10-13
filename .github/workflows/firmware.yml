@@ -5,8 +5,13 @@ on:
     branches:
       - main
       - feat/battery-saver-radio-player-site
+    paths-ignore:
+      - 'firmware/*.bin'
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-cardputer-adv:
@@ -22,3 +27,26 @@ jobs:
         run: python -m pip install --upgrade platformio
       - name: Build firmware
         run: pio run -e cardputer-adv
+      - name: Publish installer binaries to the GitHub Pages source
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p firmware
+          cp .pio/build/cardputer-adv/bootloader.bin firmware/bootloader.bin
+          cp .pio/build/cardputer-adv/partitions.bin firmware/partitions.bin
+          cp .pio/build/cardputer-adv/firmware.bin firmware/firmware.bin
+          BOOT_APP0="$(find "$HOME/.platformio/packages/framework-arduinoespressif32" -name boot_app0.bin -print -quit)"
+          test -n "$BOOT_APP0"
+          cp "$BOOT_APP0" firmware/boot_app0.bin
+      - name: Commit installer binaries
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add firmware/bootloader.bin firmware/partitions.bin firmware/boot_app0.bin firmware/firmware.bin
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Publish JOHNNY installer firmware [skip ci]'
+          git push
