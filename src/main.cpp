@@ -16,6 +16,9 @@ String entries[48];
 bool entryIsDir[48];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
 String selectedFile;
+uint8_t* wavBuffer = nullptr;
+size_t wavLength = 0;
+bool audioStarted = false;
 const char* apps[] = {"POCKET PIANO", "CHROMATIC TUNER", "MUSIC LIBRARY", "SD EXPLORER", "PHOTO VIEWER", "SYSTEM"};
 constexpr int APP_COUNT = 6;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
@@ -167,6 +170,22 @@ void drawFiles(bool musicMode=false) {
   if(entryCount==0){d.setTextColor(MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
   footer("W/S MOVE  ENTER OPEN  BACKSPACE UP");
 }
+bool startWav(const String &path) {
+  if (wavBuffer) { M5Cardputer.Speaker.stop(); free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
+  File f=SD.open(path, FILE_READ);
+  if(!f || f.isDirectory()) { if(f)f.close(); return false; }
+  size_t size=f.size();
+  if(size<44 || size>1500000) { f.close(); return false; }
+  wavBuffer=(uint8_t*)ps_malloc(size);
+  if(!wavBuffer) wavBuffer=(uint8_t*)malloc(size);
+  if(!wavBuffer) { f.close(); return false; }
+  wavLength=f.read(wavBuffer,size); f.close();
+  if(wavLength!=size || memcmp(wavBuffer,"RIFF",4)!=0 || memcmp(wavBuffer+8,"WAVE",4)!=0) {
+    free(wavBuffer); wavBuffer=nullptr; wavLength=0; return false;
+  }
+  audioStarted=M5Cardputer.Speaker.playWav(wavBuffer,wavLength,1,-1,true);
+  return audioStarted;
+}
 void drawMusicInfo(const String &name) {
   header("NOW SELECTED");
   auto &d=M5Cardputer.Display;
@@ -175,7 +194,7 @@ void drawMusicInfo(const String &name) {
   d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(8,103);
   String n=name; if(n.length()>34)n=n.substring(0,31)+"...";
   d.print(n);
-  d.setTextColor(MUTED,BG); d.setCursor(8,113); d.print("WAV / MP3 file browser; playback codec pending");
+  d.setTextColor(MUTED,BG); d.setCursor(8,113); d.print(audioStarted?"WAV PLAYING":"WAV ONLY / SELECT TO PLAY");
   footer("ESC  RETURN TO LIBRARY");
 }
 void openFile(bool musicMode) {
@@ -188,7 +207,12 @@ void openFile(bool musicMode) {
   full+=entries[selected];
   if(entryIsDir[selected]) {currentPath=full;scanDirectory();drawFiles(musicMode);return;}
   selectedFile=full;
-  if(musicMode) drawMusicInfo(entries[selected]);
+  if(musicMode) {
+    String lower=entries[selected]; lower.toLowerCase();
+    bool ok=lower.endsWith(".wav") && startWav(full);
+    drawMusicInfo(entries[selected]);
+    if(!ok) { M5Cardputer.Display.setTextColor(PINK,BG); M5Cardputer.Display.setCursor(8,101); M5Cardputer.Display.print("Use PCM WAV (max 1.5 MB)"); }
+  }
   else {
     File f=SD.open(full);
     header("FILE DETAILS");
@@ -220,6 +244,7 @@ void setup() {
 }
 void loop() {
   M5Cardputer.update();
+  if(audioStarted && !M5Cardputer.Speaker.isPlaying()) { audioStarted=false; if(wavBuffer){free(wavBuffer);wavBuffer=null;wavLength=0;} }
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()){delay(8);return;}
   auto k=M5Cardputer.Keyboard.keysState();
   char c=k.word.size()?k.word[0]:0;
@@ -236,7 +261,7 @@ void loop() {
     if(c=='w'||c=='W'){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
     else if(c=='s'||c=='S'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
     else if(k.enter)openFile(music);
-    else if(k.del){if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory();drawFiles(music);}else{screen=HOME;drawHome();}}
+    else if(k.del){if(audioStarted){M5Cardputer.Speaker.stop();audioStarted=false;}if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory();drawFiles(music);}else{screen=HOME;drawHome();}}
   }
   if(k.del && screen!=HOME && screen!=FILES && screen!=MUSIC){screen=HOME;drawHome();}
   delay(12);
