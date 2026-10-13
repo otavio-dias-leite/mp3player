@@ -21,6 +21,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
+#include "johnny_version.h"
 
 
 constexpr size_t JOHNNY_EQ_BANDS=5;
@@ -301,11 +302,23 @@ void footer(const char* s="ESC / '  BACK") {
   d.setTextColor(UI_MUTED,BG); d.setCursor(8,124); d.print(s);
 }
 void drawHome() {
-  header("JOHNNY"); auto& d=M5Cardputer.Display; const int xs[3]={5,83,161};
-  for(int i=0;i<APP_COUNT;i++){int x=xs[i],y=58;bool on=i==selected;uint16_t fill=on?0x4810:PANEL;
-    d.fillRoundRect(x,y,73,30,4,fill);d.drawRoundRect(x,y,73,30,4,on?UI_PINK:UI_PURPLE);
-    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+7,y+11);d.print(apps[i]);}
-  footer("LEFT/RIGHT SELECT  ENTER OPEN");
+  header("JOHNNY");
+  auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,43);d.printf("CARDPUTER-ADV  /  v%s",JOHNNY_VERSION);
+  const int xs[3]={7,84,161};
+  const char* hints[]={"SOUND","TOOLS","PLAY"};
+  for(int i=0;i<APP_COUNT;i++){
+    int x=xs[i],y=59;bool on=i==selected;uint16_t fill=on?0x4810:PANEL;
+    d.fillRoundRect(x,y,71,29,5,fill);
+    d.drawRoundRect(x,y,71,29,5,on?UI_PINK:UI_PURPLE);
+    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+8,y+8);d.print(apps[i]);
+    d.setTextColor(on?UI_PINK:UI_MUTED,fill);d.setCursor(x+8,y+19);d.print(hints[i]);
+  }
+  const char* detail=selected==0?"SYNTH / TUNER / PLAYER / RADIO":(selected==1?"FILES / USB / WI-FI / UPDATES":"CONWAY LIFE / DOOM");
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,99);d.print(detail);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,109);
+  d.printf("SD %s   WI-FI %s",sdReady?"READY":"MISSING",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
+  footer(", / . SELECT   ENTER OPEN");
 }
 void drawCategoryMenu(){
   bool music=screen==MUSICMENU,system=screen==SYSTEMMENU;
@@ -313,8 +326,14 @@ void drawCategoryMenu(){
   const char** items=music?musicMenuItems:(system?systemMenuItems:gamesMenuItems);
   int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
   header(title);auto& d=M5Cardputer.Display;
-  for(int i=0;i<count;i++){int y=42+i*12;bool active=i==selected;uint16_t bg=active?PANEL:BG;
-    d.fillRoundRect(7,y-2,225,11,2,bg);d.setTextColor(active?WHITE:UI_MUTED,bg);d.setCursor(12,y);d.printf("%c %s",active?'>':' ',items[i]);}
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,42);
+  d.print(music?"AUDIO / INSTRUMENTS":(system?"DEVICE / CONNECTIVITY":"GAMES / EXPERIMENTS"));
+  for(int i=0;i<count;i++){
+    int y=55+i*10;bool active=i==selected;uint16_t bg=active?PANEL:BG;
+    d.fillRoundRect(7,y-1,225,9,2,bg);
+    d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);
+    d.printf("%c %02d  %s",active?'>':' ',i+1,items[i]);
+  }
   footer("UP/DOWN SELECT  ENTER OPEN  ESC BACK");
 }
 void drawUpdateInfo(){
