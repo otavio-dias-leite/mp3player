@@ -101,7 +101,7 @@ Use apenas redes, dispositivos e streams que você tenha autorização para aces
 
 ## Versionamento
 
-A versão pública é controlada pelo arquivo `VERSION`, usando Semantic Versioning (SemVer). O projeto começa em `0.0.0-alpha.1`; cada nova compilação Alpha incrementa o identificador final (`0.0.0-alpha.2`, `0.0.0-alpha.3` ...). O instalador web, a página e os parâmetros de cache recebem a mesma versão durante a publicação. As tags de release no GitHub seguem o prefixo `v`, por exemplo `v0.0.0-alpha.1`.
+A versão pública é controlada exclusivamente pelo arquivo `VERSION` (SemVer). O build do PlatformIO gera `include/johnny_version.h` automaticamente a partir desse arquivo, e o firmware mostra a versão na tela inicial. O workflow de publicação compila o firmware e, somente se a compilação passar, cria/atualiza a GitHub Release `v<VERSION>` com `firmware.bin`. O site e o manifesto do instalador web usam o mesmo arquivo `VERSION`. Ao preparar uma atualização de código, incremente `VERSION` (por exemplo, `0.0.0-alpha.2` para `0.0.0-alpha.3`) antes de enviar as alterações; não mantenha versões separadas no código, site ou workflow.
 
 ## Jogos
 
