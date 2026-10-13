@@ -87,7 +87,7 @@ private:
 };
 JohnnyEqualizer audioEqualizer;
 
-class JohnnyAudioOutput final : public AudioOutput {class JohnnyAudioOutput final : public AudioOutput {
+class JohnnyAudioOutput final : public AudioOutput {
 public:
   explicit JohnnyAudioOutput(m5::Speaker_Class* speaker) : speaker_(speaker) {}
   bool begin() override { return speaker_ != nullptr; }
@@ -106,7 +106,9 @@ public:
   }
   void flush() override {
     if(!speaker_||bufferIndex_==0)return;
-    // Block until the codec has consumed this source buffer; do not interrupt playback.
+    uint32_t started=millis();
+    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+    if(speaker_->isPlaying()) speaker_->stop();
     speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,true);
     bufferSlot_=(bufferSlot_+1)%3;bufferIndex_=0;
   }
@@ -575,8 +577,8 @@ void processUsbCommand(String line) {
     }
     file.close(); Serial.println("END"); return;
   }
-  if(line.startsWith("PUT\\t")) {
-    int split=line.indexOf('\\t',4);
+  if(line.startsWith("PUT\t")) {
+    int split=line.indexOf('\t',4);
     if(split<0) { usbReplyError("FORMAT"); return; }
     uint32_t size=(uint32_t)line.substring(4,split).toInt();
     String path=safeSdPath(line.substring(split+1));
@@ -601,7 +603,7 @@ void processUsbCommand(String line) {
       size_t written=file.write(buffer,expected);
       if(written!=expected) break;
       received+=(uint32_t)written;
-      Serial.printf("ACK\\t%lu\\n",(unsigned long)received);
+      Serial.printf("ACK\t%lu\n",(unsigned long)received);
     }
     file.flush();file.close();
     if(received==size)Serial.println("OK");
@@ -723,9 +725,16 @@ void drawFiles(bool musicMode=false) {
 void drawMusicInfo(const String &name);
 void drawRadioScreen();
 void stopAudioLocked() {
-  if(radioRecording){
+  if(radioRecordStartRequested && radioRecordState==1) {
+    radioRecordStartRequested=false;
+    radioRecording=false;
+    radioRecordStopRequested=true;
+    radioRecordState=3;
+  } else if(radioRecording) {
     if(audioOutput)audioOutput->flushRecording();
-    radioRecording=false;radioRecordStopRequested=true;radioRecordState=3;
+    radioRecording=false;
+    radioRecordStopRequested=true;
+    radioRecordState=3;
   }
   if(audioDecoder) {
     if(audioDecoder->isRunning()) audioDecoder->stop();
@@ -753,6 +762,9 @@ void stopAudio() {
   stopAudioLocked();
   audioTaskEnded=false;
   if(audioMutex) xSemaphoreGive(audioMutex);
+  // Let the SD writer finish the WAV header before another app accesses the card.
+  uint32_t started=millis();
+  while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);
 }
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3();
