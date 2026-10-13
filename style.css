@@ -29,3 +29,6 @@ footer{display:flex;justify-content:space-between;gap:12px;padding:20px 0 28px;b
 .game-entry-card p{margin:0;color:var(--muted);font-size:12px;line-height:1.7}
 .game-entry-card a{flex-shrink:0;color:var(--lav);text-decoration:none;font:10px 'Space Mono',monospace;border-bottom:1px solid var(--pink);padding:10px 0}
 @media(max-width:640px){.site-tabs{width:calc(100% - 30px)}.game-entry-card{align-items:flex-start;flex-direction:column}.game-entry-card a{align-self:flex-start}}
+
+/* Published firmware version */
+.firmware-version{display:flex;align-items:center;gap:12px;flex-wrap:wrap;width:min(440px,100%);margin:22px 0 0;padding:13px 15px;border:1px solid var(--line);background:linear-gradient(110deg,#21132f,#140c20);font-family:"Space Mono",monospace}.firmware-version span{color:var(--muted);font-size:9px;letter-spacing:.1em}.firmware-version strong{color:var(--pink);font-size:14px;text-shadow:0 0 12px #f19fdf66}.firmware-version small{flex-basis:100%;color:#81758f;font-size:8px;letter-spacing:.08em}
