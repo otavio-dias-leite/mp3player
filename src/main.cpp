@@ -116,7 +116,11 @@ String parentPath(const String &p) {
   int n=p.lastIndexOf('/');
   return n<=0?"/":p.substring(0,n);
 }
-void scanDirectory() {
+bool isPlayableAudio(String name) {
+  name.toLowerCase();
+  return name.endsWith(".wav");
+}
+void scanDirectory(bool musicMode=false) {
   entryCount=0; selected=0; scroll=0;
   if(!sdReady)return;
   File dir=SD.open(currentPath);
@@ -126,7 +130,8 @@ void scanDirectory() {
     String name=String(f.name());
     int slash=name.lastIndexOf('/');
     if(slash>=0) name=name.substring(slash+1);
-    if(name.length() && name!="System Volume Information") {
+    if(name.length() && name!="System Volume Information" &&
+       (!musicMode || f.isDirectory() || isPlayableAudio(name))) {
       entries[entryCount]=name;
       entryIsDir[entryCount]=f.isDirectory();
       entryCount++;
@@ -157,7 +162,6 @@ void drawFiles(bool musicMode=false) {
     shown++;
   }
   for(int i=scroll;i<entryCount && shown<5;i++) {
-    if(musicMode && entryIsDir[i]) continue;
     int y=56+shown*12;
     bool on=i==selected;
     d.fillRect(8,y-1,224,11,on?PANEL:BG);
@@ -199,8 +203,6 @@ void drawMusicInfo(const String &name) {
 }
 void openFile(bool musicMode) {
   if(!sdReady)return;
-  if(currentPath!="/" && selected<0)return;
-  if(currentPath!="/" && selected== -1) {currentPath=parentPath(currentPath);scanDirectory();drawFiles(musicMode);return;}
   if(selected<0 || selected>=entryCount)return;
   String full=currentPath;
   if(full!="/")full+="/";
@@ -218,17 +220,22 @@ void openFile(bool musicMode) {
     header("FILE DETAILS");
     auto &d=M5Cardputer.Display;
     d.setTextColor(WHITE,BG);d.setCursor(8,53);d.print(entries[selected].substring(0,30));
-    d.setTextColor(UI_MUTED,BG);d.setCursor(8,72);d.printf("%lu bytes",(unsigned long)f.size());
-    d.setCursor(8,88);d.print("TYPE: ");d.print(f.isDirectory()?"DIR":"FILE");
-    f.close();footer();
+    if(f) {
+      d.setTextColor(UI_MUTED,BG);d.setCursor(8,72);d.printf("%lu bytes",(unsigned long)f.size());
+      d.setCursor(8,88);d.print("TYPE: ");d.print(f.isDirectory()?"DIR":"FILE");
+      f.close();
+    } else {
+      d.setTextColor(UI_PINK,BG);d.setCursor(8,72);d.print("UNABLE TO OPEN FILE");
+    }
+    footer();
   }
 }
 void openApp() {
   switch(selected) {
     case 0:screen=PIANO;pianoScreen();break;
     case 1:screen=TUNER;tunerScreen();break;
-    case 2:screen=MUSIC;currentPath="/";scanDirectory();drawFiles(true);break;
-    case 3:screen=FILES;currentPath="/";scanDirectory();drawFiles();break;
+    case 2:screen=MUSIC;currentPath="/";scanDirectory(true);drawFiles(true);break;
+    case 3:screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
     case 4:screen=GALLERY;header("PHOTO VIEWER");M5Cardputer.Display.setTextColor(UI_MUTED,BG);M5Cardputer.Display.setCursor(8,61);M5Cardputer.Display.print("JPEG decoder not included");footer();break;
     default:screen=ABOUT;header("SYSTEM");M5Cardputer.Display.setTextColor(WHITE,BG);M5Cardputer.Display.setCursor(8,53);M5Cardputer.Display.print("JOHNNY OS / CARDPUTER-ADV");M5Cardputer.Display.setCursor(8,69);M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");M5Cardputer.Display.setCursor(8,85);M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");footer();break;
   }
@@ -261,7 +268,7 @@ void loop() {
     if(c=='w'||c=='W'){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
     else if(c=='s'||c=='S'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
     else if(k.enter)openFile(music);
-    else if(k.del){if(audioStarted){M5Cardputer.Speaker.stop();audioStarted=false;}if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory();drawFiles(music);}else{screen=HOME;drawHome();}}
+    else if(k.del){if(audioStarted){M5Cardputer.Speaker.stop();audioStarted=false;}if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}else{screen=HOME;drawHome();}}
   }
   if(k.del && screen!=HOME && screen!=FILES && screen!=MUSIC){screen=HOME;drawHome();}
   delay(12);
