@@ -119,7 +119,7 @@ void splash() {
   d.fillScreen(BG);
   d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
   d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
-  delay(650);
+  delay(1100);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
@@ -278,6 +278,7 @@ void startNetworkSetup() {
   wifiConfigStage=1; WiFi.scanDelete(); WiFi.scanNetworks(true,false);
   drawNetworkScreen();
 }
+void saveNetworkSetup();
 void chooseNetwork(int index) {
   if(index<0 || index>=wifiNetworkCount) return;
   savedSsid=wifiNetworks[index]; wifiEntry="";
