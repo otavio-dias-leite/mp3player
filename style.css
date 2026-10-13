@@ -19,3 +19,13 @@ esp-web-install-button{display:block}button{cursor:pointer;border:1px solid var(
 .transfer{display:flex;justify-content:space-between;align-items:center;gap:25px}.transfer h2{font:700 clamp(22px,4vw,34px) 'Space Mono',monospace;line-height:1.35;margin:12px 0}.transfer h2 em{font-style:normal;color:var(--pink)}.transfer p{max-width:470px}.transfer>a{flex-shrink:0;color:var(--lav);font:10px 'Space Mono',monospace;letter-spacing:.08em;text-decoration:none;border-bottom:1px solid var(--pink);padding:12px 0}
 footer{display:flex;justify-content:space-between;gap:12px;padding:20px 0 28px;border-top:1px solid #ffffff24;color:#776b88;font:9px 'Space Mono',monospace;letter-spacing:.08em}
 @media(max-width:640px){.topbar{padding:0 16px}.device-state{font-size:8px}main{width:calc(100% - 30px)}.hero{padding-top:70px;min-height:490px}.steps{grid-template-columns:1fr}.steps article{min-height:0;padding:15px}.steps strong{display:inline;margin:0 10px 0 0}.steps p{margin-top:8px}.modules{grid-template-columns:1fr}.transfer{align-items:flex-start;flex-direction:column}.section-head{gap:12px}.section-head h2{font-size:13px}footer{flex-wrap:wrap;font-size:8px}}@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+/* Site navigation and Games entry */
+.site-tabs{width:min(920px,calc(100% - 40px));margin:0 auto;display:flex;align-items:center;gap:18px;padding:13px 0;border-bottom:1px solid #ffffff20}
+.site-tabs a{font:10px 'Space Mono',monospace;letter-spacing:.1em;color:var(--muted);text-decoration:none;padding:7px 0;border-bottom:1px solid transparent}
+.site-tabs a:hover,.site-tabs a.active{color:#fff;border-color:var(--pink)}
+.site-tabs span{margin-left:auto;color:var(--pink);font:9px 'Space Mono',monospace;letter-spacing:.08em}
+.game-entry-card{display:flex;justify-content:space-between;align-items:center;gap:24px;padding:22px;border:1px solid var(--line);background:linear-gradient(120deg,#21132f,#140c20)}
+.game-entry-card h3{margin:0 0 8px;font:700 13px 'Space Mono',monospace;letter-spacing:.08em}
+.game-entry-card p{margin:0;color:var(--muted);font-size:12px;line-height:1.7}
+.game-entry-card a{flex-shrink:0;color:var(--lav);text-decoration:none;font:10px 'Space Mono',monospace;border-bottom:1px solid var(--pink);padding:10px 0}
+@media(max-width:640px){.site-tabs{width:calc(100% - 30px)}.game-entry-card{align-items:flex-start;flex-direction:column}.game-entry-card a{align-self:flex-start}}
