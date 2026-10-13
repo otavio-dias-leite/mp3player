@@ -1,5 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap');
-:root{color-scheme:dark;--bg:#10051b;--purple:#a855f7;--violet:#6d28d9;--pink:#f472d0;--cyan:#8be9ff;--line:#45205e}
+:root{color-scheme:dark;--bg:#10051b;--purple:#a855f7;--violet:#6d28d9;--pink:#f472d0;--cyan:#d7a0ff;--line:#45205e}
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 15%,#351050 0,#1d0a30 36%,var(--bg) 78%);color:#fbf6ff;font-family:'Space Grotesk',sans-serif}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.12;background:linear-gradient(90deg,transparent 49.8%,#a855f7 50%,transparent 50.2%),linear-gradient(transparent 49.8%,#a855f7 50%,transparent 50.2%);background-size:52px 52px;mask-image:linear-gradient(transparent,#000)}
