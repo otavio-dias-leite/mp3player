@@ -55,8 +55,8 @@ const char* ukeNames[] = {"G4","C4","E4","A4"};
 }
 
 int batteryPercent() { return M5Cardputer.Power.getBatteryLevel(); }
-uint16_t batteryMillivolts() { return M5Cardputer.Power.getBatteryVoltage(); }
-bool batteryCharging() { return M5Cardputer.Power.isCharging(); }
+int16_t batteryMillivolts() { return M5Cardputer.Power.getBatteryVoltage(); }
+bool batteryCharging() { return M5Cardputer.Power.isCharging()==m5::Power_Class::is_charging; }
 void drawBatteryIndicator() {
   auto &d=M5Cardputer.Display;
   int level=batteryPercent();
@@ -558,13 +558,13 @@ void openApp() {
       M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");
       M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");
       M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
-      int battery=batteryPercent(); uint16_t mv=batteryMillivolts(); bool charging=batteryCharging();
+      int battery=batteryPercent(); int16_t mv=batteryMillivolts(); bool charging=batteryCharging();
       M5Cardputer.Display.setCursor(8,103);
-      if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f);
+      if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100));
       else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE");
       M5Cardputer.Display.setCursor(8,115);
       M5Cardputer.Display.setTextColor(charging?UI_PINK:UI_MUTED,BG);
-      M5Cardputer.Display.print(charging?"CHARGING  [USB POWER]":(battery<=15?"LOW BATTERY":"ON BATTERY"));
+      M5Cardputer.Display.print(charging?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY"));
       footer("ESC / ' BACK"); break;
   }
 }
@@ -593,7 +593,7 @@ void loop() {
   M5Cardputer.update();
   if(millis()-batteryLastDraw>=5000) {
     batteryLastDraw=millis();
-    if(screen!=USBMODE) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); uint16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
+    if(screen!=USBMODE) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); uint16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
   }
   if(audioStarted && !M5Cardputer.Speaker.isPlaying()) {
     audioStarted=false;
