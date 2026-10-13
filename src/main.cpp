@@ -397,8 +397,7 @@ void playNote(char c) {
     synthBuffer[i]=(int8_t)constrain((int)lroundf(v*gain),-127,127);
   }
   static int16_t synthEqBuffer[8192];
-  for(size_t i=0;i<8192;i++)synthEqBuffer[i]=audioEqualizer.processMono((int32_t)synthBuffer[i]*256,22050);
-  M5Cardputer.Speaker.playRaw(synthEqBuffer,8192,22050,false,1,0,true);
+  for(size_t i=0;i<8192;i++)synthEqBuffer[i]=audioEqualizer.processMono((int32_t)synthBuffer[i]*256,22050);  M5Cardputer.Speaker.playRaw(synthEqBuffer,8192,22050,false,1,0,true);
   if(audioMutex)xSemaphoreGive(audioMutex);
 }
 void stopMicCapture() {
@@ -797,8 +796,7 @@ void stopAudio() {
   stopAudioLocked();
   audioTaskEnded=false;
   if(audioMutex) xSemaphoreGive(audioMutex);
-  // Let the SD writer finish the WAV header before another app accesses the card.
-  uint32_t started=millis();
+  // Let the SD writer finish the WAV header before another app accesses the card.  uint32_t started=millis();
   while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);
 }
 AudioGenerator* createAudioDecoder(const String& extension) {
@@ -1133,7 +1131,7 @@ void openLegacyApp() {
     case 5: screen=NETWORK; wifiConfigStage=0; lastWiFiStatus=-1; drawNetworkScreen(); break;
     case 6: screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     case 7: eqReturnScreen=HOME;screen=EQSCREEN;drawEqScreen();break;
-    case 8: screen=LIFE;seedLife();drawLife();break;
+    case 8: screen=LIFE;if(!loadLife())seedLife();drawLife();break;
     default:
       screen=ABOUT; header("SYSTEM");
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
@@ -1184,6 +1182,25 @@ void drawEqScreen(){
   footer("UP/DN BAND  LEFT/RIGHT GAIN  P PRESET");
 }
 void clearLife(){memset(lifeGrid,0,sizeof(lifeGrid));lifeGeneration=0;lifeRunning=false;}
+void saveLife(){
+  if(!sdReady)return;
+  SD.mkdir("/JOHNNY");SD.remove("/JOHNNY/life.sav");
+  File file=SD.open("/JOHNNY/life.sav",FILE_WRITE);if(!file)return;
+  const uint8_t magic[4]={'J','L','I','F'};
+  file.write(magic,sizeof(magic));file.write((const uint8_t*)&lifeGeneration,sizeof(lifeGeneration));
+  file.write((const uint8_t*)&lifeIntervalMs,sizeof(lifeIntervalMs));
+  file.write((const uint8_t*)lifeGrid,sizeof(lifeGrid));file.flush();file.close();
+}
+bool loadLife(){
+  if(!sdReady)return false;File file=SD.open("/JOHNNY/life.sav",FILE_READ);if(!file)return false;
+  uint8_t magic[4]{};uint32_t generation=0;uint16_t interval=180;
+  bool ok=file.read(magic,4)==4&&memcmp(magic,"JLIF",4)==0;
+  ok=ok&&file.read((uint8_t*)&generation,sizeof(generation))==sizeof(generation);
+  ok=ok&&file.read((uint8_t*)&interval,sizeof(interval))==sizeof(interval);
+  ok=ok&&file.read((uint8_t*)lifeGrid,sizeof(lifeGrid))==sizeof(lifeGrid);file.close();
+  if(!ok)return false;lifeGeneration=generation;lifeIntervalMs=constrain((int)interval,50,1000);lifeRunning=false;return true;
+}
+
 void seedLife(){
   for(int y=0;y<LIFE_ROWS;y++)for(int x=0;x<LIFE_COLS;x++)lifeGrid[y][x]=(random(100)<27);
   lifeGeneration=0;lifeRunning=true;lifeLastStep=millis();
@@ -1197,8 +1214,7 @@ void stepLife(){
       int nx=x+dx,ny=y+dy;
       if(nx>=0&&nx<LIFE_COLS&&ny>=0&&ny<LIFE_ROWS&&lifeGrid[ny][nx])neighbours++;
     }
-    lifeNext[y][x]=lifeGrid[y][x]?(neighbours==2||neighbours==3):(neighbours==3);
-  }
+    lifeNext[y][x]=lifeGrid[y][x]?(neighbours==2||neighbours==3):(neighbours==3);  }
   memcpy(lifeGrid,lifeNext,sizeof(lifeGrid));lifeGeneration++;lifeLastStep=millis();
 }
 void drawLife(){
@@ -1364,6 +1380,8 @@ void loop() {
   if(screenSaverActive) {
     screenSaverActive=false;
     if(screen==HOME) drawHome();
+    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) drawCategoryMenu();
+    else if(screen==UPDATEINFO) drawUpdateInfo();
     else if(screen==PIANO) pianoScreen();
     else if(screen==TUNER) tunerScreen();
     else if(screen==FILES) drawFiles(false);
@@ -1387,7 +1405,7 @@ void loop() {
       else if(screen==PIANO)pianoScreen();
       else if(screen==MUSIC)musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
       else if(screen==RADIO)drawRadioScreen();
-    }else if(screen==LIFE){screen=HOME;drawHome();}
+    }else if(screen==LIFE){saveLife();screen=HOME;drawHome();}
     else if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
       if(music && musicNowPlaying) {musicNowPlaying=false;drawFiles(true);}
