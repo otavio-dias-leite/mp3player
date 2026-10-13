@@ -4,6 +4,8 @@
 #include <SD.h>
 #include <math.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include <HTTPUpdate.h>
 #include <Preferences.h>
 #include <ctype.h>
 #include <AudioOutput.h>
@@ -147,7 +149,7 @@ private:
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT };
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO };
 Screen eqReturnScreen=HOME;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
@@ -310,6 +312,23 @@ void drawCategoryMenu(){
     d.fillRoundRect(7,y-2,225,11,2,bg);d.setTextColor(active?WHITE:UI_MUTED,bg);d.setCursor(12,y);d.printf("%c %s",active?'>':' ',items[i]);}
   footer("UP/DOWN SELECT  ENTER OPEN  ESC BACK");
 }
+void drawUpdateInfo(){
+  header("FIRMWARE UPDATE");auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
+  d.setCursor(8,47);d.print("SOURCE: GITHUB RELEASES");d.setTextColor(UI_MUTED,BG);
+  d.setCursor(8,64);d.print(WiFi.status()==WL_CONNECTED?"WI-FI CONNECTED":"WI-FI OFFLINE");
+  d.setCursor(8,82);d.print(updateMessage.substring(0,34));d.setCursor(8,94);d.print(updateMessage.substring(34,68));
+  footer("ENTER INSTALL LATEST  ESC BACK");
+}
+void runFirmwareUpdate(){
+  if(WiFi.status()!=WL_CONNECTED){updateMessage="CONNECT WI-FI FIRST";drawUpdateInfo();return;}
+  updateMessage="DOWNLOADING LATEST RELEASE";drawUpdateInfo();
+  WiFiClientSecure client;client.setInsecure();HTTPUpdate updater;updater.rebootOnUpdate(true);
+  t_httpUpdate_return result=updater.update(client,"https://github.com/otavio-dias-leite/johnny/releases/latest/download/firmware.bin");
+  if(result==HTTP_UPDATE_NO_UPDATES)updateMessage="NO UPDATE AVAILABLE";
+  else if(result==HTTP_UPDATE_FAILED)updateMessage=String("UPDATE FAILED: ")+updater.getLastErrorString();
+  else updateMessage="UPDATE INSTALLED - REBOOTING";
+  drawUpdateInfo();
+}
 void showUnavailable(const char* title,const char* message){
   screen=ABOUT;header(title);auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
   d.setCursor(8,52);d.print(message);footer("ESC / ' BACK");
@@ -397,8 +416,7 @@ bool captureMic(int16_t* dst, size_t count, uint32_t timeoutMs=260) {
   while(M5Cardputer.Mic.isRecording() && millis()-started<timeoutMs) delay(1);
   bool complete=!M5Cardputer.Mic.isRecording();
   if(!complete) stopMicCapture();
-  return complete;
-}
+  return complete;}
 float detectPitch(const int16_t* samples, size_t count, float* rmsOut=nullptr) {
   if(count<512) return 0;
   double mean=0;
@@ -797,8 +815,7 @@ bool startAudioSource(AudioFileSource* source, const String& title, const String
     source->close(); delete source;
     audioStatusMessage="AUDIO TASK UNAVAILABLE";
     return false;
-  }
-  xSemaphoreTake(audioMutex,portMAX_DELAY);
+  }  xSemaphoreTake(audioMutex,portMAX_DELAY);
   stopAudioLocked();
   audioRawSource=source;
   audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,8192);
@@ -1078,7 +1095,7 @@ void drawEqScreen();
 void seedLife();
 void drawLife();
 void openApp(){
-  if(screen==HOME){selected=0;screen=MUSICMENU;drawCategoryMenu();return;}
+  if(screen==HOME){screen=selected==0?MUSICMENU:(selected==1?SYSTEMMENU:GAMESMENU);selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
   if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
   screen=HOME;
@@ -1087,7 +1104,7 @@ void openApp(){
     const int map[]={0,1,2,3,7};selected=map[item];
   }else if(menu==SYSTEMMENU){
     if(item==3){showUnavailable("BLUETOOTH","Bluetooth pairing is not integrated.");return;}
-    if(item==4){showUnavailable("FIRMWARE UPDATE","Internet updater is not integrated yet.");return;}
+    if(item==4){screen=UPDATEINFO;updateMessage="PRESS ENTER TO INSTALL LATEST";drawUpdateInfo();return;}
     if(item==5){showUnavailable("APP CATALOG","GitHub app installer is not integrated.");return;}
     const int map[]={4,6,5};selected=map[item];
   }else{
@@ -1197,8 +1214,7 @@ void drawLife(){
   footer("SPACE RUN/PAUSE  N STEP  ARROWS MOVE");
 }
 void startRadioRecording(){
-  if(!sdReady||!audioStarted||!audioIsRadio||WiFi.status()!=WL_CONNECTED){radioRecordState=5;return;}
-  if(!radioRecordQueue||!radioRecorderTaskReady||radioRecordState==1||radioRecordState==2||radioRecordState==3)return;
+  if(!sdReady||!audioStarted||!audioIsRadio||WiFi.status()!=WL_CONNECTED){radioRecordState=5;return;}  if(!radioRecordQueue||!radioRecorderTaskReady||radioRecordState==1||radioRecordState==2||radioRecordState==3)return;
   SD.mkdir("/RECORDINGS");String candidate;
   for(int i=1;i<=9999;i++){char name[32];snprintf(name,sizeof(name),"/RECORDINGS/RADIO%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}
   if(candidate.length()==0||SD.exists(candidate)){radioRecordState=5;return;}
@@ -1332,6 +1348,7 @@ void loop() {
     if(screenSaverActive) M5Cardputer.Display.fillScreen(BLACK);
     else if(screen==HOME) drawHome();
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) drawCategoryMenu();
+    else if(screen==UPDATEINFO) drawUpdateInfo();
     else if(screen==PIANO) pianoScreen();
     else if(screen==TUNER) tunerScreen();
     else if(screen==FILES) drawFiles(false);
@@ -1362,7 +1379,8 @@ void loop() {
 
   bool back=(c==0x27 || c=='`' || c=='~');
   if(back) {
-    if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU){screen=HOME;selected=0;drawHome();}
+    if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
+    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU){screen=HOME;selected=0;drawHome();}
     else if(screen==EQSCREEN){
       screen=eqReturnScreen;
       if(screen==HOME)drawHome();
@@ -1389,7 +1407,9 @@ if(usbActive) endUsbMode();
     delay(8); return;
   }
 
-  if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) {
+  if(screen==UPDATEINFO) {
+    if(k.enter) runFirmwareUpdate();
+  } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) {
     int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
     if(k.enter){openApp();delay(8);return;}
     if(c==';')selected=max(0,selected-1);
