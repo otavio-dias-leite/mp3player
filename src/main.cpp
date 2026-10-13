@@ -223,8 +223,14 @@ int16_t batteryCachedMillivolts = -1;
 bool batteryCachedCharging = false;
 bool batteryCacheReady = false;
 bool screenSaverActive = false;
-const char* apps[] = {"SYNTH","TUNER","MUSIC","RADIO","FILES","WI-FI","USB","EQ","LIFE","SYSTEM"};
-constexpr int APP_COUNT=10;
+const char* apps[] = {"MUSIC","SYSTEM","GAMES"};
+constexpr int APP_COUNT=3;
+const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
+const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","BLUETOOTH","UPDATE FIRMWARE","INSTALL APPS"};
+const char* gamesMenuItems[]={"CONWAY LIFE","DOOM 1993"};
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=2;
+String placeholderTitle, placeholderMessage;
+String updateMessage="CONNECT TO WI-FI";
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
@@ -347,8 +353,7 @@ void playNote(char c) {
   for(size_t i=0;i<8192;i++) {
     const float phase=6.2831853f*hz*((float)i/22050.0f);
     float v=sinf(phase);
-    if(pianoEffect==1) {
-      v=tanhf(v*3.8f)/tanhf(3.8f);
+    if(pianoEffect==1) {      v=tanhf(v*3.8f)/tanhf(3.8f);
     } else if(pianoEffect==2) {
       v=tanhf((sinf(phase)+0.55f*sinf(phase*2.0f)+0.28f*sinf(phase*3.0f))*5.0f);
     } else if(pianoEffect==3) {
@@ -697,8 +702,7 @@ void scanDirectory(bool musicMode=false) {
       String t=entries[i]; entries[i]=entries[j]; entries[j]=t;
       bool b=entryIsDir[i]; entryIsDir[i]=entryIsDir[j]; entryIsDir[j]=b;
     }
-}
-void drawFiles(bool musicMode=false) {
+}void drawFiles(bool musicMode=false) {
   header(musicMode?"MUSIC LIBRARY":"SD EXPLORER");
   auto &d=M5Cardputer.Display;
   d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,42);
@@ -1047,8 +1051,7 @@ void moveMusicTrack(int direction) {
 void openFile(bool musicMode) {
   if(!sdReady || selected<0 || selected>=entryCount) return;
   String full=currentPath;
-  if(full!="/") full+="/";
-  full+=entries[selected];
+  if(full!="/") full+="/";  full+=entries[selected];
   if(entryIsDir[selected]) {
     musicNowPlaying=false; currentPath=full; scanDirectory(musicMode); drawFiles(musicMode); return;
   }
@@ -1397,8 +1400,7 @@ if(usbActive) endUsbMode();
     } else {
       if(c=='e'||c=='E'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
       else if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
-      else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}
-      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
+      else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
     }
   } else if(screen==FILES) {
@@ -1477,7 +1479,3 @@ if(usbActive) endUsbMode();
       else if(c && isprint((unsigned char)c) && wifiEntry.length()<63) {wifiEntry+=c;drawNetworkScreen();}
     }
   } else if(screen==USBMODE) {
-    if(k.enter && !usbActive) {screen=HOME;drawHome();}
-  }
-  delay(8);
-}
