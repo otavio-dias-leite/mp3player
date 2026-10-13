@@ -1,28 +1,7 @@
 <!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#000000">
-<title>JOHNNY</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<main aria-label="JOHNNY">
-  <h1 class="wordmark">JOHNNY</h1>
-</main>
-<script>
-(() => {
-  const mark = document.querySelector('.wordmark');
-  const glitch = () => {
-    mark.classList.remove('glitch');
-    void mark.offsetWidth;
-    mark.classList.add('glitch');
-    window.setTimeout(() => mark.classList.remove('glitch'), 260);
-  };
-  window.setTimeout(glitch, 900);
-  window.setInterval(glitch, 6200 + Math.random() * 2400);
-})();
-</script>
-</body>
-</html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#10071f"><meta name="description" content="JOHNNY OS — firmware synthwave para M5Stack Cardputer-Adv."><title>JOHNNY OS — Cardputer-Adv</title><link rel="stylesheet" href="style.css"><script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script></head>
+<body><div class="grid"></div><div class="scanlines"></div><header class="topbar"><a class="brand" href="#">J<span>.</span> JOHNNY</a><span class="device">FIRMWARE / CARDPUTER-ADV</span></header><main>
+<section class="hero"><div class="eyebrow"><i></i> PERSONAL DECK • ESP32-S3</div><h1>JOHNNY<span> OS</span></h1><p class="intro">Seu Cardputer. Seu instrumento. Seu sistema.</p><div class="hero-actions"><a class="primary" href="#install">INSTALAR FIRMWARE <b>↘</b></a><a class="secondary" href="#features">EXPLORAR RECURSOS</a></div><div class="device-line"><span>240 × 135 DISPLAY</span><span>8 MB FLASH</span><span>ESP32-S3</span></div></section>
+<section class="install" id="install"><div class="section-tag">01 / DEPLOY</div><div class="install-panel"><div><div class="panel-kicker">LATEST BUILD <span class="live">● DISPONÍVEL</span></div><h2>Instale o JOHNNY.</h2><p>Conecte o Cardputer-Adv por USB, autorize o navegador e grave o firmware diretamente no dispositivo.</p><div class="version">JOHNNY OS <strong>v0.1.3</strong><span> • ESP32-S3</span></div></div><div class="install-action"><esp-web-install-button manifest="firmware/manifest.json"><button slot="activate" class="install-button">CONECTAR E INSTALAR <span>↗</span></button><span slot="unsupported" class="unsupported">Use Chrome ou Edge em computador compatível com Web Serial.</span><span slot="not-allowed" class="unsupported">A conexão serial não está disponível neste contexto.</span></esp-web-install-button><small>Chrome / Edge • USB • A instalação pode apagar os dados existentes.</small></div></div><div class="steps"><div><b>01</b><span>Desligue o Cardputer.</span></div><div><b>02</b><span>Segure G0 e conecte o USB para entrar em modo de gravação.</span></div><div><b>03</b><span>Clique em conectar e selecione a porta serial.</span></div></div></section>
+<section class="features" id="features"><div class="section-tag">02 / BUILT FOR ADV</div><h2>Um deck de bolso.</h2><div class="feature-grid"><article><b>01</b><h3>POCKET PIANO</h3><p>Teclas cromáticas, oitavas ajustáveis e timbres com distorção.</p></article><article><b>02</b><h3>MUSIC LIBRARY</h3><p>Navegue pelo microSD e reproduza arquivos WAV PCM compatíveis.</p></article><article><b>03</b><h3>SD EXPLORER</h3><p>Explore pastas e arquivos diretamente no dispositivo.</p></article><article><b>04</b><h3>CHROMATIC TUNER</h3><p>Afinações padrão para guitarra e ukulele. Leitura de pitch pelo microfone ainda em desenvolvimento.</p></article></div></section>
+<footer><span>JOHNNY OS <b>///</b> PERSONAL DECK</span><a href="https://github.com/otavio-dias-leite/johnny">SOURCE CODE ↗</a></footer></main></body></html>
