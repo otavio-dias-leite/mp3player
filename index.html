@@ -2,17 +2,29 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#090510"><meta name="description" content="JOHNNY — firmware para Cardputer-Adv">
-<title>JOHNNY</title>
+<meta name="theme-color" content="#08040f"><meta name="description" content="JOHNNY OS — Cardputer-Adv / neon synthwave firmware">
+<title>JOHNNY // SYSTEM</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
 <body>
-<div class="grid"></div><main>
-<div class="topline"><span>J / CARDPUTER-ADV</span><a href="https://github.com/otavio-dias-leite/johnny">GITHUB ↗</a></div>
-<section class="hero"><div class="signal">SYSTEM ONLINE <i></i> ESP32-S3</div><h1 class="glitch" data-text="JOHNNY">JOHNNY</h1><div class="sub">FIRMWARE FOR YOUR DEVICE<span>_</span></div>
-<div class="install"><div class="install-label">FLASH / CARDPUTER-ADV</div><esp-web-install-button manifest="firmware/manifest.json"><button slot="activate" class="flash">INSTALL FIRMWARE <b>↗</b></button><span slot="unsupported">Use Chrome ou Edge no desktop para instalar via USB.</span><span slot="not-allowed">Permissão USB não concedida.</span></esp-web-install-button><p>USB · ESP32-S3 · BUILD EXPERIMENTAL</p></div>
-</section><footer><span>JOHNNY OS <b>///</b> OPEN SOURCE</span><span>OTAVIO-DIAS-LEITE</span></footer>
-</main><script>document.querySelector('esp-web-install-button').addEventListener('state-changed',e=>{const s=e.detail&&e.detail.state;if(s)document.querySelector('.install-label').textContent='FLASH / '+s.toUpperCase()});</script>
+<div class="scanlines"></div><div class="grid"></div><main>
+<header class="topline"><span>/// NIGHT CITY SYSTEMS <i>•</i> CARDPUTER-ADV</span><a href="https://github.com/otavio-dias-leite/johnny">SOURCE CODE ↗</a></header>
+<section class="hero">
+<div class="eyebrow"><span class="pulse"></span> NEURAL LINK ESTABLISHED <span class="divider">/</span> ESP32-S3</div>
+<div class="brand-wrap"><h1 class="glitch" data-text="JOHNNY" aria-label="JOHNNY">JOHNNY</h1><div class="brand-line">NO FUTURE. JUST FIRMWARE.</div></div>
+<div class="sub">A PERSONAL OPERATING SYSTEM FOR YOUR POCKET CYBERDECK</div>
+<div class="modules"><span>01 / SYNTH</span><span>02 / AUDIO</span><span>03 / SD ARCHIVE</span></div>
+<div class="install"><div class="install-head"><span>FIRMWARE DEPLOYMENT</span><span class="version">BUILD // EXPERIMENTAL</span></div>
+<esp-web-install-button manifest="firmware/manifest.json"><button slot="activate" class="flash">FLASH JOHNNY OS <b>↗</b></button><span slot="unsupported">Abra no Chrome ou Edge para instalar via USB.</span><span slot="not-allowed">Permissão USB não concedida.</span></esp-web-install-button>
+<p>USB-C <i>·</i> ESP32-S3 <i>·</i> CARDPUTER-ADV</p></div>
+</section>
+<footer><span>JOHNNY OS <b>///</b> BUILT FOR THE AFTER HOURS</span><span>OPEN SOURCE <i>×</i> 2026</span></footer>
+</main>
+<script>
+const title=document.querySelector('.glitch');
+window.addEventListener('load',()=>{document.body.classList.add('booted');title.addEventListener('animationend',()=>title.classList.add('steady'),{once:true})});
+document.querySelector('esp-web-install-button').addEventListener('state-changed',e=>{const s=e.detail&&e.detail.state;if(s)document.querySelector('.install-head span:first-child').textContent='DEPLOYMENT / '+s.toUpperCase()});
+</script>
 </body></html>
