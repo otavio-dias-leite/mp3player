@@ -9,7 +9,7 @@
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
-constexpr uint16_t BG = 0x1243, PANEL = 0x24C7, UI_PURPLE = 0xA2DF, UI_PINK = 0xF19F, UI_CYAN = 0x6EFF, UI_MUTED = 0xB5B4;
+constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_CYAN = 0x6EFF, UI_MUTED = 0xB5B4;
 enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, GALLERY, VOICE, NETWORK, USBMODE, ABOUT };
 Screen screen = HOME;
 SPIClass sdBus(FSPI);
@@ -23,6 +23,7 @@ Preferences preferences;
 String savedSsid, savedPassword, wifiEntry;
 uint8_t wifiConfigStage=0;
 int voiceEffect=0, voiceGain=2;
+int lastWiFiStatus=-1;
 uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
@@ -71,7 +72,7 @@ void drawHome() {
   const int xs[3]={5,83,161}, ys[3]={43,68,93};
   for(int i=0;i<APP_COUNT;i++){
     int col=i%3,row=i/3,x=xs[col],y=ys[row]; bool on=i==selected;
-    uint16_t fill=on?0x5148:PANEL;
+    uint16_t fill=on?0x4810:PANEL;
     d.fillRoundRect(x,y,73,22,3,fill);
     d.drawRoundRect(x,y,73,22,3,on?UI_PINK:UI_PURPLE);
     d.setTextColor(on?WHITE:UI_MUTED,fill);
@@ -239,6 +240,7 @@ void saveNetworkSetup() {
   wifiConfigStage=0;
   WiFi.disconnect(true);
   WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.begin(savedSsid.c_str(),savedPassword.c_str());
+  lastWiFiStatus=-1;
   drawNetworkScreen();
 }
 void drawVoiceScreen() {
@@ -531,7 +533,7 @@ void openApp() {
     case 2:screen=MUSIC;currentPath="/";scanDirectory(true);drawFiles(true);break;
     case 3:screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
     case 4:screen=VOICE;drawVoiceScreen();break;
-    case 5:screen=NETWORK;wifiConfigStage=0;drawNetworkScreen();break;
+    case 5:screen=NETWORK;wifiConfigStage=0;lastWiFiStatus=-1;drawNetworkScreen();break;
     case 6:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     default:
       screen=ABOUT; header("SYSTEM");
@@ -569,6 +571,10 @@ void loop() {
     audioStarted=false;
     if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}
   }
+  if(screen==NETWORK && wifiConfigStage==0) {
+    int status=(int)WiFi.status();
+    if(status!=lastWiFiStatus) { lastWiFiStatus=status; drawNetworkScreen(); }
+  }
   if(screen==TUNER && millis()-tunerLastSample>220) {
     tunerLastSample=millis();
     if(captureMic(tunerSamples,2048,320)) {
@@ -605,10 +611,14 @@ if(usbActive) endUsbMode();
 
   if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
-    if(k.up||c==';') selected=(selected+APP_COUNT-3)%APP_COUNT;
-    else if(k.down||c=='.') selected=(selected+3)%APP_COUNT;
-    else if(k.left||c==',') selected=(selected+APP_COUNT-1)%APP_COUNT;
-    else if(k.right||c=='/') selected=(selected+1)%APP_COUNT;
+    int row=selected/3, col=selected%3;
+    if(k.up||c==';') row=(row+2)%3;
+    else if(k.down||c=='.') row=(row+1)%3;
+    else if(k.left||c==',') col=(col+2)%3;
+    else if(k.right||c=='/') col=(col+1)%3;
+    int candidate=row*3+col;
+    if(candidate>=APP_COUNT) candidate=row*3+(APP_COUNT-1-row*3);
+    selected=candidate;
     drawHome();
   } else if(screen==PIANO) {
     if(k.left||c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
