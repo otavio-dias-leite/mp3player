@@ -19,3 +19,11 @@ The JOHNNY audio output adapter is written for this firmware and passes decoded 
 ## AAC decoder notice
 
 ESP8266Audio bundles an AAC decoder derived from the Helix project. Its upstream README identifies the AAC decoder code as subject to RealNetworks' RSPL license and notes that commercial AAC use may require separate patent licensing through Via Licensing. Review the upstream ESP8266Audio license and the Helix/RSPL terms before redistributing builds with AAC enabled, especially for commercial distribution.
+
+
+## DOOM WebAssembly demo (external embed)
+
+- Project: https://github.com/jacobenget/doom.wasm
+- License: GNU General Public License v2.0 (GPL-2.0).
+- The Games page embeds the upstream browser demo from https://jacobenget.github.io/doom.wasm/examples/browser/doom.html in an iframe. The engine/WASM binary is served by the upstream project; this repository does not store or redistribute its engine binary.
+- The upstream demo uses its own Doom shareware game data. This repository does not bundle or redistribute commercial DOOM game data.
