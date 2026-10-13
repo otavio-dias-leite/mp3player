@@ -207,7 +207,7 @@ void openFile(bool musicMode) {
   String full=currentPath;
   if(full!="/")full+="/";
   full+=entries[selected];
-  if(entryIsDir[selected]) {currentPath=full;scanDirectory();drawFiles(musicMode);return;}
+  if(entryIsDir[selected]) {currentPath=full;scanDirectory(musicMode);drawFiles(musicMode);return;}
   selectedFile=full;
   if(musicMode) {
     String lower=entries[selected]; lower.toLowerCase();
