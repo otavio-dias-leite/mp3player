@@ -809,7 +809,7 @@ void drawRadioScreen() {
   d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,42);
   d.print(WiFi.status()==WL_CONNECTED?"WI-FI ONLINE":"WI-FI OFFLINE");
   for(int i=0;i<RADIO_STATION_COUNT+1;i++) {
-    int y=56+i*11;
+    int y=54+i*10;
     bool active=i==radioSelected;
     uint16_t fill=active?PANEL:BG;
     d.fillRoundRect(7,y-1,225,10,2,fill);
@@ -820,7 +820,7 @@ void drawRadioScreen() {
       d.setTextColor(UI_PINK,fill); d.setCursor(205,y); d.print("ON");
     }
   }
-  d.setTextColor(audioStarted && audioIsRadio?UI_PINK:UI_MUTED,BG); d.setCursor(8,112);
+  d.setTextColor(audioStarted && audioIsRadio?UI_PINK:UI_MUTED,BG); d.setCursor(8,108);
   String status=audioIsRadio?(audioPaused?"RADIO PAUSED":"LIVE STREAM"):radioMessage;
   if(status=="SELECT A STATION" || status.length()==0) status=audioStatusMessage;
   d.print(status.substring(0,30));
