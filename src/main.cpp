@@ -43,6 +43,12 @@ uint8_t* wavBuffer = nullptr;
 size_t wavLength = 0;
 bool audioStarted = false;
 uint32_t batteryLastDraw = 0;
+uint32_t batteryLastSample = 0;
+int batteryCachedPercent = -1;
+int16_t batteryCachedMillivolts = -1;
+bool batteryCachedCharging = false;
+bool batteryCacheReady = false;
+bool screenSaverActive = false;
 const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "WI-FI", "USB", "SYSTEM"};
 constexpr int APP_COUNT = 7;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
@@ -54,9 +60,24 @@ const char* ukeNames[] = {"G4","C4","E4","A4"};
 
 }
 
-int batteryPercent() { return M5Cardputer.Power.getBatteryLevel(); }
-int16_t batteryMillivolts() { return M5Cardputer.Power.getBatteryVoltage(); }
-bool batteryCharging() { return M5Cardputer.Power.isCharging()==m5::Power_Class::is_charging; }
+void refreshBatteryCache(bool force=false) {
+  if(!force && batteryCacheReady && millis()-batteryLastSample<30000UL) return;
+  bool chargingNow=M5Cardputer.Power.isCharging()==m5::Power_Class::is_charging;
+  int level=M5Cardputer.Power.getBatteryLevel();
+  int16_t mv=M5Cardputer.Power.getBatteryVoltage();
+  if(level>=0) {
+    level=constrain(level,0,100);
+    if(!chargingNow && batteryCacheReady && !batteryCachedCharging && batteryCachedPercent>=0) level=min(level,batteryCachedPercent);
+    batteryCachedPercent=level;
+  }
+  if(mv>0) batteryCachedMillivolts=mv;
+  batteryCachedCharging=chargingNow;
+  batteryLastSample=millis();
+  batteryCacheReady=true;
+}
+int batteryPercent() { refreshBatteryCache(); return batteryCachedPercent; }
+int16_t batteryMillivolts() { refreshBatteryCache(); return batteryCachedMillivolts; }
+bool batteryCharging() { refreshBatteryCache(); return batteryCachedCharging; }
 void drawBatteryIndicator() {
   auto &d=M5Cardputer.Display;
   int level=batteryPercent();
@@ -592,12 +613,14 @@ void setup() {
   auto micCfg=M5Cardputer.Mic.config();
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
+  refreshBatteryCache(true);
   splash(); selected=0; drawHome();
 }
 void loop() {
   M5Cardputer.update();
-  if(millis()-batteryLastDraw>=5000) {
+  if(millis()-batteryLastSample>=30000UL) {
     batteryLastDraw=millis();
+    refreshBatteryCache(true);
     if(screen!=USBMODE) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
   }
   if(audioStarted && !M5Cardputer.Speaker.isPlaying()) {
@@ -633,6 +656,19 @@ void loop() {
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
   char c=k.word.size()?k.word[0]:0;
+  if(c==9) { screenSaverActive=true; M5Cardputer.Display.fillScreen(BLACK); return; }
+  if(screenSaverActive) {
+    screenSaverActive=false;
+    if(screen==HOME) drawHome();
+    else if(screen==PIANO) pianoScreen();
+    else if(screen==TUNER) tunerScreen();
+    else if(screen==FILES) drawFiles(false);
+    else if(screen==MUSIC) drawFiles(true);
+    else if(screen==NETWORK) drawNetworkScreen();
+    else if(screen==USBMODE) drawUsbScreen(usbActive);
+    else if(screen==ABOUT) openApp();
+    return;
+  }
   bool back=(k.esc || c==0x27 || c=='`' || c=='~');
   if(back) {
     if(screen==FILES || screen==MUSIC) {
