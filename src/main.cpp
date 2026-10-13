@@ -23,6 +23,11 @@ Preferences preferences;
 String savedSsid, savedPassword, wifiEntry;
 uint8_t wifiConfigStage=0;
 int lastWiFiStatus=-1;
+String wifiNetworks[20];
+int wifiNetworkRSSI[20];
+int wifiNetworkAuth[20];
+int wifiNetworkCount=0, wifiSelected=0, wifiScroll=0;
+bool wifiScanPending=false;
 uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
@@ -49,23 +54,27 @@ const char* ukeNames[] = {"G4","C4","E4","A4"};
 
 }
 
-int batteryPercent() {
-  return M5Cardputer.Power.getBatteryLevel();
-}
+int batteryPercent() { return M5Cardputer.Power.getBatteryLevel(); }
+int16_t batteryMillivolts() { return M5Cardputer.Power.getBatteryVoltage(); }
+bool batteryCharging() { return M5Cardputer.Power.isCharging()==m5::Power_Class::is_charging; }
 void drawBatteryIndicator() {
   auto &d=M5Cardputer.Display;
   int level=batteryPercent();
-  d.fillRect(176,3,53,13,BG);
-  d.setTextSize(1);
-  d.setTextColor(UI_MUTED,BG);
-  d.setCursor(177,6);
-  if(level>=0) d.printf("%3d%%",constrain(level,0,100));
-  else d.print(" --%");
-  d.drawRoundRect(207,5,17,9,2,UI_LAVENDER);
-  d.fillRect(224,8,2,3,UI_LAVENDER);
+  bool charging=batteryCharging();
+  d.fillRect(168,2,62,15,BG);
+  d.setTextSize(1); d.setTextColor(level>=0 && level<=15?UI_PINK:UI_MUTED,BG);
+  d.setCursor(169,6);
+  if(level>=0) d.printf("%3d%%",constrain(level,0,100)); else d.print("--%");
+  d.drawRoundRect(201,4,19,10,2,charging?UI_PINK:UI_LAVENDER);
+  d.fillRect(220,7,2,4,charging?UI_PINK:UI_LAVENDER);
   if(level>=0) {
-    int width=constrain(level,0,100)*11/100;
-    if(width>0) d.fillRect(210,7,width,5,level<=20?UI_PINK:UI_LAVENDER);
+    int width=constrain(level,0,100)*13/100;
+    if(width>0) d.fillRect(204,6,width,6,level<=15?UI_PINK:UI_LAVENDER);
+  }
+  if(charging) {
+    d.drawLine(228,3,223,9,UI_PINK);
+    d.drawLine(223,9,226,9,UI_PINK);
+    d.drawLine(226,9,222,15,UI_PINK);
   }
 }
 void header(const char* title) {
@@ -86,7 +95,6 @@ void footer(const char* s="ESC / '  BACK") {
 void drawHome() {
   header("JOHNNY");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_PINK,BG); d.setCursor(8,29); d.print("wake fuck up samurai");
   const int xs[3]={5,83,161}, ys[3]={43,68,93};
   for(int i=0;i<APP_COUNT;i++){
     int col=i%3,row=i/3,x=xs[col],y=ys[row]; bool on=i==selected;
@@ -113,8 +121,9 @@ void splash() {
     delay(32);
   }
   d.fillScreen(BG);
-  d.setTextColor(WHITE,BG); d.setCursor(38,48); d.print("JOHNNY");
-  delay(650);
+  d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
+  d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
+  delay(1100);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
@@ -225,16 +234,35 @@ void tunerScreen() {
 void drawNetworkScreen() {
   header("WI-FI");
   auto &d=M5Cardputer.Display;
-  if(wifiConfigStage==1 || wifiConfigStage==2) {
-    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,47);
-    d.print(wifiConfigStage==1?"NETWORK NAME":"PASSWORD");
-    d.setTextColor(WHITE,BG); d.setCursor(8,66);
-    String shown=wifiEntry;
-    if(wifiConfigStage==2) { shown=""; for(size_t i=0;i<wifiEntry.length();i++) shown+="*"; }
-    if(shown.length()>29)shown=shown.substring(shown.length()-29);
-    d.print(shown);
-    d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("TYPE THEN PRESS ENTER");
-    footer("ESC / '  CANCEL");
+  if(wifiConfigStage==1) {
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,43);
+    d.print(wifiScanPending?"SCANNING NETWORKS...":"SELECT A NETWORK");
+    if(!wifiScanPending && wifiNetworkCount==0) {
+      d.setTextColor(UI_MUTED,BG); d.setCursor(8,68); d.print("NO NETWORKS FOUND");
+      d.setCursor(8,83); d.print("PRESS R TO SCAN AGAIN");
+    }
+    for(int row=0;row<5 && wifiScroll+row<wifiNetworkCount;row++) {
+      int i=wifiScroll+row, y=57+row*12;
+      bool active=i==wifiSelected;
+      uint16_t bg=active?PANEL:BG;
+      d.fillRect(7,y-1,225,11,bg);
+      d.setTextColor(active?WHITE:UI_MUTED,bg); d.setCursor(10,y);
+      String name=wifiNetworks[i]; if(name.length()>22)name=name.substring(0,19)+"...";
+      d.printf("%c %s %ddBm",active?'>':' ',name.c_str(),wifiNetworkRSSI[i]);
+      if(wifiNetworkAuth[i]==WIFI_AUTH_OPEN) { d.setTextColor(UI_LAVENDER,bg); d.setCursor(211,y); d.print("O"); }
+    }
+    footer("UP/DN SELECT  ENTER JOIN  R SCAN");
+    return;
+  }
+  if(wifiConfigStage==2) {
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,43); d.print("NETWORK");
+    d.setTextColor(WHITE,BG); d.setCursor(8,57); d.print(savedSsid.substring(0,28));
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,76); d.print("PASSWORD");
+    d.setTextColor(WHITE,BG); d.setCursor(8,91);
+    String masked=""; for(size_t i=0;i<wifiEntry.length() && i<28;i++) masked+="*";
+    d.print(masked);
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,105); d.print("TYPE PASSWORD + ENTER");
+    footer("ESC / ' BACK TO NETWORKS");
     return;
   }
   if(WiFi.status()==WL_CONNECTED) {
@@ -246,19 +274,28 @@ void drawNetworkScreen() {
     d.setTextColor(UI_PINK,BG); d.setCursor(8,54); d.print("NOT CONNECTED");
     d.setTextColor(UI_MUTED,BG); d.setCursor(8,75); d.print(savedSsid.length()?savedSsid:"NO NETWORK SAVED");
   }
-  footer("ENTER CONFIGURE  ESC / ' BACK");
+  footer("ENTER SEARCH NETWORKS  ESC / ' BACK");
 }
 void startNetworkSetup() {
-  wifiConfigStage=1; wifiEntry="";
+  WiFi.mode(WIFI_STA); WiFi.disconnect(false,false);
+  wifiNetworkCount=0; wifiSelected=0; wifiScroll=0; wifiScanPending=true;
+  wifiConfigStage=1; WiFi.scanDelete(); WiFi.scanNetworks(true,false);
   drawNetworkScreen();
+}
+void saveNetworkSetup();
+void chooseNetwork(int index) {
+  if(index<0 || index>=wifiNetworkCount) return;
+  savedSsid=wifiNetworks[index]; wifiEntry="";
+  if(wifiNetworkAuth[index]==WIFI_AUTH_OPEN) { wifiConfigStage=2; saveNetworkSetup(); }
+  else { wifiConfigStage=2; drawNetworkScreen(); }
 }
 void saveNetworkSetup() {
   if(wifiConfigStage!=2) return;
   savedPassword=wifiEntry;
   preferences.putString("ssid",savedSsid);
   preferences.putString("pass",savedPassword);
-  wifiConfigStage=0;
-  WiFi.disconnect(true);
+  wifiConfigStage=0; wifiScanPending=false;
+  WiFi.disconnect(false,false);
   WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.begin(savedSsid.c_str(),savedPassword.c_str());
   lastWiFiStatus=-1;
   drawNetworkScreen();
@@ -526,8 +563,14 @@ void openApp() {
       M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");
       M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");
       M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
-      M5Cardputer.Display.setCursor(8,105); int battery=batteryPercent(); if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: --");
-      footer(); break;
+      int battery=batteryPercent(); int16_t mv=batteryMillivolts(); bool charging=batteryCharging();
+      M5Cardputer.Display.setCursor(8,103);
+      if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100));
+      else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE");
+      M5Cardputer.Display.setCursor(8,115);
+      M5Cardputer.Display.setTextColor(charging?UI_PINK:UI_MUTED,BG);
+      M5Cardputer.Display.print(charging?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY"));
+      footer("ESC / ' BACK"); break;
   }
 }
 void setup() {
@@ -555,7 +598,7 @@ void loop() {
   M5Cardputer.update();
   if(millis()-batteryLastDraw>=5000) {
     batteryLastDraw=millis();
-    if(screen!=USBMODE) drawBatteryIndicator();
+    if(screen!=USBMODE) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
   }
   if(audioStarted && !M5Cardputer.Speaker.isPlaying()) {
     audioStarted=false;
@@ -564,6 +607,16 @@ void loop() {
   if(screen==NETWORK && wifiConfigStage==0) {
     int status=(int)WiFi.status();
     if(status!=lastWiFiStatus) { lastWiFiStatus=status; drawNetworkScreen(); }
+  }
+  if(screen==NETWORK && wifiConfigStage==1 && wifiScanPending) {
+    int result=WiFi.scanComplete();
+    if(result>=0) {
+      wifiNetworkCount=min(result,20);
+      for(int i=0;i<wifiNetworkCount;i++) { wifiNetworks[i]=WiFi.SSID(i); wifiNetworkRSSI[i]=WiFi.RSSI(i); wifiNetworkAuth[i]=(int)WiFi.encryptionType(i); }
+      wifiScanPending=false; WiFi.scanDelete();
+      if(wifiSelected>=wifiNetworkCount) wifiSelected=max(0,wifiNetworkCount-1);
+      drawNetworkScreen();
+    } else if(result==WIFI_SCAN_FAILED) { wifiScanPending=false; drawNetworkScreen(); }
   }
   if(screen==TUNER && millis()-tunerLastSample>220) {
     tunerLastSample=millis();
@@ -580,7 +633,7 @@ void loop() {
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
   char c=k.word.size()?k.word[0]:0;
-  bool back=(k.esc || c==0x27);
+  bool back=(k.esc || c==0x27 || c=='`' || c=='~');
   if(back) {
     if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
@@ -593,7 +646,8 @@ if(usbActive) endUsbMode();
       screen=HOME;drawHome();
     } else {
       if(screen==TUNER) stopMicCapture();
-      wifiConfigStage=0; screen=HOME;drawHome();
+      if(screen==NETWORK && wifiConfigStage==2) { wifiConfigStage=1; wifiEntry=""; drawNetworkScreen(); }
+      else { wifiConfigStage=0; screen=HOME;drawHome(); }
     }
     delay(8); return;
   }
@@ -629,12 +683,15 @@ if(usbActive) endUsbMode();
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
       if(k.enter) startNetworkSetup();
-      else if(k.down||c=='.') {WiFi.disconnect(true);drawNetworkScreen();}
-    } else if(k.enter) {
-      if(wifiConfigStage==1) {savedSsid=wifiEntry;wifiEntry="";wifiConfigStage=2;drawNetworkScreen();}
-      else saveNetworkSetup();
-    } else if(c && isprint((unsigned char)c) && wifiEntry.length()<(wifiConfigStage==1?32:63)) {
-      wifiEntry+=c; drawNetworkScreen();
+      else if(k.down||c=='.') {WiFi.disconnect(false,false);drawNetworkScreen();}
+    } else if(wifiConfigStage==1) {
+      if(c=='r'||c=='R') startNetworkSetup();
+      else if(k.up||c==';') {if(wifiSelected>0)wifiSelected--;if(wifiSelected<wifiScroll)wifiScroll=wifiSelected;drawNetworkScreen();}
+      else if(k.down||c=='.') {if(wifiSelected<wifiNetworkCount-1)wifiSelected++;if(wifiSelected>=wifiScroll+5)wifiScroll=wifiSelected-4;drawNetworkScreen();}
+      else if(k.enter && !wifiScanPending) chooseNetwork(wifiSelected);
+    } else if(wifiConfigStage==2) {
+      if(k.enter) saveNetworkSetup();
+      else if(c && isprint((unsigned char)c) && wifiEntry.length()<63) {wifiEntry+=c;drawNetworkScreen();}
     }
   } else if(screen==USBMODE) {
     if(k.enter && !usbActive) {screen=HOME;drawHome();}

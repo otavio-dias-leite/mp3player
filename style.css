@@ -1,5 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Space+Mono:wght@400;700&display=swap');
-:root{color-scheme:dark;--bg:#10051b;--purple:#a855f7;--violet:#6d28d9;--pink:#f472d0;--cyan:#d7a0ff;--line:#45205e}
+:root{color-scheme:dark;--bg:#10051b;--purple:#a855f7;--violet:#6d28d9;--pink:#f472d0;--cyan:#b46cff;--line:#45205e}
 *{box-sizing:border-box}
 body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 15%,#351050 0,#1d0a30 36%,var(--bg) 78%);color:#fbf6ff;font-family:'Space Grotesk',sans-serif}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.12;background:linear-gradient(90deg,transparent 49.8%,#a855f7 50%,transparent 50.2%),linear-gradient(transparent 49.8%,#a855f7 50%,transparent 50.2%);background-size:52px 52px;mask-image:linear-gradient(transparent,#000)}
@@ -7,7 +7,7 @@ main{position:relative;width:min(760px,calc(100% - 36px));margin:auto}
 .hero{text-align:center;padding:clamp(70px,13vh,130px) 0 58px}
 .glitch{position:relative;display:inline-block;margin:0 0 36px;font-size:clamp(76px,18vw,150px);font-weight:700;letter-spacing:-.095em;line-height:.9;color:#fff;text-shadow:0 0 24px #a855f7aa}
 .glitch:before,.glitch:after{content:attr(data-text);position:absolute;inset:0;pointer-events:none;overflow:hidden}
-.glitch:before{color:var(--cyan);transform:translate(-2px,0);clip-path:inset(0 0 56% 0);animation:glitch-a 2.8s infinite steps(1)}
+.glitch:before{color:#b46cff;transform:translate(-2px,0);clip-path:inset(0 0 56% 0);animation:glitch-a 2.8s infinite steps(1)}
 .glitch:after{color:var(--pink);transform:translate(2px,0);clip-path:inset(52% 0 0 0);animation:glitch-b 2.1s infinite steps(1)}
 @keyframes glitch-a{0%,88%,100%{transform:translate(0)}89%{transform:translate(-5px,-2px)}91%{transform:translate(3px,1px)}93%{transform:translate(-2px,0)}}
 @keyframes glitch-b{0%,82%,100%{transform:translate(0)}84%{transform:translate(4px,2px)}86%{transform:translate(-4px,-1px)}88%{transform:translate(2px,0)}}
@@ -24,3 +24,5 @@ h2{margin:0 0 18px;color:#f4d6ff;font:700 12px 'Space Mono',monospace;letter-spa
 .tiles div:hover,.tiles a:hover{border-color:var(--pink);background:#32154a}
 @media(max-width:580px){main{width:calc(100% - 28px)}.hero{padding:75px 0 45px}.steps{grid-template-columns:1fr}.steps div{padding:14px}.steps b{display:inline;margin:0 0 0 13px}.tiles{grid-template-columns:repeat(2,1fr)}.tiles div{min-height:72px;padding:14px}}
 @media(prefers-reduced-motion:reduce){.glitch:before,.glitch:after{animation:none}}
+
+.tagline{margin:-16px 0 34px;color:#d9b8ff;font:12px 'Space Mono',monospace;letter-spacing:.16em;text-transform:lowercase;text-shadow:0 0 14px #a855f777}
