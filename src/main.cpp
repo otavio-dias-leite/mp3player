@@ -1145,7 +1145,10 @@ if(usbActive) endUsbMode();
         radioEntry.trim();
         if(radioEntry.startsWith("http://")) {
           preferences.putString("radio_url",radioEntry); radioEditingUrl=false;
-          startRadioStream(radioEntry,"CUSTOM STREAM"); drawRadioScreen();
+          radioMessage="CONNECTING...";
+          drawRadioScreen();
+          startRadioStream(radioEntry,"CUSTOM STREAM");
+          drawRadioScreen();
         } else {radioMessage="URL MUST START HTTP://";drawRadioScreen();}
       } else if(c==8||c==127) {if(radioEntry.length())radioEntry.remove(radioEntry.length()-1);drawRadioScreen();}
       else if(c&&isprint((unsigned char)c)&&radioEntry.length()<180) {radioEntry+=c;drawRadioScreen();}
@@ -1153,8 +1156,14 @@ if(usbActive) endUsbMode();
       if(c==';') {radioSelected=max(0,radioSelected-1);drawRadioScreen();}
       else if(c=='.') {radioSelected=min(RADIO_STATION_COUNT,radioSelected+1);drawRadioScreen();}
       else if(k.enter) {
-        if(radioSelected<RADIO_STATION_COUNT) startRadioStream(radioStationUrls[radioSelected],radioStationNames[radioSelected]);
-        else {radioEntry=preferences.getString("radio_url",radioEntry);radioEditingUrl=true;}
+        if(radioSelected<RADIO_STATION_COUNT) {
+          radioMessage="CONNECTING...";
+          drawRadioScreen();
+          startRadioStream(radioStationUrls[radioSelected],radioStationNames[radioSelected]);
+        } else {
+          radioEntry=preferences.getString("radio_url",radioEntry);
+          radioEditingUrl=true;
+        }
         drawRadioScreen();
       } else if(k.space&&audioIsRadio) {toggleAudioPause();drawRadioScreen();}
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";radioMessage="STOPPED";drawRadioScreen();}
