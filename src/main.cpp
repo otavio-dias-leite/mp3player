@@ -715,6 +715,7 @@ bool startLocalAudio(const String& path) {
   return true;
 }
 bool startRadioStream(const String& url, const String& title) {
+  stopAudio();
   if(WiFi.status()!=WL_CONNECTED) {
     audioStatusMessage="CONNECT WI-FI FIRST";
     radioMessage=audioStatusMessage;
@@ -742,6 +743,7 @@ void serviceAudio() {
     const bool wasRadio=audioIsRadio;
     stopAudio();
     audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
+    if(wasRadio) radioMessage=audioStatusMessage;
     if(!screenSaverActive) {
       if(screen==MUSIC && musicNowPlaying) drawMusicInfo(audioNowTitle);
       else if(screen==RADIO) drawRadioScreen();
@@ -1072,7 +1074,7 @@ if(usbActive) endUsbMode();
         else {radioEntry=preferences.getString("radio_url",radioEntry);radioEditingUrl=true;}
         drawRadioScreen();
       } else if(c==' '&&audioIsRadio) {audioPaused=!audioPaused;drawRadioScreen();}
-      else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawRadioScreen();}
+      else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";radioMessage="STOPPED";drawRadioScreen();}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawRadioScreen();}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawRadioScreen();}
     }
