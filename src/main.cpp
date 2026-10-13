@@ -985,6 +985,8 @@ void setup() {
   M5Cardputer.Display.setRotation(1);
   M5Cardputer.Speaker.begin();
   M5Cardputer.Speaker.setVolume(255);
+  audioMutex=xSemaphoreCreateMutex();
+  if(!audioMutex) Serial.println("JOHNNY: AUDIO MUTEX FAILED");
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
   randomSeed(esp_random());
   sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
