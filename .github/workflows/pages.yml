@@ -31,6 +31,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          test -n "$VERSION"
           BUILD=".pio/build/cardputer-adv"
           test -s "$BUILD/bootloader.bin"
           test -s "$BUILD/partitions.bin"
@@ -45,7 +47,7 @@ jobs:
           cat > release/firmware/manifest.json <<'EOF'
           {
             "name": "JOHNNY — Cardputer-Adv",
-            "version": "0.3.0",
+            "version": "${VERSION}",
             "new_install_prompt_erase": true,
             "builds": [{
               "chipFamily": "ESP32-S3",
@@ -81,17 +83,21 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p _site
-          cp index.html style.css transfer.html _site/
+          cp index.html games.html style.css transfer.html _site/
           touch _site/.nojekyll
           if [ -d web/assets ]; then cp -R web/assets _site/assets; fi
           python - <<'PY'
           import json
           from pathlib import Path
+          version = Path("VERSION").read_text().strip()
+          for name in ("index.html", "games.html", "transfer.html"):
+              page = Path("_site") / name
+              page.write_text(page.read_text().replace("@JOHNNY_VERSION@", version))
           p = Path("_site/firmware/manifest.json")
           data = json.loads(p.read_text())
           base = "https://otavio-dias-leite.github.io/johnny/firmware/"
           for part in data["builds"][0]["parts"]:
-              part["path"] = base + part["path"] + "?v=0.3.0"
+              part["path"] = base + part["path"] + f"?v={version}"
           p.write_text(json.dumps(data, indent=2) + "\n")
           PY
           for f in bootloader.bin partitions.bin boot_app0.bin firmware.bin manifest.json; do
