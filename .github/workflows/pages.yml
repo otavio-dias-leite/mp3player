@@ -44,7 +44,7 @@ jobs:
           BOOT_APP0="$(find "$HOME/.platformio/packages/framework-arduinoespressif32" -name boot_app0.bin -print -quit)"
           test -n "$BOOT_APP0"
           cp "$BOOT_APP0" release/firmware/boot_app0.bin
-          cat > release/firmware/manifest.json <<'EOF'
+          cat > release/firmware/manifest.json <<EOF
           {
             "name": "JOHNNY — Cardputer-Adv",
             "version": "${VERSION}",
