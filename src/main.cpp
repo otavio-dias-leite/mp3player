@@ -327,7 +327,7 @@ void tunerScreen() {
   if(!tunerHasSignal) {
     d.setTextColor(UI_LAVENDER,BG); d.setTextSize(2); d.setCursor(8,63); d.print("TOQUE UMA CORDA");
     d.setTextSize(1); d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("MANTENHA A NOTA SOANDO");
-    d.setCursor(8,101); d.print("A LEITURA FICA NA TELA POR 3s");
+    d.setCursor(8,101); d.print("A LEITURA FICA NA TELA POR 5s");
     footer(", /  TROCAR INSTRUMENTO");
     return;
   }
@@ -956,7 +956,7 @@ void loop() {
         tunerMidi=nearestMidi(tunerFrequency,&tunerCents);
       }
     }
-    if(tunerHasSignal && millis()-tunerLastSignalAt>3000UL) {tunerHasSignal=false;tunerFilteredFrequency=0;tunerFrequency=0;tunerMidi=-1;}
+    if(tunerHasSignal && millis()-tunerLastSignalAt>5000UL) {tunerHasSignal=false;tunerFilteredFrequency=0;tunerFrequency=0;tunerMidi=-1;}
     tunerScreen();
   }
   
