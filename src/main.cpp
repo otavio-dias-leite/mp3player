@@ -480,43 +480,99 @@ void openFile(bool musicMode) {
 void openApp() {
   switch(selected) {
     case 0:screen=PIANO;pianoScreen();break;
-    case 1:screen=TUNER;tunerScreen();break;
+    case 1:screen=TUNER;tunerMidi=-1;tunerFrequency=0;tunerLastSample=0;tunerScreen();break;
     case 2:screen=MUSIC;currentPath="/";scanDirectory(true);drawFiles(true);break;
     case 3:screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
-    case 4:screen=GALLERY;header("PHOTO VIEWER");M5Cardputer.Display.setTextColor(UI_MUTED,BG);M5Cardputer.Display.setCursor(8,61);M5Cardputer.Display.print("JPEG decoder not included");footer();break;
-    default:screen=ABOUT;header("SYSTEM");M5Cardputer.Display.setTextColor(WHITE,BG);M5Cardputer.Display.setCursor(8,53);M5Cardputer.Display.print("JOHNNY OS / CARDPUTER-ADV");M5Cardputer.Display.setCursor(8,69);M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");M5Cardputer.Display.setCursor(8,85);M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");footer();break;
+    case 4:screen=GALLERY;header("PHOTO VIEWER");M5Cardputer.Display.setTextColor(UI_MUTED,BG);M5Cardputer.Display.setCursor(8,61);M5Cardputer.Display.print("JPEG DECODER PENDING");footer();break;
+    case 5:screen=VOICE;voiceDelayPos=0;memset(voiceDelay,0,sizeof(voiceDelay));drawVoiceScreen();break;
+    case 6:screen=NETWORK;wifiConfigStage=0;drawNetworkScreen();break;
+    case 7:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
+    default:
+      screen=ABOUT; header("SYSTEM");
+      M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY OS / CARDPUTER-ADV");
+      M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");
+      M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");
+      M5Cardputer.Display.setCursor(8,101); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
+      footer(); break;
   }
 }
 void setup() {
-  auto cfg=M5.config(); M5Cardputer.begin(cfg,true);
+  auto cfg=M5.config();
+  M5Cardputer.begin(cfg,true);
   M5Cardputer.Display.setRotation(1);
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
   randomSeed(esp_random());
   sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
   sdReady=SD.begin(SD_CS,sdBus,20000000);
+  preferences.begin("johnny",false);
+  savedSsid=preferences.getString("ssid","");
+  savedPassword=preferences.getString("pass","");
+  if(savedSsid.length()) {
+    WiFi.mode(WIFI_STA); WiFi.setSleep(false);
+    WiFi.begin(savedSsid.c_str(),savedPassword.c_str());
+  }
+  auto micCfg=M5Cardputer.Mic.config();
+  micCfg.sample_rate=16000;
+  M5Cardputer.Mic.config(micCfg);
   splash(); selected=0; drawHome();
 }
 void loop() {
   M5Cardputer.update();
-  if(audioStarted && !M5Cardputer.Speaker.isPlaying()) { audioStarted=false; if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;} }
-  if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()){delay(8);return;}
+  if(audioStarted && !M5Cardputer.Speaker.isPlaying()) {
+    audioStarted=false;
+    if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}
+  }
+  if(screen==TUNER && millis()-tunerLastSample>220) {
+    tunerLastSample=millis();
+    if(captureMic(tunerSamples,2048,320)) {
+      float freq=detectPitch(tunerSamples,2048);
+      if(freq>0 && freq<1400) { tunerFrequency=freq; tunerMidi=nearestMidi(freq,&tunerCents); }
+      else { tunerFrequency=0; tunerMidi=-1; }
+      tunerScreen();
+    }
+  }
+  if(screen==VOICE && !M5Cardputer.Speaker.isPlaying()) runVoiceChunk();
+
+  if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
   char c=k.word.size()?k.word[0]:0;
+  bool back=(k.esc || c==0x27);
+  if(back) {
+    if(screen==FILES || screen==MUSIC) {
+      bool music=screen==MUSIC;
+      if(audioStarted){M5Cardputer.Speaker.stop();audioStarted=false;}
+      if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}
+      if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
+      else {screen=HOME;drawHome();}
+    } else if(screen==USBMODE) {
+#if JOHNNY_USB_MSC
+      if(usbActive) endUsbMode();
+#endif
+      screen=HOME;drawHome();
+    } else {
+      if(screen==VOICE) M5Cardputer.Speaker.stop();
+      wifiConfigStage=0; screen=HOME;drawHome();
+    }
+    delay(8); return;
+  }
+
   if(screen==HOME) {
-    if(k.enter){openApp();}
-    else if(k.up||c==';'){selected=(selected+APP_COUNT-2)%APP_COUNT;drawHome();}
-    else if(k.down||c=='.'){selected=(selected+2)%APP_COUNT;drawHome();}
-    else if(k.left||c==','){selected=(selected+APP_COUNT-1)%APP_COUNT;drawHome();}
-    else if(k.right||c=='/'){selected=(selected+1)%APP_COUNT;drawHome();}
+    int row=selected/3, col=selected%3;
+    if(k.enter) { openApp(); delay(8); return; }
+    if(k.up||c==';') row=(row+2)%3;
+    else if(k.down||c=='.') row=(row+1)%3;
+    else if(k.left||c==',') col=(col+2)%3;
+    else if(k.right||c=='/') col=(col+1)%3;
+    selected=row*3+col; drawHome();
   } else if(screen==PIANO) {
     if(k.left||c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(k.right||c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(k.up||c==';'){pianoEffect=(pianoEffect+3)%4;pianoScreen();}
     else if(k.down||c=='.'){pianoEffect=(pianoEffect+1)%4;pianoScreen();}
-    else if(c=='-') {pianoVolume=max(20,pianoVolume-10);pianoScreen();}
-    else if(c=='='||c=='+') {pianoVolume=min(120,pianoVolume+10);pianoScreen();}
-    else if(c=='[') {pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
-    else if(c==']') {pianoOctave=min(2,pianoOctave+1);pianoScreen();}
+    else if(c=='-'){pianoVolume=max(20,pianoVolume-10);pianoScreen();}
+    else if(c=='='||c=='+'){pianoVolume=min(120,pianoVolume+10);pianoScreen();}
+    else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
+    else if(c==']'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(c)playNote(c);
   } else if(screen==TUNER) {
     if(k.left||k.right||c==','||c=='/'){tunerInstrument=1-tunerInstrument;tunerScreen();}
@@ -525,8 +581,25 @@ void loop() {
     if(k.up||c==';'||k.left||c==','){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
     else if(k.down||c=='.'||k.right||c=='/'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
     else if(k.enter)openFile(music);
-    else if(k.del){if(audioStarted){M5Cardputer.Speaker.stop();audioStarted=false;}if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}else{screen=HOME;drawHome();}}
+  } else if(screen==VOICE) {
+    if(k.left||c==','){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
+    else if(k.right||c=='/'){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
+    else if(k.up||c==';'){voiceEffect=(voiceEffect+3)%4;drawVoiceScreen();}
+    else if(k.down||c=='.'){voiceEffect=(voiceEffect+1)%4;drawVoiceScreen();}
+    else if(c=='-'){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
+    else if(c=='='){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
+  } else if(screen==NETWORK) {
+    if(wifiConfigStage==0) {
+      if(k.enter) startNetworkSetup();
+      else if(k.down||c=='.') {WiFi.disconnect(true);drawNetworkScreen();}
+    } else if(k.enter) {
+      if(wifiConfigStage==1) {savedSsid=wifiEntry;wifiEntry="";wifiConfigStage=2;drawNetworkScreen();}
+      else saveNetworkSetup();
+    } else if(c && isprint((unsigned char)c) && wifiEntry.length()<(wifiConfigStage==1?32:63)) {
+      wifiEntry+=c; drawNetworkScreen();
+    }
+  } else if(screen==USBMODE) {
+    if(k.enter && !usbActive) {screen=HOME;drawHome();}
   }
-  if(k.del && screen!=HOME && screen!=FILES && screen!=MUSIC){screen=HOME;drawHome();}
-  delay(12);
+  delay(8);
 }
