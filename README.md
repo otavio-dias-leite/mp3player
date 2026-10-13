@@ -77,3 +77,14 @@ O código próprio deste repositório mantém a licença indicada em LICENSE. A 
 ## Segurança
 
 Use apenas redes, dispositivos e streams que você tenha autorização para acessar.
+
+
+## Versionamento
+
+A versão pública é controlada pelo arquivo `VERSION`, usando Semantic Versioning (SemVer). O projeto começa em `0.0.0-alpha.1`; cada nova compilação Alpha incrementa o identificador final (`0.0.0-alpha.2`, `0.0.0-alpha.3` ...). O instalador web, a página e os parâmetros de cache recebem a mesma versão durante a publicação. As tags de release no GitHub seguem o prefixo `v`, por exemplo `v0.0.0-alpha.1`.
+
+## Jogos
+
+A página [Games](games.html) reúne o Game of Life e DOOM 1993 no navegador. O autômato de Conway também permanece no firmware como aplicativo LIFE. A versão web de DOOM usa o projeto externo [doom.wasm](https://github.com/jacobenget/doom.wasm) e seu runtime hospedado pelo autor; ela não é incorporada ao binário do JOHNNY.
+
+**DOOM nativo no Cardputer-Adv ainda não está integrado.** O port existente para Cardputer que encontrei usa uma árvore ESP-IDF própria, driver de teclado matricial antigo e estratégias de paginação/mapeamento de memória específicas. O ADV usa o teclado I²C gerenciado pela biblioteca M5Cardputer e este firmware é Arduino/PlatformIO. Copiar esse port diretamente não é compatível nem seguro sem uma adaptação e validação próprias. O processador do ADV também trabalha sem PSRAM, o que exige manter o consumo de RAM sob controle.
