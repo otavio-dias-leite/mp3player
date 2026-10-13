@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - feat/battery-saver-radio-player-site
     paths-ignore:
       - 'firmware/*.bin'
   pull_request:
