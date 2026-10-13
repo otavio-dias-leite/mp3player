@@ -6,7 +6,7 @@
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
-constexpr uint16_t BG = 0x080B, PANEL = 0x190F, PURPLE = 0x895F, PINK = 0xF19F, CYAN = 0x4EFF, MUTED = 0x9CB0;
+constexpr uint16_t BG = 0x080B, PANEL = 0x190F, UI_PURPLE = 0x895F, UI_PINK = 0xF19F, UI_CYAN = 0x4EFF, UI_MUTED = 0x9CB0;
 enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, GALLERY, ABOUT };
 Screen screen = HOME;
 SPIClass sdBus(FSPI);
@@ -32,16 +32,16 @@ void header(const char* title) {
   auto &d = M5Cardputer.Display;
   d.fillScreen(BG);
   d.setTextSize(1);
-  d.setTextColor(CYAN, BG); d.setCursor(7,5); d.print("J / JOHNNY");
-  d.setTextColor(MUTED, BG); d.setCursor(178,5); d.print("ADV");
-  d.drawFastHLine(7,18,226,PURPLE);
+  d.setTextColor(UI_CYAN, BG); d.setCursor(7,5); d.print("J / JOHNNY");
+  d.setTextColor(UI_MUTED, BG); d.setCursor(178,5); d.print("ADV");
+  d.drawFastHLine(7,18,226,UI_PURPLE);
   d.setTextSize(2); d.setTextColor(WHITE,BG); d.setCursor(8,25); d.print(title);
   d.setTextSize(1);
 }
 void footer(const char* s="ESC  BACK") {
   auto &d=M5Cardputer.Display;
   d.drawFastHLine(7,117,226,0x392B);
-  d.setTextColor(MUTED,BG); d.setCursor(8,124); d.print(s);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,124); d.print(s);
 }
 void drawHome() {
   header("APPLICATIONS");
@@ -49,8 +49,8 @@ void drawHome() {
   for(int i=0;i<APP_COUNT;i++){
     int y=48+i*11; bool on=i==selected;
     d.fillRect(8,y-1,224,10,on?PANEL:BG);
-    if(on)d.fillRect(8,y-1,2,10,PINK);
-    d.setTextColor(on?WHITE:MUTED,on?PANEL:BG);
+    if(on)d.fillRect(8,y-1,2,10,UI_PINK);
+    d.setTextColor(on?WHITE:UI_MUTED,on?PANEL:BG);
     d.setCursor(15,y); d.printf("%02d  %s",i+1,apps[i]);
   }
   footer("W/S OR ARROWS  MOVE     ENTER  OPEN");
@@ -61,26 +61,26 @@ void splash() {
   d.setCursor(36,48); d.print("JOHNNY"); delay(260);
   for(int i=0;i<8;i++){
     int y=random(36,98);
-    d.fillRect(23,y,random(40,194),random(1,4),i%2?PINK:CYAN);
-    d.setTextColor(i%2?PINK:CYAN,BG);
+    d.fillRect(23,y,random(40,194),random(1,4),i%2?UI_PINK:UI_CYAN);
+    d.setTextColor(i%2?UI_PINK:UI_CYAN,BG);
     d.setCursor(35+random(-4,5),47+random(-2,3)); d.print("JOHNNY");
     delay(42);
   }
   d.fillScreen(BG); d.setTextColor(WHITE,BG); d.setCursor(36,48); d.print("JOHNNY");
-  d.setTextSize(1); d.setTextColor(PURPLE,BG); d.setCursor(65,83); d.print("PERSONAL DECK / 01");
+  d.setTextSize(1); d.setTextColor(UI_PURPLE,BG); d.setCursor(65,83); d.print("PERSONAL DECK / 01");
   delay(550);
 }
 void pianoScreen() {
   header("POCKET PIANO");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(MUTED,BG); d.setCursor(8,42); d.print("Q W E R T Y U  /  WHITE KEYS");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,42); d.print("Q W E R T Y U  /  WHITE KEYS");
   const char* labels[]={"C","D","E","F","G","A","B"};
   for(int i=0;i<7;i++){
     int x=8+i*32;
     d.fillRoundRect(x,58,29,48,2,0xDEFB);
     d.setTextColor(BG,0xDEFB); d.setCursor(x+10,88); d.print(labels[i]);
   }
-  d.setTextColor(PINK,BG); d.setCursor(8,108); d.print("OCTAVE 4   |   SPEAKER SYNTH");
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,108); d.print("OCTAVE 4   |   SPEAKER SYNTH");
   footer("Q-U  PLAY     A-L  SHARPS     ESC  BACK");
 }
 void playNote(char c) {
@@ -98,17 +98,17 @@ void playNote(char c) {
 void tunerScreen() {
   header("CHROMATIC TUNER");
   auto &d=M5Cardputer.Display;
-  d.fillRoundRect(8,45,106,23,3,tunerInstrument==0?PURPLE:PANEL);
-  d.fillRoundRect(120,45,112,23,3,tunerInstrument==1?PURPLE:PANEL);
-  d.setTextColor(WHITE,tunerInstrument==0?PURPLE:PANEL); d.setCursor(34,53); d.print("GUITAR");
-  d.setTextColor(WHITE,tunerInstrument==1?PURPLE:PANEL); d.setCursor(151,53); d.print("UKULELE");
-  d.setTextColor(CYAN,BG); d.setCursor(8,77); d.print("STANDARD TUNINGS");
+  d.fillRoundRect(8,45,106,23,3,tunerInstrument==0?UI_PURPLE:PANEL);
+  d.fillRoundRect(120,45,112,23,3,tunerInstrument==1?UI_PURPLE:PANEL);
+  d.setTextColor(WHITE,tunerInstrument==0?UI_PURPLE:PANEL); d.setCursor(34,53); d.print("GUITAR");
+  d.setTextColor(WHITE,tunerInstrument==1?UI_PURPLE:PANEL); d.setCursor(151,53); d.print("UKULELE");
+  d.setTextColor(UI_CYAN,BG); d.setCursor(8,77); d.print("STANDARD TUNINGS");
   if(!tunerInstrument) {
     for(int i=0;i<6;i++){d.setTextColor(WHITE,BG);d.setCursor(8+i*38,94);d.printf("%s",guitarNames[i]);}
   } else {
     for(int i=0;i<4;i++){d.setTextColor(WHITE,BG);d.setCursor(22+i*52,94);d.printf("%s",ukeNames[i]);}
   }
-  d.setTextColor(MUTED,BG); d.setCursor(8,108); d.print("Mic pitch tracking not enabled");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,108); d.print("Mic pitch tracking not enabled");
   footer("A/D  INSTRUMENT     ESC  BACK");
 }
 String parentPath(const String &p) {
@@ -143,17 +143,17 @@ void scanDirectory() {
 void drawFiles(bool musicMode=false) {
   header(musicMode?"MUSIC LIBRARY":"SD EXPLORER");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(CYAN,BG); d.setCursor(8,42);
+  d.setTextColor(UI_CYAN,BG); d.setCursor(8,42);
   String path=currentPath; if(path.length()>27)path="..."+path.substring(path.length()-24);
   d.print(path);
   if(!sdReady) {
-    d.setTextColor(PINK,BG); d.setCursor(8,68); d.print("NO SD CARD");
-    d.setTextColor(MUTED,BG); d.setCursor(8,82); d.print("Check FAT32 card and contacts.");
+    d.setTextColor(UI_PINK,BG); d.setCursor(8,68); d.print("NO SD CARD");
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,82); d.print("Check FAT32 card and contacts.");
     footer(); return;
   }
   int shown=0;
   if(currentPath!="/" && scroll==0) {
-    d.setTextColor(MUTED,BG); d.setCursor(10,57); d.print("../");
+    d.setTextColor(UI_MUTED,BG); d.setCursor(10,57); d.print("../");
     shown++;
   }
   for(int i=scroll;i<entryCount && shown<5;i++) {
@@ -161,13 +161,13 @@ void drawFiles(bool musicMode=false) {
     int y=56+shown*12;
     bool on=i==selected;
     d.fillRect(8,y-1,224,11,on?PANEL:BG);
-    d.setTextColor(on?WHITE:(entryIsDir[i]?CYAN:MUTED),on?PANEL:BG);
+    d.setTextColor(on?WHITE:(entryIsDir[i]?UI_CYAN:UI_MUTED),on?PANEL:BG);
     d.setCursor(12,y);
     String n=entries[i]; if(n.length()>29)n=n.substring(0,26)+"...";
     d.printf("%c %s%s",on?'>':' ',n.c_str(),entryIsDir[i]?"/":"");
     shown++;
   }
-  if(entryCount==0){d.setTextColor(MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
+  if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
   footer("W/S MOVE  ENTER OPEN  BACKSPACE UP");
 }
 bool startWav(const String &path) {
@@ -190,11 +190,11 @@ void drawMusicInfo(const String &name) {
   header("NOW SELECTED");
   auto &d=M5Cardputer.Display;
   d.fillRoundRect(69,43,100,54,5,PANEL);
-  d.setTextColor(PINK,PANEL); d.setTextSize(3); d.setCursor(105,58); d.print("♪");
+  d.setTextColor(UI_PINK,PANEL); d.setTextSize(3); d.setCursor(105,58); d.print("♪");
   d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(8,103);
   String n=name; if(n.length()>34)n=n.substring(0,31)+"...";
   d.print(n);
-  d.setTextColor(MUTED,BG); d.setCursor(8,113); d.print(audioStarted?"WAV PLAYING":"WAV ONLY / SELECT TO PLAY");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,113); d.print(audioStarted?"WAV PLAYING":"WAV ONLY / SELECT TO PLAY");
   footer("ESC  RETURN TO LIBRARY");
 }
 void openFile(bool musicMode) {
@@ -211,14 +211,14 @@ void openFile(bool musicMode) {
     String lower=entries[selected]; lower.toLowerCase();
     bool ok=lower.endsWith(".wav") && startWav(full);
     drawMusicInfo(entries[selected]);
-    if(!ok) { M5Cardputer.Display.setTextColor(PINK,BG); M5Cardputer.Display.setCursor(8,101); M5Cardputer.Display.print("Use PCM WAV (max 1.5 MB)"); }
+    if(!ok) { M5Cardputer.Display.setTextColor(UI_PINK,BG); M5Cardputer.Display.setCursor(8,101); M5Cardputer.Display.print("Use PCM WAV (max 1.5 MB)"); }
   }
   else {
     File f=SD.open(full);
     header("FILE DETAILS");
     auto &d=M5Cardputer.Display;
     d.setTextColor(WHITE,BG);d.setCursor(8,53);d.print(entries[selected].substring(0,30));
-    d.setTextColor(MUTED,BG);d.setCursor(8,72);d.printf("%lu bytes",(unsigned long)f.size());
+    d.setTextColor(UI_MUTED,BG);d.setCursor(8,72);d.printf("%lu bytes",(unsigned long)f.size());
     d.setCursor(8,88);d.print("TYPE: ");d.print(f.isDirectory()?"DIR":"FILE");
     f.close();footer();
   }
@@ -229,7 +229,7 @@ void openApp() {
     case 1:screen=TUNER;tunerScreen();break;
     case 2:screen=MUSIC;currentPath="/";scanDirectory();drawFiles(true);break;
     case 3:screen=FILES;currentPath="/";scanDirectory();drawFiles();break;
-    case 4:screen=GALLERY;header("PHOTO VIEWER");M5Cardputer.Display.setTextColor(MUTED,BG);M5Cardputer.Display.setCursor(8,61);M5Cardputer.Display.print("JPEG decoder not included");footer();break;
+    case 4:screen=GALLERY;header("PHOTO VIEWER");M5Cardputer.Display.setTextColor(UI_MUTED,BG);M5Cardputer.Display.setCursor(8,61);M5Cardputer.Display.print("JPEG decoder not included");footer();break;
     default:screen=ABOUT;header("SYSTEM");M5Cardputer.Display.setTextColor(WHITE,BG);M5Cardputer.Display.setCursor(8,53);M5Cardputer.Display.print("JOHNNY OS / CARDPUTER-ADV");M5Cardputer.Display.setCursor(8,69);M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");M5Cardputer.Display.setCursor(8,85);M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");footer();break;
   }
 }
@@ -244,7 +244,7 @@ void setup() {
 }
 void loop() {
   M5Cardputer.update();
-  if(audioStarted && !M5Cardputer.Speaker.isPlaying()) { audioStarted=false; if(wavBuffer){free(wavBuffer);wavBuffer=null;wavLength=0;} }
+  if(audioStarted && !M5Cardputer.Speaker.isPlaying()) { audioStarted=false; if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;} }
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()){delay(8);return;}
   auto k=M5Cardputer.Keyboard.keysState();
   char c=k.word.size()?k.word[0]:0;
