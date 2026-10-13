@@ -42,7 +42,7 @@ jobs:
           cat > release/firmware/manifest.json <<'EOF'
           {
             "name": "Johnny OS — Cardputer-Adv",
-            "version": "0.1.3",
+            "version": "0.1.4",
             "new_install_prompt_erase": true,
             "builds": [{
               "chipFamily": "ESP32-S3",
