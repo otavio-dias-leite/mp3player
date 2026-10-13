@@ -16,3 +16,6 @@ The firmware links against ESP8266Audio. The upstream license text and source ar
 - License: see the upstream repository's license files.
 
 The JOHNNY audio output adapter is written for this firmware and passes decoded PCM samples to M5Unified's Cardputer speaker output. No ESP32-audioI2S or PSRAM-only audio stack is included.
+## AAC decoder notice
+
+ESP8266Audio bundles an AAC decoder derived from the Helix project. Its upstream README identifies the AAC decoder code as subject to RealNetworks' RSPL license and notes that commercial AAC use may require separate patent licensing through Via Licensing. Review the upstream ESP8266Audio license and the Helix/RSPL terms before redistributing builds with AAC enabled, especially for commercial distribution.
