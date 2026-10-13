@@ -1041,7 +1041,7 @@ if(usbActive) endUsbMode();
     if(musicNowPlaying) {
       if(c==',') moveMusicTrack(-1);
       else if(c=='/') moveMusicTrack(1);
-      else if(k.enter||c==' ') {audioPaused=!audioPaused;drawMusicInfo(audioNowTitle);}
+      else if(k.enter||k.space||c==' ') {audioPaused=!audioPaused;drawMusicInfo(audioNowTitle);}
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawMusicInfo(audioNowTitle);}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
@@ -1074,7 +1074,7 @@ if(usbActive) endUsbMode();
         if(radioSelected<RADIO_STATION_COUNT) startRadioStream(radioStationUrls[radioSelected],radioStationNames[radioSelected]);
         else {radioEntry=preferences.getString("radio_url",radioEntry);radioEditingUrl=true;}
         drawRadioScreen();
-      } else if(c==' '&&audioIsRadio) {audioPaused=!audioPaused;drawRadioScreen();}
+      } else if(k.space&&audioIsRadio) {audioPaused=!audioPaused;drawRadioScreen();}
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";radioMessage="STOPPED";drawRadioScreen();}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawRadioScreen();}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawRadioScreen();}
