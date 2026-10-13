@@ -142,7 +142,7 @@ void refreshBatteryCache(bool force=false) {
   int16_t mv=M5Cardputer.Power.getBatteryVoltage();
   if(level>=0) {
     level=constrain(level,0,100);
-    if(!chargingNow && batteryCacheReady && !batteryCachedCharging && batteryCachedPercent>=0) level=min(level,batteryCachedPercent);
+    if(!chargingNow && batteryCacheReady && batteryCachedPercent>=0) level=min(level,batteryCachedPercent);
     batteryCachedPercent=level;
   }
   if(mv>0) batteryCachedMillivolts=mv;
