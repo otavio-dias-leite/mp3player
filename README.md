@@ -37,7 +37,7 @@ O rádio web usa HTTP/ICY MP3. URLs personalizadas devem começar por http://; H
 - **SYNTH:** QWERTYU toca notas; setas ajustam oitava/timbre; - e + ajustam volume; [ e ] ajustam oitava.
 - **MUSIC:** na biblioteca, cima/baixo selecionam; no player, esquerda/direita ou cima/baixo trocam faixa; Enter/espaço pausa; P para; -/+ ajustam volume.
 - **RADIO:** cima/baixo seleciona estação; Enter conecta; espaço pausa; P para; opção Custom permite informar uma URL HTTP.
-- **TUNER:** esquerda/direita alterna guitarra, violão e ukulele. Toque uma corda e mantenha a nota por um instante. A leitura fica visível por até 3 segundos após o sinal desaparecer. “GRAVE DEMAIS / APERTE” indica corda frouxa; “AGUDA DEMAIS / AFROUXE” indica corda apertada. “AFINADA” aparece dentro da tolerância de ±5 cents.
+- **TUNER:** esquerda/direita alterna guitarra, violão e ukulele. Toque uma corda e mantenha a nota por um instante. A leitura fica visível por até 5 segundos após o sinal desaparecer. “GRAVE DEMAIS / APERTE” indica corda frouxa; “AGUDA DEMAIS / AFROUXE” indica corda apertada. “AFINADA” aparece dentro da tolerância de ±5 cents.
 
 ## Compilar e instalar
 
