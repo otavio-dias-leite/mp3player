@@ -20,7 +20,7 @@ h2{margin:0 0 18px;color:#f4d6ff;font:700 12px 'Space Mono',monospace;letter-spa
 .steps div,.tiles div{border:1px solid var(--line);background:linear-gradient(145deg,#251038,#180a25);padding:18px;color:var(--pink);font:11px 'Space Mono',monospace}
 .steps b{display:block;margin-top:12px;color:#fff;font-size:11px;line-height:1.6}
 .tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.tiles div{min-height:86px;display:flex;align-items:center;color:#f7edff;font-size:12px;letter-spacing:.06em}
-.tiles div:hover{border-color:var(--pink);background:#32154a}
+.tiles div,.tiles a{min-height:86px;display:flex;align-items:center;color:#f7edff;font-size:12px;letter-spacing:.06em;text-decoration:none}
+.tiles div:hover,.tiles a:hover{border-color:var(--pink);background:#32154a}
 @media(max-width:580px){main{width:calc(100% - 28px)}.hero{padding:75px 0 45px}.steps{grid-template-columns:1fr}.steps div{padding:14px}.steps b{display:inline;margin:0 0 0 13px}.tiles{grid-template-columns:repeat(2,1fr)}.tiles div{min-height:72px;padding:14px}}
 @media(prefers-reduced-motion:reduce){.glitch:before,.glitch:after{animation:none}}
