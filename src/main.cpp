@@ -10,7 +10,7 @@
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_CYAN = 0x6EFF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, GALLERY, VOICE, NETWORK, USBMODE, ABOUT };
+enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, NETWORK, USBMODE, ABOUT };
 Screen screen = HOME;
 SPIClass sdBus(FSPI);
 bool sdReady = false;
@@ -22,14 +22,11 @@ int pianoOctave=0,pianoEffect=0,pianoVolume=85;
 Preferences preferences;
 String savedSsid, savedPassword, wifiEntry;
 uint8_t wifiConfigStage=0;
-int voiceEffect=0, voiceGain=2;
 int lastWiFiStatus=-1;
 uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
 int16_t tunerSamples[2048];
-int16_t voiceSamples[16000];
-uint32_t voicePhase=0;
 bool usbActive=false;
 String usbCommandLine;
 bool micStarted=false;
@@ -40,8 +37,8 @@ String selectedFile;
 uint8_t* wavBuffer = nullptr;
 size_t wavLength = 0;
 bool audioStarted = false;
-const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "MIC FX", "WI-FI", "USB", "SYSTEM"};
-constexpr int APP_COUNT = 8;
+const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "WI-FI", "USB", "SYSTEM"};
+constexpr int APP_COUNT = 7;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
@@ -142,7 +139,7 @@ bool captureMic(int16_t* dst, size_t count, uint32_t timeoutMs=260) {
     micStarted=true; micWarmupUntil=millis()+1000;
   }
   if((int32_t)(millis()-micWarmupUntil)<0) return false;
-  if(!M5Cardputer.Mic.record(dst,count,16000,false)) return false;
+  if(!M5Cardputer.Mic.record(dst,count,16000,false)) { stopMicCapture(); return false; }
   uint32_t started=millis();
   while(M5Cardputer.Mic.isRecording() && millis()-started<timeoutMs) delay(1);
   bool complete=!M5Cardputer.Mic.isRecording();
@@ -242,40 +239,6 @@ void saveNetworkSetup() {
   WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.begin(savedSsid.c_str(),savedPassword.c_str());
   lastWiFiStatus=-1;
   drawNetworkScreen();
-}
-void drawVoiceScreen() {
-  header("MIC FX");
-  auto &d=M5Cardputer.Display;
-  const char* names[]={"CLEAN","ECHO","ROBOT","FUZZ"};
-  d.setTextColor(UI_PINK,BG); d.setCursor(8,49); d.print(names[voiceEffect]);
-  d.setTextColor(UI_CYAN,BG); d.setCursor(8,68); d.printf("GAIN %d",voiceGain);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,87); d.print("ENTER: RECORD 1 SEC");
-  d.setCursor(8,101); d.print("FX + PLAYBACK");
-  footer(",./; FX  -/+ GAIN  ENTER REC");
-}
-bool recordVoiceTake() {
-  if(M5Cardputer.Speaker.isPlaying()) return false;
-  stopMicCapture();
-  if(!M5Cardputer.Mic.begin()) return false;
-  delay(1000); // ES8311 microphone warm-up.
-  if(!M5Cardputer.Mic.record(voiceSamples,16000,16000,false)) {
-    M5Cardputer.Mic.end(); return false;
-  }
-  uint32_t started=millis();
-  while(M5Cardputer.Mic.isRecording() && millis()-started<1400) delay(1);
-  bool complete=!M5Cardputer.Mic.isRecording();
-  M5Cardputer.Mic.end();
-  if(!complete) return false;
-  const int delaySamples=3600;
-  for(int i=0;i<16000;i++) {
-    float dry=(float)voiceSamples[i]*(float)voiceGain, wet=dry;
-    if(voiceEffect==1 && i>=delaySamples) wet=dry+(float)voiceSamples[i-delaySamples]*0.48f;
-    else if(voiceEffect==2) wet=dry*(0.72f+0.28f*sinf(6.2831853f*5.0f*(float)i/16000.0f));
-    else if(voiceEffect==3) wet=tanhf(dry/12000.0f)*22000.0f;
-    voiceSamples[i]=(int16_t)constrain((int)wet,-32768,32767);
-  }
-  M5Cardputer.Speaker.setVolume(190);
-  return M5Cardputer.Speaker.playRaw(voiceSamples,16000,16000,false,1,0,true);
 }
 bool beginUsbMode();
 void drawUsbScreen(bool ok);
@@ -532,9 +495,8 @@ void openApp() {
     case 1:screen=TUNER;tunerMidi=-1;tunerFrequency=0;tunerLastSample=0;tunerScreen();break;
     case 2:screen=MUSIC;currentPath="/";scanDirectory(true);drawFiles(true);break;
     case 3:screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
-    case 4:screen=VOICE;drawVoiceScreen();break;
-    case 5:screen=NETWORK;wifiConfigStage=0;lastWiFiStatus=-1;drawNetworkScreen();break;
-    case 6:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
+    case 4:screen=NETWORK;wifiConfigStage=0;lastWiFiStatus=-1;drawNetworkScreen();break;
+    case 5:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     default:
       screen=ABOUT; header("SYSTEM");
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
@@ -581,8 +543,8 @@ void loop() {
       float freq=detectPitch(tunerSamples,2048);
       if(freq>0 && freq<1400) { tunerFrequency=freq; tunerMidi=nearestMidi(freq,&tunerCents); }
       else { tunerFrequency=0; tunerMidi=-1; }
-      tunerScreen();
-    }
+    } else { tunerFrequency=0; tunerMidi=-1; }
+    tunerScreen();
   }
   
   if(Serial.available()>0) serialTransferTask();
@@ -602,7 +564,6 @@ void loop() {
 if(usbActive) endUsbMode();
       screen=HOME;drawHome();
     } else {
-      if(screen==VOICE) { M5Cardputer.Speaker.stop(); stopMicCapture(); }
       if(screen==TUNER) stopMicCapture();
       wifiConfigStage=0; screen=HOME;drawHome();
     }
@@ -637,14 +598,6 @@ if(usbActive) endUsbMode();
     if(k.up||c==';'||k.left||c==','){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
     else if(k.down||c=='.'||k.right||c=='/'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
     else if(k.enter)openFile(music);
-  } else if(screen==VOICE) {
-    if(k.left||c==','){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
-    else if(k.right||c=='/'){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
-    else if(k.up||c==';'){voiceEffect=(voiceEffect+3)%4;drawVoiceScreen();}
-    else if(k.down||c=='.'){voiceEffect=(voiceEffect+1)%4;drawVoiceScreen();}
-    else if(c=='-'){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
-    else if(c=='='){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
-    else if(k.enter){recordVoiceTake();drawVoiceScreen();}
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
       if(k.enter) startNetworkSetup();
