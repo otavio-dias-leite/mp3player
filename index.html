@@ -1,30 +1,28 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#08040f"><meta name="description" content="JOHNNY OS — Cardputer-Adv / neon synthwave firmware">
-<title>JOHNNY // SYSTEM</title>
-<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Space+Grotesk:wght@400;600;700&display=swap" rel="stylesheet">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#000000">
+<title>JOHNNY</title>
 <link rel="stylesheet" href="style.css">
-<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
 <body>
-<div class="scanlines"></div><div class="grid"></div><main>
-<header class="topline"><span>/// NIGHT CITY SYSTEMS <i>•</i> CARDPUTER-ADV</span><a href="https://github.com/otavio-dias-leite/johnny">SOURCE CODE ↗</a></header>
-<section class="hero">
-<div class="eyebrow"><span class="pulse"></span> NEURAL LINK ESTABLISHED <span class="divider">/</span> ESP32-S3</div>
-<div class="brand-wrap"><h1 class="glitch" data-text="JOHNNY" aria-label="JOHNNY">JOHNNY</h1><div class="brand-line">NO FUTURE. JUST FIRMWARE.</div></div>
-<div class="sub">A PERSONAL OPERATING SYSTEM FOR YOUR POCKET CYBERDECK</div>
-<div class="modules"><span>01 / SYNTH</span><span>02 / AUDIO</span><span>03 / SD ARCHIVE</span></div>
-<div class="install"><div class="install-head"><span>FIRMWARE DEPLOYMENT</span><span class="version">BUILD // EXPERIMENTAL</span></div>
-<esp-web-install-button manifest="firmware/manifest.json"><button slot="activate" class="flash">FLASH JOHNNY OS <b>↗</b></button><span slot="unsupported">Abra no Chrome ou Edge para instalar via USB.</span><span slot="not-allowed">Permissão USB não concedida.</span></esp-web-install-button>
-<p>USB-C <i>·</i> ESP32-S3 <i>·</i> CARDPUTER-ADV</p></div>
-</section>
-<footer><span>JOHNNY OS <b>///</b> BUILT FOR THE AFTER HOURS</span><span>OPEN SOURCE <i>×</i> 2026</span></footer>
+<main aria-label="JOHNNY">
+  <h1 class="wordmark">JOHNNY</h1>
 </main>
 <script>
-const title=document.querySelector('.glitch');
-window.addEventListener('load',()=>{document.body.classList.add('booted');title.addEventListener('animationend',()=>title.classList.add('steady'),{once:true})});
-document.querySelector('esp-web-install-button').addEventListener('state-changed',e=>{const s=e.detail&&e.detail.state;if(s)document.querySelector('.install-head span:first-child').textContent='DEPLOYMENT / '+s.toUpperCase()});
+(() => {
+  const mark = document.querySelector('.wordmark');
+  const glitch = () => {
+    mark.classList.remove('glitch');
+    void mark.offsetWidth;
+    mark.classList.add('glitch');
+    window.setTimeout(() => mark.classList.remove('glitch'), 260);
+  };
+  window.setTimeout(glitch, 900);
+  window.setInterval(glitch, 6200 + Math.random() * 2400);
+})();
 </script>
-</body></html>
+</body>
+</html>
