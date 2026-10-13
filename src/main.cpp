@@ -17,6 +17,7 @@
 #include <AudioGeneratorOpus.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
+#include <freertos/task.h>
 
 
 class JohnnyAudioOutput final : public AudioOutput {
