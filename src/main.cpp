@@ -334,7 +334,7 @@ void drawCategoryMenu(){
     d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);
     d.printf("%c %02d  %s",active?'>':' ',i+1,items[i]);
   }
-  footer("UP/DOWN SELECT  ENTER OPEN  ESC BACK");
+  footer("UP/DN SELECT  ENTER OPEN  ESC BACK");
 }
 void drawUpdateInfo(){
   header("FIRMWARE UPDATE");auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
@@ -1454,7 +1454,7 @@ void loop() {
     return;
   }
 
-  bool back=(c==0x27 || c=='`' || c=='~');
+  bool back=(c==0x1B || c==0x27 || c=='`' || c=='~');
   if(back) {
     if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
