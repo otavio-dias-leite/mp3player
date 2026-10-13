@@ -39,8 +39,8 @@ String selectedFile;
 uint8_t* wavBuffer = nullptr;
 size_t wavLength = 0;
 bool audioStarted = false;
-const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "WI-FI", "USB", "SYSTEM"};
-constexpr int APP_COUNT = 7;
+const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "MIC FX", "WI-FI", "USB", "SYSTEM"};
+constexpr int APP_COUNT = 8;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
@@ -530,10 +530,9 @@ void openApp() {
     case 1:screen=TUNER;tunerMidi=-1;tunerFrequency=0;tunerLastSample=0;tunerScreen();break;
     case 2:screen=MUSIC;currentPath="/";scanDirectory(true);drawFiles(true);break;
     case 3:screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
-    case 4:screen=GALLERY;header("PHOTO VIEWER");M5Cardputer.Display.setTextColor(UI_MUTED,BG);M5Cardputer.Display.setCursor(8,61);M5Cardputer.Display.print("JPEG DECODER PENDING");footer();break;
-    case 5:screen=VOICE;drawVoiceScreen();break;
-    case 6:screen=NETWORK;wifiConfigStage=0;drawNetworkScreen();break;
-    case 7:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
+    case 4:screen=VOICE;drawVoiceScreen();break;
+    case 5:screen=NETWORK;wifiConfigStage=0;drawNetworkScreen();break;
+    case 6:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     default:
       screen=ABOUT; header("SYSTEM");
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
@@ -605,13 +604,12 @@ if(usbActive) endUsbMode();
   }
 
   if(screen==HOME) {
-    int row=selected/3, col=selected%3;
     if(k.enter) { openApp(); delay(8); return; }
-    if(k.up||c==';') row=(row+2)%3;
-    else if(k.down||c=='.') row=(row+1)%3;
-    else if(k.left||c==',') col=(col+2)%3;
-    else if(k.right||c=='/') col=(col+1)%3;
-    selected=row*3+col; drawHome();
+    if(k.up||c==';') selected=(selected+APP_COUNT-3)%APP_COUNT;
+    else if(k.down||c=='.') selected=(selected+3)%APP_COUNT;
+    else if(k.left||c==',') selected=(selected+APP_COUNT-1)%APP_COUNT;
+    else if(k.right||c=='/') selected=(selected+1)%APP_COUNT;
+    drawHome();
   } else if(screen==PIANO) {
     if(k.left||c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(k.right||c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
@@ -629,6 +627,13 @@ if(usbActive) endUsbMode();
     if(k.up||c==';'||k.left||c==','){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
     else if(k.down||c=='.'||k.right||c=='/'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
     else if(k.enter)openFile(music);
+  } else if(screen==VOICE) {
+    if(k.left||c==','){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
+    else if(k.right||c=='/'){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
+    else if(k.up||c==';'){voiceEffect=(voiceEffect+3)%4;drawVoiceScreen();}
+    else if(k.down||c=='.'){voiceEffect=(voiceEffect+1)%4;drawVoiceScreen();}
+    else if(c=='-'){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
+    else if(c=='='){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
     else if(k.enter){recordVoiceTake();drawVoiceScreen();}
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
