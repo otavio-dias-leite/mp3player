@@ -6,11 +6,63 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <ctype.h>
+#include <AudioOutput.h>
+#include <AudioFileSourceSD.h>
+#include <AudioFileSourceBuffer.h>
+#include <AudioFileSourceICYStream.h>
+#include <AudioGeneratorMP3.h>
+#include <AudioGeneratorWAV.h>
+#include <AudioGeneratorFLAC.h>
+#include <AudioGeneratorAAC.h>
+#include <AudioGeneratorOpus.h>
+
+
+class JohnnyAudioOutput final : public AudioOutput {
+public:
+  explicit JohnnyAudioOutput(m5::Speaker_Class* speaker) : speaker_(speaker) {}
+  bool begin() override { return speaker_ != nullptr; }
+  bool ConsumeSample(int16_t sample[2]) override {
+    if(!speaker_) return false;
+    if(bufferIndex_ >= kBufferSamples) {
+      flush();
+      return false;
+    }
+    const int32_t l=Amplify(sample[LEFTCHANNEL]);
+    const int32_t r=Amplify(sample[RIGHTCHANNEL]);
+    buffers_[bufferSlot_][bufferIndex_++]=(int16_t)((l+r)/2);
+    return true;
+  }
+  void flush() override {
+    if(!speaker_ || bufferIndex_==0) return;
+    uint32_t started=millis();
+    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+    if(speaker_->isPlaying()) speaker_->stop();
+    speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false);
+    bufferSlot_=(bufferSlot_+1)%3;
+    bufferIndex_=0;
+  }
+  bool stop() override {
+    flush();
+    if(speaker_) {
+      uint32_t started=millis();
+      while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+      if(speaker_->isPlaying()) speaker_->stop();
+    }
+    return true;
+  }
+private:
+  static constexpr size_t kBufferSamples=1536;
+  m5::Speaker_Class* speaker_=nullptr;
+  int16_t buffers_[3][kBufferSamples]{};
+  size_t bufferIndex_=0;
+  uint8_t bufferSlot_=0;
+};
+
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, NETWORK, USBMODE, ABOUT };
+enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, ABOUT };
 Screen screen = HOME;
 SPIClass sdBus(FSPI);
 bool sdReady = false;
@@ -18,7 +70,20 @@ String currentPath = "/";
 String entries[48];
 bool entryIsDir[48];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
-int pianoOctave=0,pianoEffect=0,pianoVolume=85;
+int pianoOctave=0,pianoEffect=4,pianoVolume=85;
+bool musicNowPlaying=false;
+int radioSelected=0;
+bool radioEditingUrl=false;
+String radioEntry;
+String audioStatusMessage="STOPPED";
+String audioNowTitle;
+int audioVolume=14;
+bool audioPaused=false;
+bool audioIsRadio=false;
+AudioFileSource* audioRawSource=nullptr;
+AudioFileSourceBuffer* audioInputBuffer=nullptr;
+AudioGenerator* audioDecoder=nullptr;
+JohnnyAudioOutput* audioOutput=nullptr;
 Preferences preferences;
 String savedSsid, savedPassword, wifiEntry;
 uint8_t wifiConfigStage=0;
@@ -31,17 +96,26 @@ bool wifiScanPending=false;
 uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
-int16_t tunerSamples[2048];
+int16_t tunerSamples[3072];
+float tunerFilteredFrequency=0.0f;
+bool tunerHasSignal=false;
+uint32_t tunerLastSignalAt=0;
 bool usbActive=false;
 String usbCommandLine;
 bool micStarted=false;
 uint32_t micWarmupUntil=0;
-int8_t synthBuffer[2048];
-const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
+int8_t synthBuffer[8192];
+const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE","GUITAR"};
 String selectedFile;
-uint8_t* wavBuffer = nullptr;
-size_t wavLength = 0;
 bool audioStarted = false;
+constexpr int RADIO_STATION_COUNT=4;
+const char* radioStationNames[RADIO_STATION_COUNT]={"RADIO PARADISE","GROOVE SALAD","DRONE ZONE","SPACE STATION"};
+const char* radioStationUrls[RADIO_STATION_COUNT]={
+  "http://stream-tx1.radioparadise.com/mp3-128",
+  "http://ice5.somafm.com/groovesalad-128-mp3",
+  "http://ice5.somafm.com/dronezone-128-mp3",
+  "http://ice5.somafm.com/spacestation-128-mp3"
+};
 uint32_t batteryLastDraw = 0;
 uint32_t batteryLastSample = 0;
 int batteryCachedPercent = -1;
@@ -49,8 +123,8 @@ int16_t batteryCachedMillivolts = -1;
 bool batteryCachedCharging = false;
 bool batteryCacheReady = false;
 bool screenSaverActive = false;
-const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "WI-FI", "USB", "SYSTEM"};
-constexpr int APP_COUNT = 7;
+const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "RADIO", "FILES", "WI-FI", "USB", "SYSTEM"};
+constexpr int APP_COUNT = 8;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
