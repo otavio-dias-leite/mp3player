@@ -758,28 +758,39 @@ void setAudioVolume(int value) {
 void drawMusicInfo(const String &name) {
   header("JOHNNY MUSIC");
   auto &d=M5Cardputer.Display;
-  d.fillRoundRect(75,42,90,52,6,PANEL);
-  d.drawCircle(120,68,23,UI_PURPLE);
-  d.drawCircle(120,68,15,UI_PINK);
-  d.fillCircle(120,68,5,UI_LAVENDER);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,43);
-  if(entryCount>0) d.printf("TRACK %02d / %02d",selected+1,entryCount);
-  d.setTextSize(2); d.setTextColor(WHITE,BG); d.setCursor(8,99);
-  String label=name; if(label.length()>17) label=label.substring(0,14)+"...";
-  d.print(label);
-  d.setTextSize(1); d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);
-  d.setCursor(8,113);
-  d.printf("%s  VOL %02d",audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.c_str(),audioVolume);
-  if(entryCount>1) {
-    int previous=(selected+entryCount-1)%entryCount;
-    int next=(selected+1)%entryCount;
-    d.setTextColor(UI_MUTED,BG); d.setCursor(8,59); d.print("< ");
-    String prevName=entries[previous]; if(prevName.length()>12) prevName=prevName.substring(0,9)+"...";
-    d.print(prevName);
-    d.setCursor(152,59); d.print("> ");
-    String nextName=entries[next]; if(nextName.length()>12) nextName=nextName.substring(0,9)+"...";
-    d.print(nextName);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,42);
+  d.print("NOW PLAYING");
+  d.fillRoundRect(91,49,58,43,5,PANEL);
+  d.drawCircle(120,70,19,UI_PURPLE);
+  d.drawCircle(120,70,12,UI_PINK);
+  d.drawCircle(120,70,5,UI_LAVENDER);
+  int previous=-1, next=-1;
+  for(int step=1;step<entryCount;step++) {
+    int candidate=(selected-step+entryCount)%entryCount;
+    if(!entryIsDir[candidate] && isPlayableAudio(entries[candidate])) {previous=candidate;break;}
   }
+  for(int step=1;step<entryCount;step++) {
+    int candidate=(selected+step)%entryCount;
+    if(!entryIsDir[candidate] && isPlayableAudio(entries[candidate])) {next=candidate;break;}
+  }
+  d.setTextColor(UI_LAVENDER,BG);
+  d.setCursor(8,59);
+  if(previous>=0) {
+    String title=entries[previous]; if(title.length()>8) title=title.substring(0,7)+"~";
+    d.printf("< %s",title.c_str());
+  } else d.print("< --");
+  d.setCursor(171,59);
+  if(next>=0) {
+    String title=entries[next]; if(title.length()>8) title=title.substring(0,7)+"~";
+    d.printf("> %s",title.c_str());
+  } else d.print("> --");
+  String label=name;
+  if(label.length()>34) label=label.substring(0,31)+"...";
+  d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(8,98);
+  d.print(label);
+  d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);
+  d.setCursor(8,109);
+  d.printf("%s  VOL %02d",audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.c_str(),audioVolume);
   footer("< > NEXT/PREV  ENTER PAUSE  +/- VOL");
 }
 void drawRadioScreen() {
