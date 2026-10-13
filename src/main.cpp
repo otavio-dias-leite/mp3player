@@ -6,18 +6,6 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <ctype.h>
-#include "sdkconfig.h"
-#ifndef ARDUINO_USB_MODE
-#define ARDUINO_USB_MODE 1
-#endif
-#if defined(CONFIG_TINYUSB_MSC_ENABLED) && CONFIG_TINYUSB_MSC_ENABLED && (ARDUINO_USB_MODE == 0)
-  #include "USB.h"
-  #include "USBMSC.h"
-  #include <SdFat.h>
-  #define JOHNNY_USB_MSC 1
-#else
-  #define JOHNNY_USB_MSC 0
-#endif
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
@@ -42,7 +30,8 @@ int16_t tunerSamples[2048];
 int16_t voiceInput[512], voiceOutput[512], voiceDelay[8192];
 size_t voiceDelayPos=0;
 uint32_t voicePhase=0;
-bool usbActive=false, usbHostEjected=false;
+bool usbActive=false;
+String usbCommandLine;
 int8_t synthBuffer[2048];
 const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
 String selectedFile;
@@ -57,40 +46,6 @@ const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
 const float ukeHz[] = {196.00f,261.63f,329.63f,392.00f};
 const char* ukeNames[] = {"G4","C4","E4","A4"};
 
-#if JOHNNY_USB_MSC
-SdFat32 usbSd;
-USBMSC msc;
-bool usbStarted=false;
-int32_t mscRead(uint32_t lba, uint32_t offset, void* buffer, uint32_t bufsize) {
-  if (!usbSd.card() || !buffer) return 0;
-  uint8_t sector[512], *out=(uint8_t*)buffer;
-  uint32_t done=0;
-  while(done<bufsize) {
-    if(!usbSd.card()->readSector(lba,sector)) return (int32_t)done;
-    uint32_t n=min((uint32_t)(512-offset),bufsize-done);
-    memcpy(out+done,sector+offset,n);
-    done+=n; lba++; offset=0;
-  }
-  return (int32_t)done;
-}
-int32_t mscWrite(uint32_t lba, uint32_t offset, uint8_t* buffer, uint32_t bufsize) {
-  if (!usbSd.card() || !buffer) return 0;
-  uint8_t sector[512];
-  uint32_t done=0;
-  while(done<bufsize) {
-    uint32_t n=min((uint32_t)(512-offset),bufsize-done);
-    if(offset!=0 || n!=512) if(!usbSd.card()->readSector(lba,sector)) return (int32_t)done;
-    memcpy(sector+offset,buffer+done,n);
-    if(!usbSd.card()->writeSector(lba,sector)) return (int32_t)done;
-    done+=n; lba++; offset=0;
-  }
-  return (int32_t)done;
-}
-bool mscStartStop(uint8_t, bool start, bool loadEject) {
-  if(loadEject) { usbHostEjected=!start; msc.mediaPresent(start); }
-  return true;
-}
-#endif
 
 }
 
@@ -310,51 +265,126 @@ void runVoiceChunk() {
   }
   M5Cardputer.Speaker.playRaw(voiceOutput,512,16000,false,1,0,true);
 }
-#if JOHNNY_USB_MSC
+String safeSdPath(String path) {
+  path.trim();
+  path.replace("\\","/");
+  if(!path.startsWith("/")) path="/"+path;
+  if(path.indexOf("..")>=0 || path.indexOf('\t')>=0 || path.indexOf('\n')>=0 || path.indexOf('\r')>=0) return "";
+  return path;
+}
+void usbReplyError(const char* reason) {
+  Serial.print("ERR\t"); Serial.println(reason);
+}
+void processUsbCommand(String line) {
+  line.trim();
+  if(line=="PING") { Serial.println("JOHNNY/1"); return; }
+  if(line=="EXIT") {
+    usbActive=false; screen=HOME; drawHome(); Serial.println("BYE"); return;
+  }
+  if(line.startsWith("LIST\t")) {
+    String path=safeSdPath(line.substring(5));
+    if(path.length()==0) { usbReplyError("PATH"); return; }
+    File dir=SD.open(path);
+    if(!dir || !dir.isDirectory()) { if(dir)dir.close(); usbReplyError("DIRECTORY"); return; }
+    File entry=dir.openNextFile();
+    while(entry) {
+      String name=String(entry.name());
+      int slash=name.lastIndexOf('/');
+      if(slash>=0) name=name.substring(slash+1);
+      if(name.length() && name!="System Volume Information") {
+        if(entry.isDirectory()) { Serial.print("DIR\t"); Serial.println(name); }
+        else { Serial.printf("FILE\t%lu\t",(unsigned long)entry.size()); Serial.println(name); }
+      }
+      entry.close(); entry=dir.openNextFile();
+    }
+    dir.close(); Serial.println("END"); return;
+  }
+  if(line.startsWith("GET\t")) {
+    String path=safeSdPath(line.substring(4));
+    if(path.length()==0) { usbReplyError("PATH"); return; }
+    File file=SD.open(path,FILE_READ);
+    if(!file || file.isDirectory()) { if(file)file.close(); usbReplyError("OPEN"); return; }
+    size_t size=file.size();
+    Serial.printf("DATA\t%lu\n",(unsigned long)size);
+    uint8_t buffer[512];
+    while(file.available()) {
+      int n=file.read(buffer,sizeof(buffer));
+      if(n<=0) break;
+      Serial.write(buffer,(size_t)n);
+    }
+    file.close(); Serial.println("END"); return;
+  }
+  if(line.startsWith("PUT\t")) {
+    int split=line.indexOf('\t',4);
+    if(split<0) { usbReplyError("FORMAT"); return; }
+    uint32_t size=(uint32_t)line.substring(4,split).toInt();
+    String path=safeSdPath(line.substring(split+1));
+    if(path.length()==0 || path=="/" || size>16UL*1024UL*1024UL) { usbReplyError("LIMIT"); return; }
+    if(SD.exists(path)) SD.remove(path);
+    File file=SD.open(path,FILE_WRITE);
+    if(!file) { usbReplyError("CREATE"); return; }
+    Serial.println("READY");
+    uint32_t received=0, lastByte=millis();
+    uint8_t buffer[512];
+    while(received<size && millis()-lastByte<120000UL) {
+      int available=Serial.available();
+      if(available<=0) { delay(1); continue; }
+      size_t n=(size_t)min((uint32_t)min(available,(int)sizeof(buffer)),size-received);
+      int got=Serial.read(buffer,n);
+      if(got>0) {
+        size_t written=file.write(buffer,(size_t)got);
+        received+=(uint32_t)written; lastByte=millis();
+        if(written!=(size_t)got) break;
+      }
+    }
+    file.flush(); file.close();
+    if(received==size) Serial.println("OK");
+    else { SD.remove(path); usbReplyError("INCOMPLETE"); }
+    return;
+  }
+  if(line.startsWith("DELETE\t")) {
+    String path=safeSdPath(line.substring(7));
+    if(path.length()==0 || path=="/") { usbReplyError("PATH"); return; }
+    if(SD.remove(path)) Serial.println("OK"); else usbReplyError("DELETE");
+    return;
+  }
+  usbReplyError("COMMAND");
+}
 bool beginUsbMode() {
   if(!sdReady) return false;
   if(audioStarted) { M5Cardputer.Speaker.stop(); audioStarted=false; }
   if(wavBuffer) { free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
-  SD.end(); sdReady=false; sdBus.end();
-  sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
-  if(!usbSd.cardBegin(SdSpiConfig(SD_CS,DEDICATED_SPI,SD_SCK_MHZ(20),&sdBus))) {
-    usbSd.end(); sdBus.end(); sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
-    sdReady=SD.begin(SD_CS,sdBus,20000000); return false;
-  }
-  msc.vendorID("JOHNNY"); msc.productID("CARDPUTER SD"); msc.productRevision("1.0");
-  msc.onRead(mscRead); msc.onWrite(mscWrite); msc.onStartStop(mscStartStop);
-  uint32_t sectors=(uint32_t)usbSd.card()->sectorCount();
-  if(!msc.begin(sectors,512)) {
-    usbSd.end(); sdBus.end(); sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
-    sdReady=SD.begin(SD_CS,sdBus,20000000); return false;
-  }
-  msc.mediaPresent(true); usbHostEjected=false;
-  if(!usbStarted) { USB.begin(); usbStarted=true; }
+  Serial.begin(115200);
+  usbCommandLine="";
   usbActive=true;
   return true;
 }
 void endUsbMode() {
-  msc.mediaPresent(false);
-  delay(80);
-  usbSd.end();
-  sdBus.end(); sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
-  sdReady=SD.begin(SD_CS,sdBus,20000000);
   usbActive=false;
+  Serial.flush();
 }
-#else
-bool beginUsbMode() { return false; }
-void endUsbMode() {}
-#endif
+void serialTransferTask() {
+  while(Serial.available()>0) {
+    char ch=(char)Serial.read();
+    if(ch=='\n') {
+      processUsbCommand(usbCommandLine);
+      usbCommandLine="";
+      if(!usbActive) return;
+    } else if(ch!='\r' && usbCommandLine.length()<256) {
+      usbCommandLine+=ch;
+    }
+  }
+}
 void drawUsbScreen(bool ok) {
-  header("USB DRIVE");
+  header("USB TRANSFER");
   auto &d=M5Cardputer.Display;
   if(ok) {
-    d.setTextColor(UI_CYAN,BG); d.setCursor(8,52); d.print("SD CARD EXPORTED");
-    d.setTextColor(WHITE,BG); d.setCursor(8,70); d.print("PC CAN READ / WRITE");
-    d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("EJECT BEFORE DISCONNECT");
+    d.setTextColor(UI_CYAN,BG); d.setCursor(8,52); d.print("USB SERIAL READY");
+    d.setTextColor(WHITE,BG); d.setCursor(8,70); d.print("OPEN JOHNNY TRANSFER PAGE");
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("SEND / RECEIVE SD FILES");
   } else {
-    d.setTextColor(UI_PINK,BG); d.setCursor(8,52); d.print("USB MSC UNAVAILABLE");
-    d.setTextColor(UI_MUTED,BG); d.setCursor(8,70); d.print("CHECK SD CARD / USB MODE");
+    d.setTextColor(UI_PINK,BG); d.setCursor(8,52); d.print("SD CARD NOT READY");
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,70); d.print("INSERT / CHECK MICROSD");
   }
   footer("ESC / '  RETURN TO JOHNNY");
 }
@@ -532,6 +562,7 @@ void loop() {
     }
   }
   if(screen==VOICE && !M5Cardputer.Speaker.isPlaying()) runVoiceChunk();
+  if(screen==USBMODE && usbActive) serialTransferTask();
 
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
