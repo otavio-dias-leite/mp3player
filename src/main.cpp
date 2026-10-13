@@ -9,7 +9,7 @@
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
-constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_CYAN = 0x6EFF, UI_MUTED = 0xB5B4;
+constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
 enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, NETWORK, USBMODE, ABOUT };
 Screen screen = HOME;
 SPIClass sdBus(FSPI);
@@ -37,6 +37,7 @@ String selectedFile;
 uint8_t* wavBuffer = nullptr;
 size_t wavLength = 0;
 bool audioStarted = false;
+uint32_t batteryLastDraw = 0;
 const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "WI-FI", "USB", "SYSTEM"};
 constexpr int APP_COUNT = 7;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
@@ -48,11 +49,31 @@ const char* ukeNames[] = {"G4","C4","E4","A4"};
 
 }
 
+int batteryPercent() {
+  return M5Cardputer.Power.getBatteryLevel();
+}
+void drawBatteryIndicator() {
+  auto &d=M5Cardputer.Display;
+  int level=batteryPercent();
+  d.fillRect(176,3,53,13,BG);
+  d.setTextSize(1);
+  d.setTextColor(UI_MUTED,BG);
+  d.setCursor(177,6);
+  if(level>=0) d.printf("%3d%%",constrain(level,0,100));
+  else d.print(" --%");
+  d.drawRoundRect(207,5,17,9,2,UI_LAVENDER);
+  d.fillRect(224,8,2,3,UI_LAVENDER);
+  if(level>=0) {
+    int width=constrain(level,0,100)*11/100;
+    if(width>0) d.fillRect(210,7,width,5,level<=20?UI_PINK:UI_LAVENDER);
+  }
+}
 void header(const char* title) {
   auto &d=M5Cardputer.Display;
   d.fillScreen(BG);
   d.setTextSize(1);
   d.setTextColor(UI_PINK,BG); d.setCursor(7,5); d.print("JOHNNY");
+  drawBatteryIndicator();
   d.drawFastHLine(7,18,226,UI_PURPLE);
   d.setTextSize(2); d.setTextColor(WHITE,BG); d.setCursor(8,25); d.print(title);
   d.setTextSize(1);
@@ -65,7 +86,7 @@ void footer(const char* s="ESC / '  BACK") {
 void drawHome() {
   header("JOHNNY");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_PINK,BG); d.setCursor(8,29); d.print("WAKE THE FUCK UP, SAMURAI.");
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,29); d.print("wake fuck up samurai");
   const int xs[3]={5,83,161}, ys[3]={43,68,93};
   for(int i=0;i<APP_COUNT;i++){
     int col=i%3,row=i/3,x=xs[col],y=ys[row]; bool on=i==selected;
@@ -86,8 +107,8 @@ void splash() {
   delay(350);
   for(int i=0;i<10;i++) {
     int y=random(43,87), x=random(12,45), w=random(70,205);
-    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_CYAN);
-    d.setTextColor(i%2?UI_PINK:UI_CYAN,BG);
+    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_PURPLE);
+    d.setTextColor(i%2?UI_PINK:UI_PURPLE,BG);
     d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
     delay(32);
   }
@@ -107,7 +128,7 @@ void pianoScreen() {
     d.setTextColor(BG,key); d.setCursor(x+5,74); d.print(labels[i]);
     d.setCursor(x+10,88); d.printf("%c","QWERTYU"[i]);
   }
-  d.setTextColor(UI_CYAN,BG); d.setCursor(8,108); d.print("- / + VOLUME   [ / ] OCTAVE");
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,108); d.print("- / + VOLUME   [ / ] OCTAVE");
   footer(", . / ; ARROWS   UP/DOWN TIMBRE");
 }
 void playNote(char c) {
@@ -118,6 +139,8 @@ void playNote(char c) {
   int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
   float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
   M5Cardputer.Speaker.stop();
+  M5Cardputer.Speaker.setVolume(255);
+  const float outputGain=(float)pianoVolume*1.27f;
   for(int i=0;i<2048;i++){
     float phase=6.2831853f*hz*((float)i/22050.0f);
     float v=sinf(phase);
@@ -125,7 +148,7 @@ void playNote(char c) {
     else if(pianoEffect==2)v=tanhf((sinf(phase)+0.55f*sinf(phase*2)+0.28f*sinf(phase*3))*5.0f);
     else if(pianoEffect==3)v=(v>=0)?0.72f:-0.72f;
     float envelope=1.0f-(float)i/2048.0f; envelope*=envelope;
-    v*=envelope; synthBuffer[i]=(int8_t)(v*(float)pianoVolume);
+    v*=envelope; synthBuffer[i]=(int8_t)constrain((int)lroundf(v*outputGain),-127,127);
   }
   M5Cardputer.Speaker.playRaw(synthBuffer,2048,22050,false,1,0,true);
 }
@@ -184,10 +207,10 @@ void tunerScreen() {
   d.setTextColor(tunerInstrument==1?UI_PINK:UI_MUTED,BG); d.setCursor(152,43); d.print("UKULELE");
   if(tunerMidi>=0) {
     int note=((tunerMidi%12)+12)%12, octave=tunerMidi/12-1;
-    d.setTextSize(3); d.setTextColor(UI_CYAN,BG); d.setCursor(9,61); d.printf("%s%d",noteNames[note],octave);
+    d.setTextSize(3); d.setTextColor(UI_LAVENDER,BG); d.setCursor(9,61); d.printf("%s%d",noteNames[note],octave);
     d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(146,65); d.printf("%.1f Hz",tunerFrequency);
-    d.setTextColor(fabsf(tunerCents)<5?UI_CYAN:UI_PINK,BG); d.setCursor(146,82); d.printf("%+.0f cents",tunerCents);
-    d.drawFastHLine(16,101,208,UI_PURPLE); d.drawFastVLine(120,96,11,UI_CYAN);
+    d.setTextColor(fabsf(tunerCents)<5?UI_LAVENDER:UI_PINK,BG); d.setCursor(146,82); d.printf("%+.0f cents",tunerCents);
+    d.drawFastHLine(16,101,208,UI_PURPLE); d.drawFastVLine(120,96,11,UI_LAVENDER);
     int marker=120+(int)constrain(tunerCents,-50.0f,50.0f)*2;
     d.fillCircle(marker,101,3,UI_PINK);
   } else {
@@ -203,7 +226,7 @@ void drawNetworkScreen() {
   header("WI-FI");
   auto &d=M5Cardputer.Display;
   if(wifiConfigStage==1 || wifiConfigStage==2) {
-    d.setTextColor(UI_CYAN,BG); d.setCursor(8,47);
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,47);
     d.print(wifiConfigStage==1?"NETWORK NAME":"PASSWORD");
     d.setTextColor(WHITE,BG); d.setCursor(8,66);
     String shown=wifiEntry;
@@ -215,7 +238,7 @@ void drawNetworkScreen() {
     return;
   }
   if(WiFi.status()==WL_CONNECTED) {
-    d.setTextColor(UI_CYAN,BG); d.setCursor(8,48); d.print("CONNECTED");
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,48); d.print("CONNECTED");
     d.setTextColor(WHITE,BG); d.setCursor(8,66); d.print(WiFi.SSID());
     d.setTextColor(UI_MUTED,BG); d.setCursor(8,82); d.print(WiFi.localIP().toString());
     d.setCursor(8,98); d.printf("SIGNAL %d dBm",WiFi.RSSI());
@@ -361,7 +384,7 @@ void drawUsbScreen(bool ok) {
   header("USB TRANSFER");
   auto &d=M5Cardputer.Display;
   if(ok) {
-    d.setTextColor(UI_CYAN,BG); d.setCursor(8,52); d.print("USB SERIAL READY");
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,52); d.print("USB SERIAL READY");
     d.setTextColor(WHITE,BG); d.setCursor(8,70); d.print("OPEN JOHNNY TRANSFER PAGE");
     d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("SEND / RECEIVE SD FILES");
   } else {
@@ -407,7 +430,7 @@ void scanDirectory(bool musicMode=false) {
 void drawFiles(bool musicMode=false) {
   header(musicMode?"MUSIC LIBRARY":"SD EXPLORER");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_CYAN,BG); d.setCursor(8,42);
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,42);
   String path=currentPath; if(path.length()>27)path="..."+path.substring(path.length()-24);
   d.print(path);
   if(!sdReady) {
@@ -424,7 +447,7 @@ void drawFiles(bool musicMode=false) {
     int y=56+shown*12;
     bool on=i==selected;
     d.fillRect(8,y-1,224,11,on?PANEL:BG);
-    d.setTextColor(on?WHITE:(entryIsDir[i]?UI_CYAN:UI_MUTED),on?PANEL:BG);
+    d.setTextColor(on?WHITE:(entryIsDir[i]?UI_LAVENDER:UI_MUTED),on?PANEL:BG);
     d.setCursor(12,y);
     String n=entries[i]; if(n.length()>29)n=n.substring(0,26)+"...";
     d.printf("%c %s%s",on?'>':' ',n.c_str(),entryIsDir[i]?"/":"");
@@ -502,7 +525,8 @@ void openApp() {
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
       M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");
       M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");
-      M5Cardputer.Display.setCursor(8,101); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
+      M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
+      M5Cardputer.Display.setCursor(8,105); M5Cardputer.Display.printf("BATTERY: %d%%",constrain(batteryPercent(),0,100));
       footer(); break;
   }
 }
@@ -529,6 +553,10 @@ void setup() {
 }
 void loop() {
   M5Cardputer.update();
+  if(millis()-batteryLastDraw>=5000) {
+    batteryLastDraw=millis();
+    if(screen!=USBMODE) drawBatteryIndicator();
+  }
   if(audioStarted && !M5Cardputer.Speaker.isPlaying()) {
     audioStarted=false;
     if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}
@@ -586,8 +614,8 @@ if(usbActive) endUsbMode();
     else if(k.right||c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(k.up||c==';'){pianoEffect=(pianoEffect+3)%4;pianoScreen();}
     else if(k.down||c=='.'){pianoEffect=(pianoEffect+1)%4;pianoScreen();}
-    else if(c=='-'){pianoVolume=max(20,pianoVolume-10);pianoScreen();}
-    else if(c=='='||c=='+'){pianoVolume=min(120,pianoVolume+10);pianoScreen();}
+    else if(c=='-'){pianoVolume=max(0,pianoVolume-10);pianoScreen();}
+    else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
     else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c==']'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(c)playNote(c);
