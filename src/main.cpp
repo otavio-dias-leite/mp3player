@@ -27,11 +27,12 @@ uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
 int16_t tunerSamples[2048];
-int16_t voiceInput[512], voiceOutput[512], voiceDelay[8192];
-size_t voiceDelayPos=0;
+int16_t voiceSamples[16000];
 uint32_t voicePhase=0;
 bool usbActive=false;
 String usbCommandLine;
+bool micStarted=false;
+uint32_t micWarmupUntil=0;
 int8_t synthBuffer[2048];
 const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
 String selectedFile;
@@ -130,14 +131,21 @@ void playNote(char c) {
   }
   M5Cardputer.Speaker.playRaw(synthBuffer,2048,22050,false,1,0,true);
 }
+void stopMicCapture() {
+  if(micStarted) M5Cardputer.Mic.end();
+  micStarted=false; micWarmupUntil=0;
+}
 bool captureMic(int16_t* dst, size_t count, uint32_t timeoutMs=260) {
-  if(!M5Cardputer.Mic.begin()) return false;
-  bool queued=M5Cardputer.Mic.record(dst,count,16000,false);
-  if(!queued) { M5Cardputer.Mic.end(); return false; }
+  if(!micStarted) {
+    if(!M5Cardputer.Mic.begin()) return false;
+    micStarted=true; micWarmupUntil=millis()+1000;
+  }
+  if((int32_t)(millis()-micWarmupUntil)<0) return false;
+  if(!M5Cardputer.Mic.record(dst,count,16000,false)) return false;
   uint32_t started=millis();
   while(M5Cardputer.Mic.isRecording() && millis()-started<timeoutMs) delay(1);
   bool complete=!M5Cardputer.Mic.isRecording();
-  M5Cardputer.Mic.end();
+  if(!complete) stopMicCapture();
   return complete;
 }
 float detectPitch(const int16_t* samples, size_t count, float* rmsOut=nullptr) {
@@ -239,31 +247,33 @@ void drawVoiceScreen() {
   const char* names[]={"CLEAN","ECHO","ROBOT","FUZZ"};
   d.setTextColor(UI_PINK,BG); d.setCursor(8,49); d.print(names[voiceEffect]);
   d.setTextColor(UI_CYAN,BG); d.setCursor(8,68); d.printf("GAIN %d",voiceGain);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,87); d.print("LIVE MIC -> SPEAKER");
-  d.setCursor(8,101); d.print("HALF-DUPLEX MONITOR");
-  footer(",./; FX   -/+ GAIN");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,87); d.print("ENTER: RECORD 1 SEC");
+  d.setCursor(8,101); d.print("FX + PLAYBACK");
+  footer(",./; FX  -/+ GAIN  ENTER REC");
 }
-void runVoiceChunk() {
-  if(M5Cardputer.Speaker.isPlaying()) return;
-  if(!captureMic(voiceInput,512,180)) return;
-  M5Cardputer.Speaker.setVolume(170);
-  for(size_t i=0;i<512;i++) {
-    int32_t dry=(int32_t)voiceInput[i]*voiceGain, wet=dry;
-    if(voiceEffect==1) {
-      int32_t delayed=voiceDelay[voiceDelayPos];
-      wet=dry+(delayed*55)/100;
-      voiceDelay[voiceDelayPos]=(int16_t)constrain(dry+(delayed*35)/100,-32768,32767);
-      voiceDelayPos=(voiceDelayPos+1)%8192;
-    } else if(voiceEffect==2) {
-      float mod=(voicePhase++%64)<32?1.0f:-1.0f;
-      wet=(int32_t)(dry*mod*0.72f);
-    } else if(voiceEffect==3) {
-      float x=constrain((float)dry/12000.0f,-5.0f,5.0f);
-      wet=(int32_t)(tanhf(x)*22000.0f);
-    }
-    voiceOutput[i]=(int16_t)constrain(wet,-32768,32767);
+bool recordVoiceTake() {
+  if(M5Cardputer.Speaker.isPlaying()) return false;
+  stopMicCapture();
+  if(!M5Cardputer.Mic.begin()) return false;
+  delay(1000); // ES8311 microphone warm-up.
+  if(!M5Cardputer.Mic.record(voiceSamples,16000,16000,false)) {
+    M5Cardputer.Mic.end(); return false;
   }
-  M5Cardputer.Speaker.playRaw(voiceOutput,512,16000,false,1,0,true);
+  uint32_t started=millis();
+  while(M5Cardputer.Mic.isRecording() && millis()-started<1400) delay(1);
+  bool complete=!M5Cardputer.Mic.isRecording();
+  M5Cardputer.Mic.end();
+  if(!complete) return false;
+  const int delaySamples=3600;
+  for(int i=0;i<16000;i++) {
+    float dry=(float)voiceSamples[i]*(float)voiceGain, wet=dry;
+    if(voiceEffect==1 && i>=delaySamples) wet=dry+(float)voiceSamples[i-delaySamples]*0.48f;
+    else if(voiceEffect==2) wet=dry*(0.72f+0.28f*sinf(6.2831853f*5.0f*(float)i/16000.0f));
+    else if(voiceEffect==3) wet=tanhf(dry/12000.0f)*22000.0f;
+    voiceSamples[i]=(int16_t)constrain((int)wet,-32768,32767);
+  }
+  M5Cardputer.Speaker.setVolume(190);
+  return M5Cardputer.Speaker.playRaw(voiceSamples,16000,16000,false,1,0,true);
 }
 bool beginUsbMode();
 void drawUsbScreen(bool ok);
@@ -456,7 +466,7 @@ void drawFiles(bool musicMode=false) {
     shown++;
   }
   if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
-  footer("ARROWS MOVE  ENTER OPEN  BACKSPACE UP");
+  footer("ARROWS MOVE  ENTER OPEN");
 }
 bool startWav(const String &path) {
   if (wavBuffer) { M5Cardputer.Speaker.stop(); free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
@@ -521,7 +531,7 @@ void openApp() {
     case 2:screen=MUSIC;currentPath="/";scanDirectory(true);drawFiles(true);break;
     case 3:screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
     case 4:screen=GALLERY;header("PHOTO VIEWER");M5Cardputer.Display.setTextColor(UI_MUTED,BG);M5Cardputer.Display.setCursor(8,61);M5Cardputer.Display.print("JPEG DECODER PENDING");footer();break;
-    case 5:screen=VOICE;voiceDelayPos=0;memset(voiceDelay,0,sizeof(voiceDelay));drawVoiceScreen();break;
+    case 5:screen=VOICE;drawVoiceScreen();break;
     case 6:screen=NETWORK;wifiConfigStage=0;drawNetworkScreen();break;
     case 7:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     default:
@@ -569,7 +579,7 @@ void loop() {
       tunerScreen();
     }
   }
-  if(screen==VOICE && !M5Cardputer.Speaker.isPlaying()) runVoiceChunk();
+  
   if(Serial.available()>0) serialTransferTask();
 
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
@@ -584,12 +594,11 @@ void loop() {
       if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
       else {screen=HOME;drawHome();}
     } else if(screen==USBMODE) {
-#if JOHNNY_USB_MSC
-      if(usbActive) endUsbMode();
-#endif
+if(usbActive) endUsbMode();
       screen=HOME;drawHome();
     } else {
-      if(screen==VOICE) M5Cardputer.Speaker.stop();
+      if(screen==VOICE) { M5Cardputer.Speaker.stop(); stopMicCapture(); }
+      if(screen==TUNER) stopMicCapture();
       wifiConfigStage=0; screen=HOME;drawHome();
     }
     delay(8); return;
@@ -627,6 +636,7 @@ void loop() {
     else if(k.down||c=='.'){voiceEffect=(voiceEffect+1)%4;drawVoiceScreen();}
     else if(c=='-'){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
     else if(c=='='){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
+    else if(k.enter){recordVoiceTake();drawVoiceScreen();}
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
       if(k.enter) startNetworkSetup();
