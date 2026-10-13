@@ -147,7 +147,7 @@ private:
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT };
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT };
 Screen eqReturnScreen=HOME;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
@@ -294,16 +294,25 @@ void footer(const char* s="ESC / '  BACK") {
   d.setTextColor(UI_MUTED,BG); d.setCursor(8,124); d.print(s);
 }
 void drawHome() {
-  header("JOHNNY");
-  auto &d=M5Cardputer.Display;
-  const int xs[3]={5,83,161},ys[4]={40,59,78,97};
-  for(int i=0;i<APP_COUNT;i++){
-    int col=i%3,row=i/3,x=xs[col],y=ys[row];bool on=i==selected;
-    uint16_t fill=on?0x4810:PANEL;
-    d.fillRoundRect(x,y,73,17,3,fill);d.drawRoundRect(x,y,73,17,3,on?UI_PINK:UI_PURPLE);
-    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+5,y+5);d.printf("%s",apps[i]);
-  }
-  footer(", . / ;  ARROWS  ENTER");
+  header("JOHNNY"); auto& d=M5Cardputer.Display; const int xs[3]={5,83,161};
+  for(int i=0;i<APP_COUNT;i++){int x=xs[i],y=58;bool on=i==selected;uint16_t fill=on?0x4810:PANEL;
+    d.fillRoundRect(x,y,73,30,4,fill);d.drawRoundRect(x,y,73,30,4,on?UI_PINK:UI_PURPLE);
+    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+7,y+11);d.print(apps[i]);}
+  footer("LEFT/RIGHT SELECT  ENTER OPEN");
+}
+void drawCategoryMenu(){
+  bool music=screen==MUSICMENU,system=screen==SYSTEMMENU;
+  const char* title=music?"MUSIC":(system?"SYSTEM":"GAMES");
+  const char** items=music?musicMenuItems:(system?systemMenuItems:gamesMenuItems);
+  int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
+  header(title);auto& d=M5Cardputer.Display;
+  for(int i=0;i<count;i++){int y=42+i*12;bool active=i==selected;uint16_t bg=active?PANEL:BG;
+    d.fillRoundRect(7,y-2,225,11,2,bg);d.setTextColor(active?WHITE:UI_MUTED,bg);d.setCursor(12,y);d.printf("%c %s",active?'>':' ',items[i]);}
+  footer("UP/DOWN SELECT  ENTER OPEN  ESC BACK");
+}
+void showUnavailable(const char* title,const char* message){
+  screen=ABOUT;header(title);auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
+  d.setCursor(8,52);d.print(message);footer("ESC / ' BACK");
 }
 void splash() {
   auto &d=M5Cardputer.Display;
@@ -347,8 +356,7 @@ void playNote(char c) {
   const int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
   const float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
   if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
-  M5Cardputer.Speaker.stop();M5Cardputer.Speaker.setVolume(255);audioEqualizer.reset();
-  const float gain=(float)pianoVolume*1.27f;
+  M5Cardputer.Speaker.stop();M5Cardputer.Speaker.setVolume(255);audioEqualizer.reset();  const float gain=(float)pianoVolume*1.27f;
   const float guitarDecay=0.30f+0.34f*(82.0f/max(hz,82.0f));
   for(size_t i=0;i<8192;i++) {
     const float phase=6.2831853f*hz*((float)i/22050.0f);
@@ -697,8 +705,7 @@ void scanDirectory(bool musicMode=false) {
     f.close(); f=dir.openNextFile();
   }
   dir.close();
-  for(int i=0;i<entryCount-1;i++) for(int j=i+1;j<entryCount;j++)
-    if((!entryIsDir[i] && entryIsDir[j]) || (entryIsDir[i]==entryIsDir[j] && entries[j].compareTo(entries[i])<0)) {
+  for(int i=0;i<entryCount-1;i++) for(int j=i+1;j<entryCount;j++)    if((!entryIsDir[i] && entryIsDir[j]) || (entryIsDir[i]==entryIsDir[j] && entries[j].compareTo(entries[i])<0)) {
       String t=entries[i]; entries[i]=entries[j]; entries[j]=t;
       bool b=entryIsDir[i]; entryIsDir[i]=entryIsDir[j]; entryIsDir[j]=b;
     }
@@ -1047,7 +1054,6 @@ void moveMusicTrack(int direction) {
     }
   }
 }
-
 void openFile(bool musicMode) {
   if(!sdReady || selected<0 || selected>=entryCount) return;
   String full=currentPath;
@@ -1071,7 +1077,26 @@ void openFile(bool musicMode) {
 void drawEqScreen();
 void seedLife();
 void drawLife();
-void openApp() {
+void openApp(){
+  if(screen==HOME){selected=0;screen=MUSICMENU;drawCategoryMenu();return;}
+  int item=selected;Screen menu=screen;
+  if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
+  screen=HOME;
+  if(menu==MUSICMENU){
+    if(item==5){showUnavailable("MIC RECORDER","Microphone recording is not integrated.");return;}
+    const int map[]={0,1,2,3,7};selected=map[item];
+  }else if(menu==SYSTEMMENU){
+    if(item==3){showUnavailable("BLUETOOTH","Bluetooth pairing is not integrated.");return;}
+    if(item==4){showUnavailable("FIRMWARE UPDATE","Internet updater is not integrated yet.");return;}
+    if(item==5){showUnavailable("APP CATALOG","GitHub app installer is not integrated.");return;}
+    const int map[]={4,6,5};selected=map[item];
+  }else{
+    if(item==1){showUnavailable("DOOM 1993","Native DOOM port is not integrated.");return;}
+    selected=8;
+  }
+  openLegacyApp();
+}
+void openLegacyApp() {
   switch(selected) {
     case 0: stopMicCapture(); stopAudio(); screen=PIANO; pianoScreen(); break;
     case 1:
@@ -1306,6 +1331,7 @@ void loop() {
     screenSaverActive=!screenSaverActive;
     if(screenSaverActive) M5Cardputer.Display.fillScreen(BLACK);
     else if(screen==HOME) drawHome();
+    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) drawCategoryMenu();
     else if(screen==PIANO) pianoScreen();
     else if(screen==TUNER) tunerScreen();
     else if(screen==FILES) drawFiles(false);
@@ -1336,7 +1362,8 @@ void loop() {
 
   bool back=(c==0x27 || c=='`' || c=='~');
   if(back) {
-    if(screen==EQSCREEN){
+    if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU){screen=HOME;selected=0;drawHome();}
+    else if(screen==EQSCREEN){
       screen=eqReturnScreen;
       if(screen==HOME)drawHome();
       else if(screen==PIANO)pianoScreen();
@@ -1362,16 +1389,16 @@ if(usbActive) endUsbMode();
     delay(8); return;
   }
 
-  if(screen==HOME) {
+  if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) {
+    int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
+    if(k.enter){openApp();delay(8);return;}
+    if(c==';')selected=max(0,selected-1);
+    else if(c=='.')selected=min(count-1,selected+1);
+    drawCategoryMenu();
+  } else if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
-    int row=selected/3,col=selected%3;
-    const int rows=(APP_COUNT+2)/3;
-    if(c==';')row=(row+rows-1)%rows;
-    else if(c=='.')row=(row+1)%rows;
-    else if(c==',')col=(col+2)%3;
-    else if(c=='/')col=(col+1)%3;
-    int candidate=row*3+col;if(candidate>=APP_COUNT)candidate=APP_COUNT-1;
-    selected=candidate;
+    if(c==',')selected=(selected+APP_COUNT-1)%APP_COUNT;
+    else if(c=='/')selected=(selected+1)%APP_COUNT;
     drawHome();
   } else if(screen==PIANO) {
     if(c=='e'||c=='E'){eqReturnScreen=PIANO;screen=EQSCREEN;drawEqScreen();}
@@ -1397,8 +1424,7 @@ if(usbActive) endUsbMode();
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
       else if(c==';') moveMusicTrack(-1);
       else if(c=='.') moveMusicTrack(1);
-    } else {
-      if(c=='e'||c=='E'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
+    } else {      if(c=='e'||c=='E'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
       else if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
       else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
