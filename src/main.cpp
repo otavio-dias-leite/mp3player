@@ -116,6 +116,7 @@ volatile bool audioIsRadio = false;
 SemaphoreHandle_t audioMutex = nullptr;
 volatile bool audioTaskEnded = false;
 volatile bool audioTaskEndedWasRadio = false;
+volatile bool audioTaskReady = false;
 constexpr int RADIO_STATION_COUNT=4;
 const char* radioStationNames[RADIO_STATION_COUNT]={"RADIO PARADISE","GROOVE SALAD","DRONE ZONE","SPACE STATION"};
 const char* radioStationUrls[RADIO_STATION_COUNT]={
@@ -666,7 +667,12 @@ AudioGenerator* createAudioDecoder(const String& extension) {
 }
 bool startAudioSource(AudioFileSource* source, const String& title, const String& extension, bool radio) {
   if(!source) { audioStatusMessage="SOURCE ERROR"; return false; }
-  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  if(!audioTaskReady || !audioMutex) {
+    source->close(); delete source;
+    audioStatusMessage="AUDIO TASK UNAVAILABLE";
+    return false;
+  }
+  xSemaphoreTake(audioMutex,portMAX_DELAY);
   stopAudioLocked();
   audioRawSource=source;
   audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,8192);
@@ -792,6 +798,7 @@ void serviceAudio() {
 }
 void audioTask(void* parameter) {
   (void)parameter;
+  audioTaskReady=true;
   for(;;) {
     if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(50))==pdTRUE) {
       if(audioStarted && !audioPaused && audioDecoder) {
@@ -995,7 +1002,7 @@ void setup() {
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
   refreshBatteryCache(true);
-  if(audioMutex) xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",8192,nullptr,3,nullptr,1);
+  if(audioMutex) xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,3,nullptr,1);
   splash(); selected=0; drawHome();
 }
 void loop() {
