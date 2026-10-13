@@ -526,7 +526,7 @@ void openApp() {
       M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");
       M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");
       M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
-      M5Cardputer.Display.setCursor(8,105); M5Cardputer.Display.printf("BATTERY: %d%%",constrain(batteryPercent(),0,100));
+      M5Cardputer.Display.setCursor(8,105); int battery=batteryPercent(); if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: --");
       footer(); break;
   }
 }
