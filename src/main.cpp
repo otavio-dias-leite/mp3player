@@ -798,8 +798,10 @@ void stopAudio() {
   if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
   stopAudioLocked();  audioTaskEnded=false;
   if(audioMutex) xSemaphoreGive(audioMutex);
-  // Let the SD writer finish the WAV header before another app accesses the card.  uint32_t started=millis();
-  while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);}
+  // Let the SD writer finish the WAV header before another app accesses the card.
+  uint32_t started=millis();
+  while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);
+}
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3();
   if(extension=="wav") return new AudioGeneratorWAV();
@@ -1096,6 +1098,8 @@ void stopMicRecording();
 void serviceMicRecorder();
 void seedLife();
 void drawLife();
+bool loadLife();
+void openLegacyApp();
 void openApp(){
   if(screen==HOME){screen=selected==0?MUSICMENU:(selected==1?SYSTEMMENU:GAMESMENU);selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
@@ -1582,3 +1586,6 @@ if(usbActive) endUsbMode();
       else if(c && isprint((unsigned char)c) && wifiEntry.length()<63) {wifiEntry+=c;drawNetworkScreen();}
     }
   } else if(screen==USBMODE) {
+    // USB transfer is serviced through the serial protocol above.
+  }
+}
