@@ -6,11 +6,66 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <ctype.h>
+#include <AudioOutput.h>
+#include <AudioFileSourceSD.h>
+#include <AudioFileSourceBuffer.h>
+#include <AudioFileSourceICYStream.h>
+#include <AudioGeneratorMP3.h>
+#include <AudioGeneratorWAV.h>
+#include <AudioGeneratorFLAC.h>
+#include <AudioGeneratorAAC.h>
+#include <AudioGeneratorOpus.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
+#include <freertos/task.h>
+
+
+class JohnnyAudioOutput final : public AudioOutput {
+public:
+  explicit JohnnyAudioOutput(m5::Speaker_Class* speaker) : speaker_(speaker) {}
+  bool begin() override { return speaker_ != nullptr; }
+  bool ConsumeSample(int16_t sample[2]) override {
+    if(!speaker_) return false;
+    if(bufferIndex_ >= kBufferSamples) {
+      flush();
+      return false;
+    }
+    const int32_t l=Amplify(sample[LEFTCHANNEL]);
+    const int32_t r=Amplify(sample[RIGHTCHANNEL]);
+    buffers_[bufferSlot_][bufferIndex_++]=(int16_t)((l+r)/2);
+    return true;
+  }
+  void flush() override {
+    if(!speaker_ || bufferIndex_==0) return;
+    uint32_t started=millis();
+    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+    if(speaker_->isPlaying()) speaker_->stop();
+    speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false);
+    bufferSlot_=(bufferSlot_+1)%3;
+    bufferIndex_=0;
+  }
+  bool stop() override {
+    flush();
+    if(speaker_) {
+      uint32_t started=millis();
+      while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+      if(speaker_->isPlaying()) speaker_->stop();
+    }
+    return true;
+  }
+private:
+  static constexpr size_t kBufferSamples=1536;
+  m5::Speaker_Class* speaker_=nullptr;
+  int16_t buffers_[3][kBufferSamples]{};
+  size_t bufferIndex_=0;
+  uint8_t bufferSlot_=0;
+};
+
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, NETWORK, USBMODE, ABOUT };
+enum Screen : uint8_t { HOME, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, ABOUT };
 Screen screen = HOME;
 SPIClass sdBus(FSPI);
 bool sdReady = false;
@@ -18,7 +73,19 @@ String currentPath = "/";
 String entries[48];
 bool entryIsDir[48];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
-int pianoOctave=0,pianoEffect=0,pianoVolume=85;
+int pianoOctave=0,pianoEffect=4,pianoVolume=85;
+bool musicNowPlaying=false;
+int radioSelected=0;
+bool radioEditingUrl=false;
+String radioEntry;
+String radioMessage="SELECT A STATION";
+String audioStatusMessage="STOPPED";
+String audioNowTitle;
+int audioVolume=14;
+AudioFileSource* audioRawSource=nullptr;
+AudioFileSourceBuffer* audioInputBuffer=nullptr;
+AudioGenerator* audioDecoder=nullptr;
+JohnnyAudioOutput* audioOutput=nullptr;
 Preferences preferences;
 String savedSsid, savedPassword, wifiEntry;
 uint8_t wifiConfigStage=0;
@@ -31,20 +98,41 @@ bool wifiScanPending=false;
 uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
-int16_t tunerSamples[2048];
+int16_t tunerSamples[3072];
+float tunerFilteredFrequency=0.0f;
+bool tunerHasSignal=false;
+uint32_t tunerLastSignalAt=0;
 bool usbActive=false;
 String usbCommandLine;
 bool micStarted=false;
 uint32_t micWarmupUntil=0;
-int8_t synthBuffer[2048];
-const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
+int8_t synthBuffer[8192];
+const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE","GUITAR"};
 String selectedFile;
-uint8_t* wavBuffer = nullptr;
-size_t wavLength = 0;
-bool audioStarted = false;
+volatile bool audioStarted = false;
+volatile bool audioPaused = false;
+volatile bool audioIsRadio = false;
+SemaphoreHandle_t audioMutex = nullptr;
+volatile bool audioTaskEnded = false;
+volatile bool audioTaskEndedWasRadio = false;
+volatile bool audioTaskReady = false;
+constexpr int RADIO_STATION_COUNT=4;
+const char* radioStationNames[RADIO_STATION_COUNT]={"RADIO PARADISE","GROOVE SALAD","DRONE ZONE","SPACE STATION"};
+const char* radioStationUrls[RADIO_STATION_COUNT]={
+  "http://stream-tx1.radioparadise.com/mp3-128",
+  "http://ice5.somafm.com/groovesalad-128-mp3",
+  "http://ice5.somafm.com/dronezone-128-mp3",
+  "http://ice5.somafm.com/spacestation-128-mp3"
+};
 uint32_t batteryLastDraw = 0;
-const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "WI-FI", "USB", "SYSTEM"};
-constexpr int APP_COUNT = 7;
+uint32_t batteryLastSample = 0;
+int batteryCachedPercent = -1;
+int16_t batteryCachedMillivolts = -1;
+bool batteryCachedCharging = false;
+bool batteryCacheReady = false;
+bool screenSaverActive = false;
+const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "RADIO", "FILES", "WI-FI", "USB", "SYSTEM"};
+constexpr int APP_COUNT = 8;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
@@ -54,9 +142,24 @@ const char* ukeNames[] = {"G4","C4","E4","A4"};
 
 }
 
-int batteryPercent() { return M5Cardputer.Power.getBatteryLevel(); }
-int16_t batteryMillivolts() { return M5Cardputer.Power.getBatteryVoltage(); }
-bool batteryCharging() { return M5Cardputer.Power.isCharging()==m5::Power_Class::is_charging; }
+void refreshBatteryCache(bool force=false) {
+  if(!force && batteryCacheReady && millis()-batteryLastSample<30000UL) return;
+  bool chargingNow=M5Cardputer.Power.isCharging()==m5::Power_Class::is_charging;
+  int level=M5Cardputer.Power.getBatteryLevel();
+  int16_t mv=M5Cardputer.Power.getBatteryVoltage();
+  if(level>=0) {
+    level=constrain(level,0,100);
+    if(!chargingNow && batteryCacheReady && batteryCachedPercent>=0) level=min(level,batteryCachedPercent);
+    batteryCachedPercent=level;
+  }
+  if(mv>0) batteryCachedMillivolts=mv;
+  batteryCachedCharging=chargingNow;
+  batteryLastSample=millis();
+  batteryCacheReady=true;
+}
+int batteryPercent() { refreshBatteryCache(); return batteryCachedPercent; }
+int16_t batteryMillivolts() { refreshBatteryCache(); return batteryCachedMillivolts; }
+bool batteryCharging() { refreshBatteryCache(); return batteryCachedCharging; }
 void drawBatteryIndicator() {
   auto &d=M5Cardputer.Display;
   int level=batteryPercent();
@@ -143,23 +246,35 @@ void pianoScreen() {
 void playNote(char c) {
   const char* keys="qwertyu";
   const char* pos=strchr(keys,(char)tolower((unsigned char)c));
-  if(!pos)return;
+  if(!pos) return;
   const int scale[7]={0,2,4,5,7,9,11};
-  int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
-  float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
+  const int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
+  const float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
   M5Cardputer.Speaker.stop();
   M5Cardputer.Speaker.setVolume(255);
-  const float outputGain=(float)pianoVolume*1.27f;
-  for(int i=0;i<2048;i++){
-    float phase=6.2831853f*hz*((float)i/22050.0f);
+  const float gain=(float)pianoVolume*1.27f;
+  const float guitarDecay=0.30f+0.34f*(82.0f/max(hz,82.0f));
+  for(size_t i=0;i<8192;i++) {
+    const float phase=6.2831853f*hz*((float)i/22050.0f);
     float v=sinf(phase);
-    if(pianoEffect==1)v=tanhf(v*3.8f)/tanhf(3.8f);
-    else if(pianoEffect==2)v=tanhf((sinf(phase)+0.55f*sinf(phase*2)+0.28f*sinf(phase*3))*5.0f);
-    else if(pianoEffect==3)v=(v>=0)?0.72f:-0.72f;
-    float envelope=1.0f-(float)i/2048.0f; envelope*=envelope;
-    v*=envelope; synthBuffer[i]=(int8_t)constrain((int)lroundf(v*outputGain),-127,127);
+    if(pianoEffect==1) {
+      v=tanhf(v*3.8f)/tanhf(3.8f);
+    } else if(pianoEffect==2) {
+      v=tanhf((sinf(phase)+0.55f*sinf(phase*2.0f)+0.28f*sinf(phase*3.0f))*5.0f);
+    } else if(pianoEffect==3) {
+      v=(v>=0.0f)?0.72f:-0.72f;
+    } else if(pianoEffect==4) {
+      // Plucked-string patch: a short pick transient and decaying harmonics.
+      const float body=sinf(phase)+0.42f*sinf(phase*2.0f)+0.18f*sinf(phase*3.0f)+0.07f*sinf(phase*4.0f);
+      const float decay=expf(-(float)i/(22050.0f*guitarDecay));
+      const float pick=0.22f*expf(-(float)i/85.0f)*sinf(phase*6.7f);
+      v=(body*decay+pick)*0.72f;
+    }
+    const float envelope=(i<80)?((float)i/80.0f):1.0f;
+    v*=envelope;
+    synthBuffer[i]=(int8_t)constrain((int)lroundf(v*gain),-127,127);
   }
-  M5Cardputer.Speaker.playRaw(synthBuffer,2048,22050,false,1,0,true);
+  M5Cardputer.Speaker.playRaw(synthBuffer,8192,22050,false,1,0,true);
 }
 void stopMicCapture() {
   if(micStarted) M5Cardputer.Mic.end();
@@ -212,25 +327,41 @@ int nearestMidi(float hz, float* cents) {
 void tunerScreen() {
   header("CHROMATIC TUNER");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(tunerInstrument==0?UI_PINK:UI_MUTED,BG); d.setCursor(8,43); d.print("GUITAR");
-  d.setTextColor(tunerInstrument==1?UI_PINK:UI_MUTED,BG); d.setCursor(152,43); d.print("UKULELE");
-  if(tunerMidi>=0) {
-    int note=((tunerMidi%12)+12)%12, octave=tunerMidi/12-1;
-    d.setTextSize(3); d.setTextColor(UI_LAVENDER,BG); d.setCursor(9,61); d.printf("%s%d",noteNames[note],octave);
-    d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(146,65); d.printf("%.1f Hz",tunerFrequency);
-    d.setTextColor(fabsf(tunerCents)<5?UI_LAVENDER:UI_PINK,BG); d.setCursor(146,82); d.printf("%+.0f cents",tunerCents);
-    d.drawFastHLine(16,101,208,UI_PURPLE); d.drawFastVLine(120,96,11,UI_LAVENDER);
-    int marker=120+(int)constrain(tunerCents,-50.0f,50.0f)*2;
-    d.fillCircle(marker,101,3,UI_PINK);
-  } else {
-    d.setTextColor(UI_MUTED,BG); d.setCursor(8,70); d.print("PLAY A SINGLE NOTE");
-    d.setCursor(8,85); d.print("LISTENING TO INTERNAL MIC...");
+  const char* modeNames[]={"GUITAR","VIOLAO","UKULELE"};
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,43);
+  d.printf("MODE: %s",modeNames[tunerInstrument]);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(166,43); d.print("<  >");
+  if(!tunerHasSignal) {
+    d.setTextColor(UI_LAVENDER,BG); d.setTextSize(2); d.setCursor(8,63); d.print("TOQUE UMA CORDA");
+    d.setTextSize(1); d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("MANTENHA A NOTA SOANDO");
+    d.setCursor(8,101); d.print("A LEITURA FICA NA TELA POR 5s");
+    footer(", /  TROCAR INSTRUMENTO");
+    return;
   }
-  const char* ref=tunerInstrument==0?"E2 A2 D3 G3 B3 E4":"G4 C4 E4 A4";
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,111); d.print(ref);
-  footer(", / ; CHANGE INSTRUMENT");
+  const float* hzTable=(tunerInstrument==2)?ukeHz:guitarHz;
+  const char** nameTable=(tunerInstrument==2)?ukeNames:guitarNames;
+  const int count=(tunerInstrument==2)?4:6;
+  int nearest=0;
+  float cents=1200.0f*log2f(tunerFrequency/hzTable[0]);
+  for(int i=1;i<count;i++) {
+    float candidate=1200.0f*log2f(tunerFrequency/hzTable[i]);
+    if(fabsf(candidate)<fabsf(cents)) { cents=candidate; nearest=i; }
+  }
+  const uint16_t statusColor=(fabsf(cents)<=5.0f)?UI_LAVENDER:UI_PINK;
+  d.fillRoundRect(8,56,224,51,4,PANEL);
+  d.setTextColor(UI_MUTED,PANEL); d.setCursor(16,63); d.printf("CORDA %s  /  ALVO %.1f Hz",nameTable[nearest],hzTable[nearest]);
+  d.setTextColor(WHITE,PANEL); d.setTextSize(2); d.setCursor(16,78); d.printf("%+.0f CENT",cents);
+  d.setTextSize(1); d.setTextColor(UI_LAVENDER,PANEL); d.setCursor(156,83); d.printf("%.1f Hz",tunerFrequency);
+  d.drawFastHLine(18,113,204,UI_PURPLE);
+  d.drawFastVLine(120,109,9,UI_LAVENDER);
+  int marker=120+(int)constrain(cents,-50.0f,50.0f)*2;
+  d.fillCircle(marker,113,3,statusColor);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,101);
+  if(cents < -5.0f) { d.setTextColor(UI_PINK,BG); d.setCursor(8,101); d.print("GRAVE DEMAIS  ->  APERTE"); }
+  else if(cents > 5.0f) { d.setTextColor(UI_PINK,BG); d.setCursor(8,101); d.print("AGUDA DEMAIS  ->  AFROUXE"); }
+  else { d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,101); d.print("AFINADA  /  MANTENHA"); }
+  footer(", /  TROCAR INSTRUMENTO");
 }
-
 void drawNetworkScreen() {
   header("WI-FI");
   auto &d=M5Cardputer.Display;
@@ -300,6 +431,7 @@ void saveNetworkSetup() {
   lastWiFiStatus=-1;
   drawNetworkScreen();
 }
+void stopAudio();
 bool beginUsbMode();
 void drawUsbScreen(bool ok);
 String safeSdPath(String path) {
@@ -395,8 +527,7 @@ void processUsbCommand(String line) {
 }
 bool beginUsbMode() {
   if(!sdReady) return false;
-  if(audioStarted) { M5Cardputer.Speaker.stop(); audioStarted=false; }
-  if(wavBuffer) { free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
+  stopAudio();
   usbCommandLine="";
   usbActive=true;
   return true;
@@ -437,7 +568,8 @@ String parentPath(const String &p) {
 }
 bool isPlayableAudio(String name) {
   name.toLowerCase();
-  return name.endsWith(".wav");
+  return name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".flac") ||
+         name.endsWith(".aac") || name.endsWith(".ogg") || name.endsWith(".opus") || name.endsWith(".oga");
 }
 void scanDirectory(bool musicMode=false) {
   entryCount=0; selected=0; scroll=0;
@@ -493,83 +625,356 @@ void drawFiles(bool musicMode=false) {
   if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
   footer(",./; MOVE  ENTER OPEN  ESC / ' BACK");
 }
-bool startWav(const String &path) {
-  if (wavBuffer) { M5Cardputer.Speaker.stop(); free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
-  File f=SD.open(path, FILE_READ);
-  if(!f || f.isDirectory()) { if(f)f.close(); return false; }
-  size_t size=f.size();
-  if(size<44 || size>1500000) { f.close(); return false; }
-  wavBuffer=(uint8_t*)ps_malloc(size);
-  if(!wavBuffer) wavBuffer=(uint8_t*)malloc(size);
-  if(!wavBuffer) { f.close(); return false; }
-  wavLength=f.read(wavBuffer,size); f.close();
-  if(wavLength!=size || memcmp(wavBuffer,"RIFF",4)!=0 || memcmp(wavBuffer+8,"WAVE",4)!=0) {
-    free(wavBuffer); wavBuffer=nullptr; wavLength=0; return false;
+
+void drawMusicInfo(const String &name);
+void drawRadioScreen();
+void stopAudioLocked() {
+  if(audioDecoder) {
+    if(audioDecoder->isRunning()) audioDecoder->stop();
+    delete audioDecoder;
+    audioDecoder=nullptr;
   }
-  audioStarted=M5Cardputer.Speaker.playWav(wavBuffer,wavLength,1,-1,true);
-  return audioStarted;
+  if(audioInputBuffer) { delete audioInputBuffer; audioInputBuffer=nullptr; }
+  if(audioRawSource) {
+    audioRawSource->close();
+    delete audioRawSource;
+    audioRawSource=nullptr;
+  }
+  if(audioOutput) {
+    audioOutput->stop();
+    delete audioOutput;
+    audioOutput=nullptr;
+  }
+  M5Cardputer.Speaker.stop();
+  audioStarted=false;
+  audioPaused=false;
+  audioIsRadio=false;
+}
+void stopAudio() {
+  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  stopAudioLocked();
+  audioTaskEnded=false;
+  if(audioMutex) xSemaphoreGive(audioMutex);
+}
+AudioGenerator* createAudioDecoder(const String& extension) {
+  if(extension=="mp3") return new AudioGeneratorMP3();
+  if(extension=="wav") return new AudioGeneratorWAV();
+  if(extension=="flac") return new AudioGeneratorFLAC();
+  if(extension=="aac") return new AudioGeneratorAAC();
+  if(extension=="ogg" || extension=="opus" || extension=="oga") return new AudioGeneratorOpus();
+  return nullptr;
+}
+bool startAudioSource(AudioFileSource* source, const String& title, const String& extension, bool radio) {
+  if(!source) { audioStatusMessage="SOURCE ERROR"; return false; }
+  if(!audioTaskReady || !audioMutex) {
+    source->close(); delete source;
+    audioStatusMessage="AUDIO TASK UNAVAILABLE";
+    return false;
+  }
+  xSemaphoreTake(audioMutex,portMAX_DELAY);
+  stopAudioLocked();
+  audioRawSource=source;
+  audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,8192);
+  if(!audioInputBuffer) {
+    audioStatusMessage="NO BUFFER MEMORY";
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
+    return false;
+  }
+  audioOutput=new JohnnyAudioOutput(&M5Cardputer.Speaker);
+  if(!audioOutput) {
+    audioStatusMessage="NO AUDIO OUTPUT";
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
+    return false;
+  }
+  audioOutput->SetGain((float)audioVolume/21.0f);
+  audioDecoder=createAudioDecoder(extension);
+  if(!audioDecoder) {
+    audioStatusMessage="UNSUPPORTED FORMAT";
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
+    return false;
+  }
+  if(!audioDecoder->begin(audioInputBuffer,audioOutput)) {
+    audioStatusMessage=(extension=="ogg" || extension=="opus" || extension=="oga")?
+      "OGG MUST BE OPUS":"DECODE / STREAM ERROR";
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
+    return false;
+  }
+  audioNowTitle=title;
+  audioIsRadio=radio;
+  audioPaused=false;
+  audioTaskEnded=false;
+  audioStarted=true;
+  audioStatusMessage=radio?"LIVE RADIO":"PLAYING";
+  M5Cardputer.Speaker.setVolume(255);
+  if(audioMutex) xSemaphoreGive(audioMutex);
+  return true;
+}
+String audioExtension(const String& path) {
+  String name=path;
+  name.toLowerCase();
+  int dot=name.lastIndexOf('.');
+  return dot>=0?name.substring(dot+1):"";
+}
+bool isOggOpusFile(const String& path) {
+  File probe=SD.open(path,FILE_READ);
+  if(!probe) return false;
+  uint8_t bytes[160]={0};
+  size_t count=probe.read(bytes,sizeof(bytes));
+  probe.close();
+  if(count<8 || memcmp(bytes,"OggS",4)!=0) return false;
+  for(size_t i=0;i+8<=count;i++) {
+    if(memcmp(bytes+i,"OpusHead",8)==0) return true;
+  }
+  return false;
+}
+bool startLocalAudio(const String& path) {
+  if(!sdReady) { audioStatusMessage="NO SD CARD"; return false; }
+  const String ext=audioExtension(path);
+  if(ext!="mp3" && ext!="wav" && ext!="flac" && ext!="aac" && ext!="ogg" && ext!="opus" && ext!="oga") {
+    audioStatusMessage="UNSUPPORTED FORMAT";
+    return false;
+  }
+  if((ext=="ogg" || ext=="opus" || ext=="oga") && !isOggOpusFile(path)) {
+    audioStatusMessage="OGG VORBIS NOT SUPPORTED";
+    return false;
+  }
+  AudioFileSourceSD* source=new AudioFileSourceSD();
+  if(!source || !source->open(path.c_str())) {
+    if(source) delete source;
+    audioStatusMessage="CANNOT OPEN FILE";
+    return false;
+  }
+  String title=path.substring(path.lastIndexOf('/')+1);
+  if(!startAudioSource(source,title,ext,false)) return false;
+  return true;
+}
+bool startRadioStream(const String& url, const String& title) {
+  stopAudio();
+  if(WiFi.status()!=WL_CONNECTED) {
+    audioStatusMessage="CONNECT WI-FI FIRST";
+    radioMessage=audioStatusMessage;
+    return false;
+  }
+  if(!url.startsWith("http://")) {
+    audioStatusMessage="USE HTTP STREAM URL";
+    radioMessage=audioStatusMessage;
+    return false;
+  }
+  AudioFileSourceICYStream* stream=new AudioFileSourceICYStream();
+  if(!stream || !stream->open(url.c_str())) {
+    if(stream) delete stream;
+    audioStatusMessage="RADIO CONNECTION FAILED";
+    radioMessage=audioStatusMessage;
+    return false;
+  }
+  const bool ok=startAudioSource(stream,title,"mp3",true);
+  radioMessage=ok?"LIVE / CONNECTED":audioStatusMessage;
+  return ok;
+}
+void serviceAudio() {
+  bool ended=false;
+  bool wasRadio=false;
+  if(audioMutex && xSemaphoreTake(audioMutex,0)==pdTRUE) {
+    if(audioTaskEnded) {
+      ended=true;
+      wasRadio=audioTaskEndedWasRadio;
+      audioTaskEnded=false;
+    }
+    xSemaphoreGive(audioMutex);
+  }
+  if(!ended) return;
+  stopAudio();
+  audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
+  if(wasRadio) radioMessage=audioStatusMessage;
+  if(!screenSaverActive) {
+    if(screen==MUSIC && musicNowPlaying) drawMusicInfo(audioNowTitle);
+    else if(screen==RADIO) drawRadioScreen();
+  }
+}
+void audioTask(void* parameter) {
+  (void)parameter;
+  audioTaskReady=true;
+  for(;;) {
+    if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(50))==pdTRUE) {
+      if(audioStarted && !audioPaused && audioDecoder) {
+        if(!audioDecoder->loop()) {
+          audioTaskEndedWasRadio=audioIsRadio;
+          audioTaskEnded=true;
+          audioStarted=false;
+          audioPaused=true;
+        }
+      }
+      xSemaphoreGive(audioMutex);
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+void toggleAudioPause() {
+  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  audioPaused=!audioPaused;
+  if(audioMutex) xSemaphoreGive(audioMutex);
+}
+void setAudioVolume(int value) {
+  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  audioVolume=constrain(value,0,21);
+  if(audioOutput) audioOutput->SetGain((float)audioVolume/21.0f);
+  if(audioMutex) xSemaphoreGive(audioMutex);
 }
 void drawMusicInfo(const String &name) {
-  header("NOW SELECTED");
+  header("JOHNNY MUSIC");
   auto &d=M5Cardputer.Display;
-  d.fillRoundRect(69,43,100,54,5,PANEL);
-  d.setTextColor(UI_PINK,PANEL); d.setTextSize(3); d.setCursor(105,58); d.print("♪");
-  d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(8,103);
-  String n=name; if(n.length()>34)n=n.substring(0,31)+"...";
-  d.print(n);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,113); d.print(audioStarted?"WAV PLAYING":"WAV ONLY / SELECT TO PLAY");
-  footer("ESC / '  RETURN TO LIBRARY");
-}
-void openFile(bool musicMode) {
-  if(!sdReady)return;
-  if(selected<0 || selected>=entryCount)return;
-  String full=currentPath;
-  if(full!="/")full+="/";
-  full+=entries[selected];
-  if(entryIsDir[selected]) {currentPath=full;scanDirectory(musicMode);drawFiles(musicMode);return;}
-  selectedFile=full;
-  if(musicMode) {
-    String lower=entries[selected]; lower.toLowerCase();
-    bool ok=lower.endsWith(".wav") && startWav(full);
-    drawMusicInfo(entries[selected]);
-    if(!ok) { M5Cardputer.Display.setTextColor(UI_PINK,BG); M5Cardputer.Display.setCursor(8,101); M5Cardputer.Display.print("Use PCM WAV (max 1.5 MB)"); }
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,42);
+  d.print("NOW PLAYING");
+  d.fillRoundRect(91,49,58,43,5,PANEL);
+  d.drawCircle(120,70,19,UI_PURPLE);
+  d.drawCircle(120,70,12,UI_PINK);
+  d.drawCircle(120,70,5,UI_LAVENDER);
+  int previous=-1, next=-1;
+  for(int step=1;step<entryCount;step++) {
+    int candidate=(selected-step+entryCount)%entryCount;
+    if(!entryIsDir[candidate] && isPlayableAudio(entries[candidate])) {previous=candidate;break;}
   }
-  else {
-    File f=SD.open(full);
-    header("FILE DETAILS");
-    auto &d=M5Cardputer.Display;
-    d.setTextColor(WHITE,BG);d.setCursor(8,53);d.print(entries[selected].substring(0,30));
-    if(f) {
-      d.setTextColor(UI_MUTED,BG);d.setCursor(8,72);d.printf("%lu bytes",(unsigned long)f.size());
-      d.setCursor(8,88);d.print("TYPE: ");d.print(f.isDirectory()?"DIR":"FILE");
-      f.close();
-    } else {
-      d.setTextColor(UI_PINK,BG);d.setCursor(8,72);d.print("UNABLE TO OPEN FILE");
+  for(int step=1;step<entryCount;step++) {
+    int candidate=(selected+step)%entryCount;
+    if(!entryIsDir[candidate] && isPlayableAudio(entries[candidate])) {next=candidate;break;}
+  }
+  d.setTextColor(UI_LAVENDER,BG);
+  d.setCursor(8,59);
+  if(previous>=0) {
+    String title=entries[previous]; if(title.length()>8) title=title.substring(0,7)+"~";
+    d.printf("< %s",title.c_str());
+  } else d.print("< --");
+  d.setCursor(171,59);
+  if(next>=0) {
+    String title=entries[next]; if(title.length()>8) title=title.substring(0,7)+"~";
+    d.printf("> %s",title.c_str());
+  } else d.print("> --");
+  String label=name;
+  if(label.length()>34) label=label.substring(0,31)+"...";
+  d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(8,98);
+  d.print(label);
+  d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);
+  d.setCursor(8,109);
+  d.printf("%s  VOL %02d",audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.c_str(),audioVolume);
+  footer("< > NEXT/PREV  ENTER PAUSE  +/- VOL");
+}
+void drawRadioScreen() {
+  header("WEB RADIO");
+  auto &d=M5Cardputer.Display;
+  if(radioEditingUrl) {
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,43); d.print("CUSTOM HTTP STREAM URL");
+    d.setTextColor(WHITE,BG); d.setCursor(8,61);
+    String shown=radioEntry; if(shown.length()>31) shown=shown.substring(shown.length()-31);
+    d.print(shown);
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,83); d.print("TYPE URL, THEN ENTER");
+    d.setCursor(8,97); d.print("HTTP STREAMS (NOT HTTPS)");
+    footer("ENTER CONNECT  ESC CANCEL");
+    return;
+  }
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,42);
+  d.print(WiFi.status()==WL_CONNECTED?"WI-FI ONLINE":"WI-FI OFFLINE");
+  for(int i=0;i<RADIO_STATION_COUNT+1;i++) {
+    int y=54+i*10;
+    bool active=i==radioSelected;
+    uint16_t fill=active?PANEL:BG;
+    d.fillRoundRect(7,y-1,225,10,2,fill);
+    d.setTextColor(active?WHITE:UI_MUTED,fill); d.setCursor(12,y);
+    const char* label=(i<RADIO_STATION_COUNT)?radioStationNames[i]:"CUSTOM STREAM URL";
+    d.print(active?"> ":"  "); d.print(label);
+    if(audioIsRadio && audioStarted && i==radioSelected) {
+      d.setTextColor(UI_PINK,fill); d.setCursor(205,y); d.print("ON");
     }
+  }
+  d.setTextColor(audioStarted && audioIsRadio?UI_PINK:UI_MUTED,BG); d.setCursor(8,108);
+  String status=audioIsRadio?(audioPaused?"RADIO PAUSED":"LIVE STREAM"):radioMessage;
+  if(status=="SELECT A STATION" || status.length()==0) status=audioStatusMessage;
+  d.print(status.substring(0,30));
+  footer("UP/DN STATION  ENTER PLAY  SPACE PAUSE");
+}
+void playSelectedTrack() {
+  if(selected<0 || selected>=entryCount || entryIsDir[selected]) return;
+  String path=currentPath;
+  if(path!="/") path+="/";
+  path+=entries[selected];
+  audioStatusMessage="LOADING";
+  const bool ok=startLocalAudio(path);
+  musicNowPlaying=true;
+  drawMusicInfo(entries[selected]);
+  if(!ok) {
+    M5Cardputer.Display.setTextColor(UI_PINK,BG);
+    M5Cardputer.Display.setCursor(8,88);
+    M5Cardputer.Display.print(audioStatusMessage.substring(0,28));
+  }
+}
+void moveMusicTrack(int direction) {
+  if(entryCount<=0) return;
+  int candidate=selected;
+  for(int tries=0;tries<entryCount;tries++) {
+    candidate=(candidate+direction+entryCount)%entryCount;
+    if(!entryIsDir[candidate] && isPlayableAudio(entries[candidate])) {
+      selected=candidate;
+      playSelectedTrack();
+      return;
+    }
+  }
+}
+
+void openFile(bool musicMode) {
+  if(!sdReady || selected<0 || selected>=entryCount) return;
+  String full=currentPath;
+  if(full!="/") full+="/";
+  full+=entries[selected];
+  if(entryIsDir[selected]) {
+    musicNowPlaying=false; currentPath=full; scanDirectory(musicMode); drawFiles(musicMode); return;
+  }
+  selectedFile=full;
+  if(musicMode) playSelectedTrack();
+  else {
+    File f=SD.open(full); header("FILE DETAILS");
+    auto &d=M5Cardputer.Display;
+    d.setTextColor(WHITE,BG); d.setCursor(8,53); d.print(entries[selected].substring(0,30));
+    if(f) {
+      d.setTextColor(UI_MUTED,BG); d.setCursor(8,72); d.printf("%lu bytes",(unsigned long)f.size());
+      d.setCursor(8,88); d.print("TYPE: FILE"); f.close();
+    } else {d.setTextColor(UI_PINK,BG);d.setCursor(8,72);d.print("UNABLE TO OPEN FILE");}
     footer();
   }
 }
 void openApp() {
   switch(selected) {
-    case 0:screen=PIANO;pianoScreen();break;
-    case 1:screen=TUNER;tunerMidi=-1;tunerFrequency=0;tunerLastSample=0;tunerScreen();break;
-    case 2:screen=MUSIC;currentPath="/";scanDirectory(true);drawFiles(true);break;
-    case 3:screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
-    case 4:screen=NETWORK;wifiConfigStage=0;lastWiFiStatus=-1;drawNetworkScreen();break;
-    case 5:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
+    case 0: stopMicCapture(); stopAudio(); screen=PIANO; pianoScreen(); break;
+    case 1:
+      stopAudio(); stopMicCapture(); screen=TUNER; tunerInstrument=1;
+      tunerMidi=-1; tunerFrequency=0; tunerFilteredFrequency=0; tunerHasSignal=false;
+      tunerLastSignalAt=0; tunerLastSample=0; tunerScreen(); break;
+    case 2:
+      if(audioIsRadio) stopAudio();
+      screen=MUSIC; musicNowPlaying=false; currentPath="/"; scanDirectory(true); drawFiles(true); break;
+    case 3:
+      if(!audioIsRadio && audioStarted) stopAudio();
+      screen=RADIO; radioEditingUrl=false; radioSelected=0; drawRadioScreen(); break;
+    case 4: screen=FILES; currentPath="/"; scanDirectory(false); drawFiles(); break;
+    case 5: screen=NETWORK; wifiConfigStage=0; lastWiFiStatus=-1; drawNetworkScreen(); break;
+    case 6: screen=USBMODE; drawUsbScreen(beginUsbMode()); break;
     default:
       screen=ABOUT; header("SYSTEM");
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
       M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");
       M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");
       M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
-      int battery=batteryPercent(); int16_t mv=batteryMillivolts(); bool charging=batteryCharging();
-      M5Cardputer.Display.setCursor(8,103);
-      if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100));
-      else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE");
-      M5Cardputer.Display.setCursor(8,115);
-      M5Cardputer.Display.setTextColor(charging?UI_PINK:UI_MUTED,BG);
-      M5Cardputer.Display.print(charging?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY"));
+      {
+        int battery=batteryPercent(); int16_t mv=batteryMillivolts(); bool charging=batteryCharging();
+        M5Cardputer.Display.setCursor(8,103);
+        if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f);
+        else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100));
+        else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE");
+        M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(charging?UI_PINK:UI_MUTED,BG);
+        M5Cardputer.Display.print(charging?"CHARGING [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY"));
+      }
       footer("ESC / ' BACK"); break;
   }
 }
@@ -577,6 +982,10 @@ void setup() {
   auto cfg=M5.config();
   M5Cardputer.begin(cfg,true);
   M5Cardputer.Display.setRotation(1);
+  M5Cardputer.Speaker.begin();
+  M5Cardputer.Speaker.setVolume(255);
+  audioMutex=xSemaphoreCreateMutex();
+  if(!audioMutex) Serial.println("JOHNNY: AUDIO MUTEX FAILED");
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
   randomSeed(esp_random());
   sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
@@ -585,6 +994,7 @@ void setup() {
   preferences.begin("johnny",false);
   savedSsid=preferences.getString("ssid","");
   savedPassword=preferences.getString("pass","");
+  radioEntry=preferences.getString("radio_url","");
   if(savedSsid.length()) {
     WiFi.mode(WIFI_STA); WiFi.setSleep(false);
     WiFi.begin(savedSsid.c_str(),savedPassword.c_str());
@@ -592,23 +1002,23 @@ void setup() {
   auto micCfg=M5Cardputer.Mic.config();
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
+  refreshBatteryCache(true);
+  if(audioMutex) xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,3,nullptr,1);
   splash(); selected=0; drawHome();
 }
 void loop() {
   M5Cardputer.update();
-  if(millis()-batteryLastDraw>=5000) {
+  if(millis()-batteryLastSample>=30000UL) {
     batteryLastDraw=millis();
-    if(screen!=USBMODE) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
+    refreshBatteryCache(true);
+    if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
   }
-  if(audioStarted && !M5Cardputer.Speaker.isPlaying()) {
-    audioStarted=false;
-    if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}
-  }
-  if(screen==NETWORK && wifiConfigStage==0) {
+  serviceAudio();
+  if(!screenSaverActive && screen==NETWORK && wifiConfigStage==0) {
     int status=(int)WiFi.status();
     if(status!=lastWiFiStatus) { lastWiFiStatus=status; drawNetworkScreen(); }
   }
-  if(screen==NETWORK && wifiConfigStage==1 && wifiScanPending) {
+  if(!screenSaverActive && screen==NETWORK && wifiConfigStage==1 && wifiScanPending) {
     int result=WiFi.scanComplete();
     if(result>=0) {
       wifiNetworkCount=min(result,20);
@@ -618,13 +1028,18 @@ void loop() {
       drawNetworkScreen();
     } else if(result==WIFI_SCAN_FAILED) { wifiScanPending=false; drawNetworkScreen(); }
   }
-  if(screen==TUNER && millis()-tunerLastSample>220) {
+  if(screen==TUNER && !screenSaverActive && millis()-tunerLastSample>420) {
     tunerLastSample=millis();
-    if(captureMic(tunerSamples,2048,320)) {
-      float freq=detectPitch(tunerSamples,2048);
-      if(freq>0 && freq<1400) { tunerFrequency=freq; tunerMidi=nearestMidi(freq,&tunerCents); }
-      else { tunerFrequency=0; tunerMidi=-1; }
-    } else { tunerFrequency=0; tunerMidi=-1; }
+    if(captureMic(tunerSamples,3072,420)) {
+      float freq=detectPitch(tunerSamples,3072);
+      if(freq>0 && freq<1400) {
+        if(tunerFilteredFrequency<=0.0f || fabsf(freq-tunerFilteredFrequency)>tunerFilteredFrequency*0.22f) tunerFilteredFrequency=freq;
+        else tunerFilteredFrequency=0.62f*tunerFilteredFrequency+0.38f*freq;
+        tunerFrequency=tunerFilteredFrequency; tunerHasSignal=true; tunerLastSignalAt=millis();
+        tunerMidi=nearestMidi(tunerFrequency,&tunerCents);
+      }
+    }
+    if(tunerHasSignal && millis()-tunerLastSignalAt>5000UL) {tunerHasSignal=false;tunerFilteredFrequency=0;tunerFrequency=0;tunerMidi=-1;}
     tunerScreen();
   }
   
@@ -633,13 +1048,43 @@ void loop() {
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
   char c=k.word.size()?k.word[0]:0;
-  bool back=(k.esc || c==0x27 || c=='`' || c=='~');
+  if(k.tab) {
+    screenSaverActive=!screenSaverActive;
+    if(screenSaverActive) M5Cardputer.Display.fillScreen(BLACK);
+    else if(screen==HOME) drawHome();
+    else if(screen==PIANO) pianoScreen();
+    else if(screen==TUNER) tunerScreen();
+    else if(screen==FILES) drawFiles(false);
+    else if(screen==MUSIC) musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
+    else if(screen==RADIO) drawRadioScreen();
+    else if(screen==NETWORK) drawNetworkScreen();
+    else if(screen==USBMODE) drawUsbScreen(usbActive);
+    else if(screen==ABOUT) openApp();
+    return;
+  }
+  if(screenSaverActive) {
+    screenSaverActive=false;
+    if(screen==HOME) drawHome();
+    else if(screen==PIANO) pianoScreen();
+    else if(screen==TUNER) tunerScreen();
+    else if(screen==FILES) drawFiles(false);
+    else if(screen==MUSIC) musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
+    else if(screen==RADIO) drawRadioScreen();
+    else if(screen==NETWORK) drawNetworkScreen();
+    else if(screen==USBMODE) drawUsbScreen(usbActive);
+    else if(screen==ABOUT) openApp();
+    return;
+  }
+
+  bool back=(c==0x27 || c=='`' || c=='~');
   if(back) {
     if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
-      if(audioStarted){M5Cardputer.Speaker.stop();audioStarted=false;}
-      if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}
-      if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
+      if(music && musicNowPlaying) {musicNowPlaying=false;drawFiles(true);}
+      else if(currentPath!="/") {currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
+      else {screen=HOME;drawHome();}
+    } else if(screen==RADIO) {
+      if(radioEditingUrl) {radioEditingUrl=false;drawRadioScreen();}
       else {screen=HOME;drawHome();}
     } else if(screen==USBMODE) {
 if(usbActive) endUsbMode();
@@ -655,39 +1100,86 @@ if(usbActive) endUsbMode();
   if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
     int row=selected/3, col=selected%3;
-    if(k.up||c==';') row=(row+2)%3;
-    else if(k.down||c=='.') row=(row+1)%3;
-    else if(k.left||c==',') col=(col+2)%3;
-    else if(k.right||c=='/') col=(col+1)%3;
+    if(c==';') row=(row+2)%3;
+    else if(c=='.') row=(row+1)%3;
+    else if(c==',') col=(col+2)%3;
+    else if(c=='/') col=(col+1)%3;
     int candidate=row*3+col;
     if(candidate>=APP_COUNT) candidate=row*3+(APP_COUNT-1-row*3);
     selected=candidate;
     drawHome();
   } else if(screen==PIANO) {
-    if(k.left||c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
-    else if(k.right||c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
-    else if(k.up||c==';'){pianoEffect=(pianoEffect+3)%4;pianoScreen();}
-    else if(k.down||c=='.'){pianoEffect=(pianoEffect+1)%4;pianoScreen();}
+    if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
+    else if(c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
+    else if(c==';'){pianoEffect=(pianoEffect+4)%5;pianoScreen();}
+    else if(c=='.'){pianoEffect=(pianoEffect+1)%5;pianoScreen();}
     else if(c=='-'){pianoVolume=max(0,pianoVolume-10);pianoScreen();}
     else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
     else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c==']'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(c)playNote(c);
   } else if(screen==TUNER) {
-    if(k.left||k.right||c==','||c=='/'){tunerInstrument=1-tunerInstrument;tunerScreen();}
-  } else if(screen==FILES || screen==MUSIC) {
-    bool music=screen==MUSIC;
-    if(k.up||c==';'||k.left||c==','){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
-    else if(k.down||c=='.'||k.right||c=='/'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
-    else if(k.enter)openFile(music);
+    if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
+  } else if(screen==MUSIC) {
+    if(musicNowPlaying) {
+      if(c==',') moveMusicTrack(-1);
+      else if(c=='/') moveMusicTrack(1);
+      else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicInfo(audioNowTitle);}
+      else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawMusicInfo(audioNowTitle);}
+      else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
+      else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
+      else if(c==';') moveMusicTrack(-1);
+      else if(c=='.') moveMusicTrack(1);
+    } else {
+      if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
+      else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}
+      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
+      else if(k.enter) openFile(true);
+    }
+  } else if(screen==FILES) {
+    if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(false);}
+    else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(false);}
+    else if(k.enter) openFile(false);
+  } else if(screen==RADIO) {
+    if(radioEditingUrl) {
+      if(k.enter) {
+        radioEntry.trim();
+        if(radioEntry.startsWith("http://")) {
+          preferences.putString("radio_url",radioEntry); radioEditingUrl=false;
+          radioMessage="CONNECTING...";
+          drawRadioScreen();
+          startRadioStream(radioEntry,"CUSTOM STREAM");
+          drawRadioScreen();
+        } else {radioMessage="URL MUST START HTTP://";drawRadioScreen();}
+      } else if(c==8||c==127) {if(radioEntry.length())radioEntry.remove(radioEntry.length()-1);drawRadioScreen();}
+      else if(c&&isprint((unsigned char)c)&&radioEntry.length()<180) {radioEntry+=c;drawRadioScreen();}
+    } else {
+      if(c==';') {radioSelected=max(0,radioSelected-1);drawRadioScreen();}
+      else if(c=='.') {radioSelected=min(RADIO_STATION_COUNT,radioSelected+1);drawRadioScreen();}
+      else if(k.enter) {
+        if(radioSelected<RADIO_STATION_COUNT) {
+          radioMessage="CONNECTING...";
+          drawRadioScreen();
+          startRadioStream(radioStationUrls[radioSelected],radioStationNames[radioSelected]);
+        } else {
+          radioEntry=preferences.getString("radio_url",radioEntry);
+          radioEditingUrl=true;
+        }
+        drawRadioScreen();
+      } else if(k.space&&audioIsRadio) {toggleAudioPause();drawRadioScreen();}
+      else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";radioMessage="STOPPED";drawRadioScreen();}
+      else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawRadioScreen();}
+      else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawRadioScreen();}
+    }
+
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
       if(k.enter) startNetworkSetup();
-      else if(k.down||c=='.') {WiFi.disconnect(false,false);drawNetworkScreen();}
+      else if(c=='.') {WiFi.disconnect(false,false);drawNetworkScreen();}
     } else if(wifiConfigStage==1) {
       if(c=='r'||c=='R') startNetworkSetup();
-      else if(k.up||c==';') {if(wifiSelected>0)wifiSelected--;if(wifiSelected<wifiScroll)wifiScroll=wifiSelected;drawNetworkScreen();}
-      else if(k.down||c=='.') {if(wifiSelected<wifiNetworkCount-1)wifiSelected++;if(wifiSelected>=wifiScroll+5)wifiScroll=wifiSelected-4;drawNetworkScreen();}
+      else if(c==';') {if(wifiSelected>0)wifiSelected--;if(wifiSelected<wifiScroll)wifiScroll=wifiSelected;drawNetworkScreen();}
+      else if(c=='.') {if(wifiSelected<wifiNetworkCount-1)wifiSelected++;if(wifiSelected>=wifiScroll+5)wifiScroll=wifiSelected-4;drawNetworkScreen();}
       else if(k.enter && !wifiScanPending) chooseNetwork(wifiSelected);
     } else if(wifiConfigStage==2) {
       if(k.enter) saveNetworkSetup();
