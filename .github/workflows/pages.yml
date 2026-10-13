@@ -42,7 +42,7 @@ jobs:
           cat > release/firmware/manifest.json <<'EOF'
           {
             "name": "Johnny OS — Cardputer-Adv",
-            "version": "0.1.1",
+            "version": "0.1.2",
             "new_install_prompt_erase": true,
             "builds": [{
               "chipFamily": "ESP32-S3",
@@ -88,7 +88,7 @@ jobs:
           base = "https://otavio-dias-leite.github.io/johnny/firmware/"
           for part in data["builds"][0]["parts"]:
               part["path"] = base + part["path"]
-          p.write_text(json.dumps(data, indent=2) + "\\n")
+          p.write_text(json.dumps(data, indent=2) + "\n")
           PY
           for f in bootloader.bin partitions.bin firmware.bin manifest.json; do
             test -s "_site/firmware/$f"
