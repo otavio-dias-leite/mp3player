@@ -75,7 +75,8 @@ async function requestList(path){
 function button(label,fn,secondary=true){
  const b=document.createElement("button");b.textContent=label;if(secondary)b.className="secondary";b.addEventListener("click",fn);return b;
 }
-async function loadDirectory(path){
+async function loadDirectory(path,internal=false){
+ if(transferBusy&&!internal)return;
  currentPath=path;$("path").textContent=path;$("files").replaceChildren();
  const list=await requestList(path);
  if(path!=="/"){
@@ -104,20 +105,20 @@ async function downloadFile(path){
  transferBusy=true;
  let output=null;
  try{
-  setStatus("REQUESTING "+path);
-  await sendLine("GET\t"+path);
-  const header=(await readLine()).split("\t");
-  if(header[0]!=="DATA")throw new Error(header.join(" "));
-  const size=Number(header[1]);
-  if(!Number.isSafeInteger(size)||size<0||size>MAX_TRANSFER)throw new Error("FILE SIZE OUTSIDE 64 MB LIMIT");
   const filename=path.split("/").pop();
-  const parts=[];
   if("showSaveFilePicker" in window){
    try{
     const handle=await window.showSaveFilePicker({suggestedName:filename});
     output=await handle.createWritable();
    }catch(e){if(e.name==="AbortError"){setStatus("DOWNLOAD CANCELLED");return;}throw e;}
   }
+  setStatus("REQUESTING "+path);
+  await sendLine("GET\t"+path);
+  const header=(await readLine()).split("\t");
+  if(header[0]!=="DATA")throw new Error(header.join(" "));
+  const size=Number(header[1]);
+  if(!Number.isSafeInteger(size)||size<0||size>MAX_TRANSFER)throw new Error("FILE SIZE OUTSIDE 64 MB LIMIT");
+  const parts=[];
   let received=0;
   while(received<size){
    const chunk=await readExact(Math.min(DOWNLOAD_CHUNK,size-received));
@@ -141,9 +142,16 @@ async function downloadFile(path){
  }finally{transferBusy=false;}
 }
 async function deleteFile(path){
- if(!confirm("DELETE "+path+"?"))return;
- try{await sendLine("DELETE\t"+path);const result=await readLine();if(result!=="OK")throw new Error(result);setStatus("FILE DELETED");await loadDirectory(currentPath);}
- catch(e){setStatus(e.message);}
+ if(transferBusy||!confirm("DELETE "+path+"?"))return;
+ transferBusy=true;
+ try{
+  await sendLine("DELETE\t"+path);
+  const result=await readLine();
+  if(result!=="OK")throw new Error(result);
+  setStatus("FILE DELETED");
+  await loadDirectory(currentPath,true);
+ }catch(e){setStatus(e.message);}
+ finally{transferBusy=false;}
 }
 async function uploadFiles(files){
  if(transferBusy||!files.length)return;
@@ -168,11 +176,12 @@ async function uploadFiles(files){
   }
   setStatus("UPLOAD COMPLETE · "+files.length+" FILE(S)");
   $("upload").value="";
-  await loadDirectory(currentPath);
+  await loadDirectory(currentPath,true);
  }catch(e){setStatus(e.message);}
  finally{transferBusy=false;}
 }
 async function disconnect(){
+ if(transferBusy){setStatus("WAIT FOR THE CURRENT TRANSFER TO FINISH");return;}
  try{if(connected){await sendLine("EXIT");await readLine();}}catch(e){}
  connected=false;
  try{if(reader){await reader.cancel();reader.releaseLock();}}catch(e){}
