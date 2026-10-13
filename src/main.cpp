@@ -424,6 +424,7 @@ void saveNetworkSetup() {
   lastWiFiStatus=-1;
   drawNetworkScreen();
 }
+void stopAudio();
 bool beginUsbMode();
 void drawUsbScreen(bool ok);
 String safeSdPath(String path) {
@@ -964,7 +965,7 @@ void loop() {
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
   char c=k.word.size()?k.word[0]:0;
-  if(c==9) {
+  if(k.tab) {
     screenSaverActive=!screenSaverActive;
     if(screenSaverActive) M5Cardputer.Display.fillScreen(BLACK);
     else if(screen==HOME) drawHome();
@@ -992,7 +993,7 @@ void loop() {
     return;
   }
 
-  bool back=(k.esc || c==0x27 || c=='`' || c=='~');
+  bool back=(c==0x27 || c=='`' || c=='~');
   if(back) {
     if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
@@ -1016,45 +1017,45 @@ if(usbActive) endUsbMode();
   if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
     int row=selected/3, col=selected%3;
-    if(k.up||c==';') row=(row+2)%3;
-    else if(k.down||c=='.') row=(row+1)%3;
-    else if(k.left||c==',') col=(col+2)%3;
-    else if(k.right||c=='/') col=(col+1)%3;
+    if(c==';') row=(row+2)%3;
+    else if(c=='.') row=(row+1)%3;
+    else if(c==',') col=(col+2)%3;
+    else if(c=='/') col=(col+1)%3;
     int candidate=row*3+col;
     if(candidate>=APP_COUNT) candidate=row*3+(APP_COUNT-1-row*3);
     selected=candidate;
     drawHome();
   } else if(screen==PIANO) {
-    if(k.left||c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
-    else if(k.right||c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
-    else if(k.up||c==';'){pianoEffect=(pianoEffect+4)%5;pianoScreen();}
-    else if(k.down||c=='.'){pianoEffect=(pianoEffect+1)%5;pianoScreen();}
+    if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
+    else if(c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
+    else if(c==';'){pianoEffect=(pianoEffect+4)%5;pianoScreen();}
+    else if(c=='.'){pianoEffect=(pianoEffect+1)%5;pianoScreen();}
     else if(c=='-'){pianoVolume=max(0,pianoVolume-10);pianoScreen();}
     else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
     else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c==']'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(c)playNote(c);
   } else if(screen==TUNER) {
-    if(k.left||k.right||c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
+    if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
   } else if(screen==MUSIC) {
     if(musicNowPlaying) {
-      if(k.left||c==',') moveMusicTrack(-1);
-      else if(k.right||c=='/') moveMusicTrack(1);
+      if(c==',') moveMusicTrack(-1);
+      else if(c=='/') moveMusicTrack(1);
       else if(k.enter||c==' ') {audioPaused=!audioPaused;drawMusicInfo(audioNowTitle);}
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawMusicInfo(audioNowTitle);}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
-      else if(k.up||c==';') moveMusicTrack(-1);
-      else if(k.down||c=='.') moveMusicTrack(1);
+      else if(c==';') moveMusicTrack(-1);
+      else if(c=='.') moveMusicTrack(1);
     } else {
-      if(k.up||c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
-      else if(k.down||c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}
-      else if(k.left||c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
+      if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
+      else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}
+      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
     }
   } else if(screen==FILES) {
-    if(k.up||c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(false);}
-    else if(k.down||c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(false);}
+    if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(false);}
+    else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(false);}
     else if(k.enter) openFile(false);
   } else if(screen==RADIO) {
     if(radioEditingUrl) {
@@ -1067,8 +1068,8 @@ if(usbActive) endUsbMode();
       } else if(c==8||c==127) {if(radioEntry.length())radioEntry.remove(radioEntry.length()-1);drawRadioScreen();}
       else if(c&&isprint((unsigned char)c)&&radioEntry.length()<180) {radioEntry+=c;drawRadioScreen();}
     } else {
-      if(k.up||c==';') {radioSelected=max(0,radioSelected-1);drawRadioScreen();}
-      else if(k.down||c=='.') {radioSelected=min(RADIO_STATION_COUNT,radioSelected+1);drawRadioScreen();}
+      if(c==';') {radioSelected=max(0,radioSelected-1);drawRadioScreen();}
+      else if(c=='.') {radioSelected=min(RADIO_STATION_COUNT,radioSelected+1);drawRadioScreen();}
       else if(k.enter) {
         if(radioSelected<RADIO_STATION_COUNT) startRadioStream(radioStationUrls[radioSelected],radioStationNames[radioSelected]);
         else {radioEntry=preferences.getString("radio_url",radioEntry);radioEditingUrl=true;}
@@ -1082,11 +1083,11 @@ if(usbActive) endUsbMode();
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
       if(k.enter) startNetworkSetup();
-      else if(k.down||c=='.') {WiFi.disconnect(false,false);drawNetworkScreen();}
+      else if(c=='.') {WiFi.disconnect(false,false);drawNetworkScreen();}
     } else if(wifiConfigStage==1) {
       if(c=='r'||c=='R') startNetworkSetup();
-      else if(k.up||c==';') {if(wifiSelected>0)wifiSelected--;if(wifiSelected<wifiScroll)wifiScroll=wifiSelected;drawNetworkScreen();}
-      else if(k.down||c=='.') {if(wifiSelected<wifiNetworkCount-1)wifiSelected++;if(wifiSelected>=wifiScroll+5)wifiScroll=wifiSelected-4;drawNetworkScreen();}
+      else if(c==';') {if(wifiSelected>0)wifiSelected--;if(wifiSelected<wifiScroll)wifiScroll=wifiSelected;drawNetworkScreen();}
+      else if(c=='.') {if(wifiSelected<wifiNetworkCount-1)wifiSelected++;if(wifiSelected>=wifiScroll+5)wifiScroll=wifiSelected-4;drawNetworkScreen();}
       else if(k.enter && !wifiScanPending) chooseNetwork(wifiSelected);
     } else if(wifiConfigStage==2) {
       if(k.enter) saveNetworkSetup();
