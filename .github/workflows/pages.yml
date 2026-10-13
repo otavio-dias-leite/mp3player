@@ -77,7 +77,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p _site
-          cp index.html style.css _site/
+          cp index.html style.css transfer.html _site/
           touch _site/.nojekyll
           if [ -d web/assets ]; then cp -R web/assets _site/assets; fi
           python - <<'PY'
