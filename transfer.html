@@ -27,7 +27,7 @@ footer{padding:30px 0;color:var(--muted);font:10px 'Space Mono',monospace}
 </head>
 <body>
 <main>
-<header><a href="index.html?v=0.3.0">JOHNNY</a><span>USB / MICROSD · V0.3</span></header>
+<header><a href="index.html?v=@JOHNNY_VERSION@">JOHNNY</a><span>USB / MICROSD · V@JOHNNY_VERSION@</span></header>
 <h1>FILE TRANSFER</h1>
 <div class="bar">
 <button id="connect">CONNECT USB</button>
@@ -38,7 +38,7 @@ footer{padding:30px 0;color:var(--muted);font:10px 'Space Mono',monospace}
 <div id="status">CONNECT THE CARDPUTER IN USB TRANSFER MODE.</div>
 <div id="path">/</div>
 <div id="files"></div>
-<footer>CHROME / EDGE • WEB SERIAL • MICROSD • CHUNK ACK / V0.3</footer>
+<footer>CHROME / EDGE • WEB SERIAL • MICROSD • CHUNK ACK / V@JOHNNY_VERSION@</footer>
 </main>
 <script>
 const $=id=>document.getElementById(id);
