@@ -15,6 +15,8 @@
 #include <AudioGeneratorFLAC.h>
 #include <AudioGeneratorAAC.h>
 #include <AudioGeneratorOpus.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 
 
 class JohnnyAudioOutput final : public AudioOutput {
@@ -108,7 +110,12 @@ uint32_t micWarmupUntil=0;
 int8_t synthBuffer[8192];
 const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE","GUITAR"};
 String selectedFile;
-bool audioStarted = false;
+volatile bool audioStarted = false;
+volatile bool audioPaused = false;
+volatile bool audioIsRadio = false;
+SemaphoreHandle_t audioMutex = nullptr;
+volatile bool audioTaskEnded = false;
+volatile bool audioTaskEndedWasRadio = false;
 constexpr int RADIO_STATION_COUNT=4;
 const char* radioStationNames[RADIO_STATION_COUNT]={"RADIO PARADISE","GROOVE SALAD","DRONE ZONE","SPACE STATION"};
 const char* radioStationUrls[RADIO_STATION_COUNT]={
@@ -621,7 +628,7 @@ void drawFiles(bool musicMode=false) {
 
 void drawMusicInfo(const String &name);
 void drawRadioScreen();
-void stopAudio() {
+void stopAudioLocked() {
   if(audioDecoder) {
     if(audioDecoder->isRunning()) audioDecoder->stop();
     delete audioDecoder;
@@ -643,6 +650,12 @@ void stopAudio() {
   audioPaused=false;
   audioIsRadio=false;
 }
+void stopAudio() {
+  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  stopAudioLocked();
+  audioTaskEnded=false;
+  if(audioMutex) xSemaphoreGive(audioMutex);
+}
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3();
   if(extension=="wav") return new AudioGeneratorWAV();
@@ -652,28 +665,47 @@ AudioGenerator* createAudioDecoder(const String& extension) {
   return nullptr;
 }
 bool startAudioSource(AudioFileSource* source, const String& title, const String& extension, bool radio) {
-  stopAudio();
   if(!source) { audioStatusMessage="SOURCE ERROR"; return false; }
+  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  stopAudioLocked();
   audioRawSource=source;
   audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,8192);
-  if(!audioInputBuffer) { audioStatusMessage="NO BUFFER MEMORY"; stopAudio(); return false; }
+  if(!audioInputBuffer) {
+    audioStatusMessage="NO BUFFER MEMORY";
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
+    return false;
+  }
   audioOutput=new JohnnyAudioOutput(&M5Cardputer.Speaker);
-  if(!audioOutput) { audioStatusMessage="NO AUDIO OUTPUT"; stopAudio(); return false; }
+  if(!audioOutput) {
+    audioStatusMessage="NO AUDIO OUTPUT";
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
+    return false;
+  }
   audioOutput->SetGain((float)audioVolume/21.0f);
   audioDecoder=createAudioDecoder(extension);
-  if(!audioDecoder) { audioStatusMessage="UNSUPPORTED FORMAT"; stopAudio(); return false; }
+  if(!audioDecoder) {
+    audioStatusMessage="UNSUPPORTED FORMAT";
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
+    return false;
+  }
   if(!audioDecoder->begin(audioInputBuffer,audioOutput)) {
     audioStatusMessage=(extension=="ogg" || extension=="opus" || extension=="oga")?
       "OGG MUST BE OPUS":"DECODE / STREAM ERROR";
-    stopAudio();
+    stopAudioLocked();
+    if(audioMutex) xSemaphoreGive(audioMutex);
     return false;
   }
   audioNowTitle=title;
   audioIsRadio=radio;
   audioPaused=false;
+  audioTaskEnded=false;
   audioStarted=true;
   audioStatusMessage=radio?"LIVE RADIO":"PLAYING";
   M5Cardputer.Speaker.setVolume(255);
+  if(audioMutex) xSemaphoreGive(audioMutex);
   return true;
 }
 String audioExtension(const String& path) {
@@ -739,21 +771,52 @@ bool startRadioStream(const String& url, const String& title) {
   return ok;
 }
 void serviceAudio() {
-  if(!audioStarted || audioPaused || !audioDecoder) return;
-  if(!audioDecoder->loop()) {
-    const bool wasRadio=audioIsRadio;
-    stopAudio();
-    audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
-    if(wasRadio) radioMessage=audioStatusMessage;
-    if(!screenSaverActive) {
-      if(screen==MUSIC && musicNowPlaying) drawMusicInfo(audioNowTitle);
-      else if(screen==RADIO) drawRadioScreen();
+  bool ended=false;
+  bool wasRadio=false;
+  if(audioMutex && xSemaphoreTake(audioMutex,0)==pdTRUE) {
+    if(audioTaskEnded) {
+      ended=true;
+      wasRadio=audioTaskEndedWasRadio;
+      audioTaskEnded=false;
     }
+    xSemaphoreGive(audioMutex);
+  }
+  if(!ended) return;
+  stopAudio();
+  audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
+  if(wasRadio) radioMessage=audioStatusMessage;
+  if(!screenSaverActive) {
+    if(screen==MUSIC && musicNowPlaying) drawMusicInfo(audioNowTitle);
+    else if(screen==RADIO) drawRadioScreen();
   }
 }
+void audioTask(void* parameter) {
+  (void)parameter;
+  for(;;) {
+    if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(50))==pdTRUE) {
+      if(audioStarted && !audioPaused && audioDecoder) {
+        if(!audioDecoder->loop()) {
+          audioTaskEndedWasRadio=audioIsRadio;
+          audioTaskEnded=true;
+          audioStarted=false;
+          audioPaused=true;
+        }
+      }
+      xSemaphoreGive(audioMutex);
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+}
+void toggleAudioPause() {
+  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  audioPaused=!audioPaused;
+  if(audioMutex) xSemaphoreGive(audioMutex);
+}
 void setAudioVolume(int value) {
+  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
   audioVolume=constrain(value,0,21);
   if(audioOutput) audioOutput->SetGain((float)audioVolume/21.0f);
+  if(audioMutex) xSemaphoreGive(audioMutex);
 }
 void drawMusicInfo(const String &name) {
   header("JOHNNY MUSIC");
@@ -932,6 +995,7 @@ void setup() {
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
   refreshBatteryCache(true);
+  if(audioMutex) xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",8192,nullptr,3,nullptr,1);
   splash(); selected=0; drawHome();
 }
 void loop() {
@@ -1052,7 +1116,7 @@ if(usbActive) endUsbMode();
     if(musicNowPlaying) {
       if(c==',') moveMusicTrack(-1);
       else if(c=='/') moveMusicTrack(1);
-      else if(k.enter||k.space||c==' ') {audioPaused=!audioPaused;drawMusicInfo(audioNowTitle);}
+      else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicInfo(audioNowTitle);}
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawMusicInfo(audioNowTitle);}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
@@ -1085,7 +1149,7 @@ if(usbActive) endUsbMode();
         if(radioSelected<RADIO_STATION_COUNT) startRadioStream(radioStationUrls[radioSelected],radioStationNames[radioSelected]);
         else {radioEntry=preferences.getString("radio_url",radioEntry);radioEditingUrl=true;}
         drawRadioScreen();
-      } else if(k.space&&audioIsRadio) {audioPaused=!audioPaused;drawRadioScreen();}
+      } else if(k.space&&audioIsRadio) {toggleAudioPause();drawRadioScreen();}
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";radioMessage="STOPPED";drawRadioScreen();}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawRadioScreen();}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawRadioScreen();}
