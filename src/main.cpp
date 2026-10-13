@@ -117,7 +117,11 @@ public:
   void resetRecordingBuffer(){recordIndex_=0;}
   bool stop() override {
     flush();
-    if(speaker_)speaker_->stop();
+    if(speaker_) {
+      uint32_t started=millis();
+      while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+      if(speaker_->isPlaying()) speaker_->stop();
+    }
     return true;
   }
 private:
