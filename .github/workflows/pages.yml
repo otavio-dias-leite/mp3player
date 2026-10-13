@@ -39,16 +39,20 @@ jobs:
           cp "$BUILD/bootloader.bin" release/firmware/bootloader.bin
           cp "$BUILD/partitions.bin" release/firmware/partitions.bin
           cp "$BUILD/firmware.bin" release/firmware/firmware.bin
+          BOOT_APP0="$(find "$HOME/.platformio/packages/framework-arduinoespressif32" -name boot_app0.bin -print -quit)"
+          test -n "$BOOT_APP0"
+          cp "$BOOT_APP0" release/firmware/boot_app0.bin
           cat > release/firmware/manifest.json <<'EOF'
           {
             "name": "JOHNNY — Cardputer-Adv",
-            "version": "0.2.1",
+            "version": "0.3.0",
             "new_install_prompt_erase": true,
             "builds": [{
               "chipFamily": "ESP32-S3",
               "parts": [
                 {"path": "bootloader.bin", "offset": 0},
                 {"path": "partitions.bin", "offset": 32768},
+                {"path": "boot_app0.bin", "offset": 57344},
                 {"path": "firmware.bin", "offset": 65536}
               ]
             }]
@@ -87,10 +91,10 @@ jobs:
           data = json.loads(p.read_text())
           base = "https://otavio-dias-leite.github.io/johnny/firmware/"
           for part in data["builds"][0]["parts"]:
-              part["path"] = base + part["path"]
+              part["path"] = base + part["path"] + "?v=0.3.0"
           p.write_text(json.dumps(data, indent=2) + "\n")
           PY
-          for f in bootloader.bin partitions.bin firmware.bin manifest.json; do
+          for f in bootloader.bin partitions.bin boot_app0.bin firmware.bin manifest.json; do
             test -s "_site/firmware/$f"
           done
       - uses: actions/upload-pages-artifact@v3
