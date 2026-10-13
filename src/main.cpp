@@ -82,7 +82,7 @@ void loop() {
       if (c == 'w' || c == 'W') { menuIndex = (menuIndex + MENU_COUNT - 1) % MENU_COUNT; drawHome(); }
       if (c == 's' || c == 'S') { menuIndex = (menuIndex + 1) % MENU_COUNT; drawHome(); }
     }
-  } else if (keys.del || keys.esc) {
+  } else if (keys.del) {
     screen = HOME;
     drawHome();
   }
