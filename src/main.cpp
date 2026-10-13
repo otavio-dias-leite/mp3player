@@ -569,6 +569,7 @@ void processUsbCommand(String line) {
     File file=SD.open(path,FILE_READ);
     if(!file || file.isDirectory()) { if(file)file.close(); usbReplyError("OPEN"); return; }
     size_t size=file.size();
+    if(size>64UL*1024UL*1024UL){file.close();usbReplyError("LIMIT");return;}
     Serial.printf("DATA\t%lu\n",(unsigned long)size);
     uint8_t buffer[512];
     while(file.available()) {
