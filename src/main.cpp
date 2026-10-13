@@ -149,7 +149,7 @@ private:
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO };
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
 Screen eqReturnScreen=HOME;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
@@ -233,6 +233,11 @@ const char* gamesMenuItems[]={"CONWAY LIFE","DOOM 1993"};
 constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=2;
 String placeholderTitle, placeholderMessage;
 String updateMessage="CONNECT TO WI-FI";
+File micRecordFile;
+bool micRecording=false;
+uint32_t micRecordBytes=0,micRecordLastDraw=0;
+String micRecordPath,micRecordStatus="READY";
+int16_t micRecordSamples[3072];
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
@@ -397,8 +402,7 @@ void playNote(char c) {
     synthBuffer[i]=(int8_t)constrain((int)lroundf(v*gain),-127,127);
   }
   static int16_t synthEqBuffer[8192];
-  for(size_t i=0;i<8192;i++)synthEqBuffer[i]=audioEqualizer.processMono((int32_t)synthBuffer[i]*256,22050);  M5Cardputer.Speaker.playRaw(synthEqBuffer,8192,22050,false,1,0,true);
-  if(audioMutex)xSemaphoreGive(audioMutex);
+  for(size_t i=0;i<8192;i++)synthEqBuffer[i]=audioEqualizer.processMono((int32_t)synthBuffer[i]*256,22050);  M5Cardputer.Speaker.playRaw(synthEqBuffer,8192,22050,false,1,0,true);  if(audioMutex)xSemaphoreGive(audioMutex);
 }
 void stopMicCapture() {
   if(micStarted) M5Cardputer.Mic.end();
@@ -797,8 +801,7 @@ void stopAudio() {
   audioTaskEnded=false;
   if(audioMutex) xSemaphoreGive(audioMutex);
   // Let the SD writer finish the WAV header before another app accesses the card.  uint32_t started=millis();
-  while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);
-}
+  while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);}
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3();
   if(extension=="wav") return new AudioGeneratorWAV();
@@ -1090,6 +1093,9 @@ void openFile(bool musicMode) {
   }
 }
 void drawEqScreen();
+void drawMicRecorder();
+void stopMicRecording();
+void serviceMicRecorder();
 void seedLife();
 void drawLife();
 void openApp(){
@@ -1098,7 +1104,7 @@ void openApp(){
   if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
   screen=HOME;
   if(menu==MUSICMENU){
-    if(item==5){showUnavailable("MIC RECORDER","Microphone recording is not integrated.");return;}
+    if(item==5){screen=MICREC;micRecording=false;micRecordStatus="READY";drawMicRecorder();return;}
     const int map[]={0,1,2,3,7};selected=map[item];
   }else if(menu==SYSTEMMENU){
     if(item==3){showUnavailable("BLUETOOTH","Bluetooth pairing is not integrated.");return;}
@@ -1197,8 +1203,7 @@ bool loadLife(){
   bool ok=file.read(magic,4)==4&&memcmp(magic,"JLIF",4)==0;
   ok=ok&&file.read((uint8_t*)&generation,sizeof(generation))==sizeof(generation);
   ok=ok&&file.read((uint8_t*)&interval,sizeof(interval))==sizeof(interval);
-  ok=ok&&file.read((uint8_t*)lifeGrid,sizeof(lifeGrid))==sizeof(lifeGrid);file.close();
-  if(!ok)return false;lifeGeneration=generation;lifeIntervalMs=constrain((int)interval,50,1000);lifeRunning=false;return true;
+  ok=ok&&file.read((uint8_t*)lifeGrid,sizeof(lifeGrid))==sizeof(lifeGrid);file.close();  if(!ok)return false;lifeGeneration=generation;lifeIntervalMs=constrain((int)interval,50,1000);lifeRunning=false;return true;
 }
 
 void seedLife(){
@@ -1251,6 +1256,37 @@ void writeWavHeader(File& file,uint32_t dataBytes,uint32_t sampleRate){
   memcpy(h+20,&format,2);memcpy(h+22,&channels,2);memcpy(h+24,&sampleRate,4);
   uint32_t byteRate=sampleRate*2U;memcpy(h+28,&byteRate,4);memcpy(h+32,&align,2);memcpy(h+34,&bits,2);
   memcpy(h+36,"data",4);memcpy(h+40,&dataBytes,4);file.seek(0);file.write(h,sizeof(h));
+}
+void drawMicRecorder(){
+  header("MIC RECORDER");auto& d=M5Cardputer.Display;
+  d.setTextColor(micRecording?UI_PINK:UI_LAVENDER,BG);d.setCursor(8,49);
+  d.print(micRecording?"RECORDING":"MICROPHONE READY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,68);d.print(micRecordStatus.substring(0,30));
+  d.setCursor(8,84);d.printf("%.1f SEC",(float)micRecordBytes/32000.0f);
+  d.setCursor(8,100);d.print(micRecordPath.substring(max(0,(int)micRecordPath.length()-28)));
+  footer("ENTER / SPACE START-STOP");
+}
+void startMicRecording(){
+  if(!sdReady){micRecordStatus="NO SD CARD";drawMicRecorder();return;}
+  SD.mkdir("/RECORDINGS");String candidate;
+  for(int i=1;i<=9999;i++){char name[32];snprintf(name,sizeof(name),"/RECORDINGS/MIC%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}
+  if(candidate.length()==0||SD.exists(candidate)){micRecordStatus="NO FREE FILENAME";drawMicRecorder();return;}
+  micRecordFile=SD.open(candidate,FILE_WRITE);if(!micRecordFile){micRecordStatus="FILE OPEN FAILED";drawMicRecorder();return;}
+  uint8_t blank[44]{};micRecordFile.write(blank,sizeof(blank));micRecordPath=candidate;micRecordBytes=0;micRecording=true;micRecordStatus="RECORDING PCM 16 KHZ";micRecordLastDraw=0;drawMicRecorder();
+}
+void stopMicRecording(){
+  if(!micRecording)return;
+  micRecording=false;
+  if(micRecordFile){writeWavHeader(micRecordFile,micRecordBytes,16000);micRecordFile.flush();micRecordFile.close();}
+  stopMicCapture();micRecordStatus="SAVED TO MICROSD";drawMicRecorder();
+}
+void serviceMicRecorder(){
+  if(!micRecording)return;
+  if(!captureMic(micRecordSamples,3072,420)){if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive)drawMicRecorder();}return;}
+  size_t bytes=sizeof(micRecordSamples);
+  if(!micRecordFile||micRecordFile.write((const uint8_t*)micRecordSamples,bytes)!=bytes){micRecordStatus="SD WRITE ERROR";stopMicRecording();return;}
+  micRecordBytes+=(uint32_t)bytes;
+  if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive)drawMicRecorder();}
 }
 void radioRecorderTask(void* parameter){
   (void)parameter;File output;radioRecorderTaskReady=true;
@@ -1322,6 +1358,7 @@ void loop() {
     if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
   }
   serviceAudio();
+  if(screen==MICREC&&micRecording)serviceMicRecorder();
   if(!screenSaverActive&&screen==LIFE&&lifeRunning&&millis()-lifeLastStep>=lifeIntervalMs){stepLife();drawLife();}
   static uint8_t lastRecorderDisplayState=255;
   if(screen==RADIO&&!screenSaverActive&&lastRecorderDisplayState!=radioRecordState){lastRecorderDisplayState=radioRecordState;drawRadioScreen();}
@@ -1365,6 +1402,7 @@ void loop() {
     else if(screen==HOME) drawHome();
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) drawCategoryMenu();
     else if(screen==UPDATEINFO) drawUpdateInfo();
+    else if(screen==MICREC) drawMicRecorder();
     else if(screen==PIANO) pianoScreen();
     else if(screen==TUNER) tunerScreen();
     else if(screen==FILES) drawFiles(false);
@@ -1397,7 +1435,8 @@ void loop() {
 
   bool back=(c==0x27 || c=='`' || c=='~');
   if(back) {
-    if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
+    if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
+    else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU){screen=HOME;selected=0;drawHome();}
     else if(screen==EQSCREEN){
       screen=eqReturnScreen;
@@ -1425,7 +1464,9 @@ if(usbActive) endUsbMode();
     delay(8); return;
   }
 
-  if(screen==UPDATEINFO) {
+  if(screen==MICREC) {
+    if(k.enter||k.space){if(micRecording)stopMicRecording();else startMicRecording();}
+  } else if(screen==UPDATEINFO) {
     if(k.enter) runFirmwareUpdate();
   } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) {
     int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
