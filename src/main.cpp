@@ -15,6 +15,9 @@ String currentPath = "/";
 String entries[48];
 bool entryIsDir[48];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
+int pianoOctave=0,pianoEffect=0;
+int8_t synthBuffer[2048];
+const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
 String selectedFile;
 uint8_t* wavBuffer = nullptr;
 size_t wavLength = 0;
@@ -53,7 +56,7 @@ void drawHome() {
     d.setTextColor(on?WHITE:UI_MUTED,on?PANEL:BG);
     d.setCursor(15,y); d.printf("%02d  %s",i+1,apps[i]);
   }
-  footer("W/S OR ARROWS  MOVE     ENTER  OPEN");
+  footer("ARROWS MOVE     ENTER OPEN");
 }
 void splash() {
   auto &d=M5Cardputer.Display;
@@ -73,7 +76,7 @@ void splash() {
 void pianoScreen() {
   header("POCKET PIANO");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,42); d.print("Q W E R T Y U  /  WHITE KEYS");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,42); d.printf("CHROMATIC | OCT %d | %s",4+pianoOctave,effectNames[pianoEffect]);
   const char* labels[]={"C","D","E","F","G","A","B"};
   for(int i=0;i<7;i++){
     int x=8+i*32;
@@ -81,19 +84,25 @@ void pianoScreen() {
     d.setTextColor(BG,0xDEFB); d.setCursor(x+10,88); d.print(labels[i]);
   }
   d.setTextColor(UI_PINK,BG); d.setCursor(8,108); d.print("OCTAVE 4   |   SPEAKER SYNTH");
-  footer("Q-U  PLAY     A-L  SHARPS     ESC  BACK");
+  footer("LEFT/RIGHT OCTAVE  UP/DOWN EFFECT");
 }
 void playNote(char c) {
-  const char white[]={'q','w','e','r','t','y','u'};
-  const int midi[]={60,62,64,65,67,69,71};
-  const char black[]={'2','3','5','6','7'};
-  const int blackMidi[]={61,63,66,68,70};
-  for(int i=0;i<7;i++) if(c==white[i] || c==white[i]-32) {
-    M5Cardputer.Speaker.tone((uint32_t)(440.0f*powf(2.0f,(midi[i]-69)/12.0f)),180); return;
+  const char* keys="qwertyuiopasdfghjklzxcvbnm1234567890";
+  const char* pos=strchr(keys,(char)tolower((unsigned char)c));
+  if(!pos)return;
+  int midi=48+pianoOctave*12+(int)(pos-keys);
+  float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
+  M5Cardputer.Speaker.stop();
+  for(int i=0;i<2048;i++){
+    float phase=6.2831853f*hz*((float)i/22050.0f);
+    float v=sinf(phase);
+    if(pianoEffect==1)v=tanhf(v*3.8f)/tanhf(3.8f);
+    else if(pianoEffect==2)v=tanhf((sinf(phase)+0.55f*sinf(phase*2)+0.28f*sinf(phase*3))*5.0f);
+    else if(pianoEffect==3)v=(v>=0)?0.72f:-0.72f;
+    v*=1.0f-(float)i/2048.0f;
+    synthBuffer[i]=(int8_t)(v*105.0f);
   }
-  for(int i=0;i<5;i++) if(c==black[i]) {
-    M5Cardputer.Speaker.tone((uint32_t)(440.0f*powf(2.0f,(blackMidi[i]-69)/12.0f)),180); return;
-  }
+  M5Cardputer.Speaker.playRaw(synthBuffer,2048,22050,false,1,0,true);
 }
 void tunerScreen() {
   header("CHROMATIC TUNER");
@@ -109,7 +118,7 @@ void tunerScreen() {
     for(int i=0;i<4;i++){d.setTextColor(WHITE,BG);d.setCursor(22+i*52,94);d.printf("%s",ukeNames[i]);}
   }
   d.setTextColor(UI_MUTED,BG); d.setCursor(8,108); d.print("Mic pitch tracking not enabled");
-  footer("A/D  INSTRUMENT     ESC  BACK");
+  footer("LEFT/RIGHT INSTRUMENT     ESC BACK");
 }
 String parentPath(const String &p) {
   if(p=="/") return "/";
@@ -172,7 +181,7 @@ void drawFiles(bool musicMode=false) {
     shown++;
   }
   if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
-  footer("W/S MOVE  ENTER OPEN  BACKSPACE UP");
+  footer("ARROWS MOVE  ENTER OPEN  BACKSPACE UP");
 }
 bool startWav(const String &path) {
   if (wavBuffer) { M5Cardputer.Speaker.stop(); free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
@@ -257,16 +266,20 @@ void loop() {
   char c=k.word.size()?k.word[0]:0;
   if(screen==HOME) {
     if(k.enter){openApp();}
-    else if(c=='w'||c=='W'){selected=(selected+APP_COUNT-1)%APP_COUNT;drawHome();}
-    else if(c=='s'||c=='S'){selected=(selected+1)%APP_COUNT;drawHome();}
+    else if(k.up||k.left){selected=(selected+APP_COUNT-1)%APP_COUNT;drawHome();}
+    else if(k.down||k.right){selected=(selected+1)%APP_COUNT;drawHome();}
   } else if(screen==PIANO) {
-    if(c)playNote(c);
+    if(k.left){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
+    else if(k.right){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
+    else if(k.up){pianoEffect=(pianoEffect+3)%4;pianoScreen();}
+    else if(k.down){pianoEffect=(pianoEffect+1)%4;pianoScreen();}
+    else if(c)playNote(c);
   } else if(screen==TUNER) {
-    if(c=='a'||c=='A'||c=='d'||c=='D'){tunerInstrument=1-tunerInstrument;tunerScreen();}
+    if(k.left||k.right){tunerInstrument=1-tunerInstrument;tunerScreen();}
   } else if(screen==FILES || screen==MUSIC) {
     bool music=screen==MUSIC;
-    if(c=='w'||c=='W'){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
-    else if(c=='s'||c=='S'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
+    if(k.up){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
+    else if(k.down){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
     else if(k.enter)openFile(music);
     else if(k.del){if(audioStarted){M5Cardputer.Speaker.stop();audioStarted=false;}if(wavBuffer){free(wavBuffer);wavBuffer=nullptr;wavLength=0;}if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}else{screen=HOME;drawHome();}}
   }
