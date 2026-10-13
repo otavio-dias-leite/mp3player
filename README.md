@@ -15,6 +15,26 @@ Firmware para o M5Stack Cardputer-Adv (ESP32-S3), com interface em roxo/rosa, na
 - **CONWAY LIFE:** autômato celular Conway B3/S23, com edição de células, execução, pausa e passo individual.
 - **SYSTEM:** informações do dispositivo e bateria.
 
+## Menus do firmware
+
+A tela inicial organiza os aplicativos em três camadas:
+
+- **MUSIC:** SYNTH, TUNER, MUSIC PLAYER, WEB RADIO, EQUALIZER e MIC RECORDER.
+- **SYSTEM:** FILES, USB TRANSFER, WI-FI, BLUETOOTH, UPDATE FIRMWARE e INSTALL APPS.
+- **GAMES:** CONWAY LIFE e DOOM 1993.
+
+Os módulos existentes (sintetizador, afinador, player, rádio, equalizador, arquivos, USB, Wi-Fi e Conway Life) são acessados pelos novos menus. O save do Conway Life é gravado em `/JOHNNY/life.sav` no microSD ao sair do jogo.
+
+**Itens ainda não implementados:** gravador de microfone independente, pareamento/gerenciamento Bluetooth, catálogo e instalador de aplicativos e port nativo de DOOM 1993. Eles aparecem no menu como entradas identificadas, mas ainda não executam essas funções.
+
+## Atualização OTA
+
+A opção SYSTEM → UPDATE FIRMWARE baixa o binário `firmware.bin` da última GitHub Release do repositório. O dispositivo precisa estar conectado ao Wi-Fi. A atualização usa HTTPS e o mecanismo OTA do ESP32.
+
+O workflow `.github/workflows/firmware-release.yml` compila o ambiente `cardputer-adv` em pushes para `main`. Ao publicar uma tag `v*`, ele anexa `firmware.bin` à GitHub Release. Para disponibilizar uma nova versão ao atualizador, publique uma tag/release após validar a compilação e o teste no hardware.
+
+O cartão microSD é armazenamento persistente, não RAM. O firmware usa buffers limitados em RAM para áudio e transferência; não usa o cartão como swap, pois a latência e a vida útil do cartão tornam essa abordagem inadequada para substituir memória de execução.
+
 ## Equalização e áudio
 
 O equalizador é um banco de cinco filtros peaking biquad do tipo RBJ Audio EQ Cookbook, aplicado ao PCM decodificado antes da saída ES8311. O perfil Warm vem ativo inicialmente. Os ganhos são limitados a ±6 dB e compensados por pré-ganho para reduzir clipping. A preferência é armazenada no NVS.
