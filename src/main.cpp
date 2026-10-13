@@ -175,21 +175,188 @@ void playNote(char c) {
   }
   M5Cardputer.Speaker.playRaw(synthBuffer,2048,22050,false,1,0,true);
 }
+bool captureMic(int16_t* dst, size_t count, uint32_t timeoutMs=260) {
+  if(!M5Cardputer.Mic.begin()) return false;
+  bool queued=M5Cardputer.Mic.record(dst,count,16000,false);
+  if(!queued) { M5Cardputer.Mic.end(); return false; }
+  uint32_t started=millis();
+  while(M5Cardputer.Mic.isRecording() && millis()-started<timeoutMs) delay(1);
+  bool complete=!M5Cardputer.Mic.isRecording();
+  M5Cardputer.Mic.end();
+  return complete;
+}
+float detectPitch(const int16_t* samples, size_t count, float* rmsOut=nullptr) {
+  if(count<512) return 0;
+  double mean=0;
+  for(size_t i=0;i<count;i++) mean+=samples[i];
+  mean/=count;
+  double energy=0;
+  for(size_t i=0;i<count;i++) { double v=(double)samples[i]-mean; energy+=v*v; }
+  float rms=sqrtf((float)(energy/count));
+  if(rmsOut)*rmsOut=rms;
+  if(rms<180.0f) return 0;
+  const int minLag=13, maxLag=min(300,(int)count/3);
+  float previous=0;
+  for(int lag=minLag;lag<=maxLag;lag++) {
+    double cross=0,aa=0,bb=0;
+    for(size_t i=0;i<count-(size_t)lag;i++) {
+      double x=(double)samples[i]-mean, y=(double)samples[i+lag]-mean;
+      cross+=x*y; aa+=x*x; bb+=y*y;
+    }
+    float corr=(aa>0 && bb>0)?(float)(cross/sqrt(aa*bb)):0;
+    if(lag>minLag && previous>0.55f && previous>=corr) return 16000.0f/(float)(lag-1);
+    previous=corr;
+  }
+  return 0;
+}
+int nearestMidi(float hz, float* cents) {
+  if(hz<=0) return -1;
+  float raw=69.0f+12.0f*log2f(hz/440.0f);
+  int midi=(int)lroundf(raw);
+  if(cents)*cents=(raw-(float)midi)*100.0f;
+  return midi;
+}
 void tunerScreen() {
   header("CHROMATIC TUNER");
   auto &d=M5Cardputer.Display;
-  d.fillRoundRect(8,45,106,23,3,tunerInstrument==0?UI_PURPLE:PANEL);
-  d.fillRoundRect(120,45,112,23,3,tunerInstrument==1?UI_PURPLE:PANEL);
-  d.setTextColor(WHITE,tunerInstrument==0?UI_PURPLE:PANEL); d.setCursor(34,53); d.print("GUITAR");
-  d.setTextColor(WHITE,tunerInstrument==1?UI_PURPLE:PANEL); d.setCursor(151,53); d.print("UKULELE");
-  d.setTextColor(UI_CYAN,BG); d.setCursor(8,77); d.print("STANDARD TUNINGS");
-  if(!tunerInstrument) {
-    for(int i=0;i<6;i++){d.setTextColor(WHITE,BG);d.setCursor(8+i*38,94);d.printf("%s",guitarNames[i]);}
+  d.setTextColor(tunerInstrument==0?UI_PINK:UI_MUTED,BG); d.setCursor(8,43); d.print("GUITAR");
+  d.setTextColor(tunerInstrument==1?UI_PINK:UI_MUTED,BG); d.setCursor(152,43); d.print("UKULELE");
+  if(tunerMidi>=0) {
+    int note=((tunerMidi%12)+12)%12, octave=tunerMidi/12-1;
+    d.setTextSize(3); d.setTextColor(UI_CYAN,BG); d.setCursor(9,61); d.printf("%s%d",noteNames[note],octave);
+    d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(146,65); d.printf("%.1f Hz",tunerFrequency);
+    d.setTextColor(fabsf(tunerCents)<5?UI_CYAN:UI_PINK,BG); d.setCursor(146,82); d.printf("%+.0f cents",tunerCents);
+    d.drawFastHLine(16,101,208,UI_PURPLE); d.drawFastVLine(120,96,11,UI_CYAN);
+    int marker=120+(int)constrain(tunerCents,-50.0f,50.0f)*2;
+    d.fillCircle(marker,101,3,UI_PINK);
   } else {
-    for(int i=0;i<4;i++){d.setTextColor(WHITE,BG);d.setCursor(22+i*52,94);d.printf("%s",ukeNames[i]);}
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,70); d.print("PLAY A SINGLE NOTE");
+    d.setCursor(8,85); d.print("LISTENING TO INTERNAL MIC...");
   }
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,108); d.print("Mic pitch tracking not enabled");
-  footer("LEFT/RIGHT INSTRUMENT     ESC BACK");
+  const char* ref=tunerInstrument==0?"E2 A2 D3 G3 B3 E4":"G4 C4 E4 A4";
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,111); d.print(ref);
+  footer(", / ; CHANGE INSTRUMENT");
+}
+
+void drawNetworkScreen() {
+  header("WI-FI");
+  auto &d=M5Cardputer.Display;
+  if(wifiConfigStage==1 || wifiConfigStage==2) {
+    d.setTextColor(UI_CYAN,BG); d.setCursor(8,47);
+    d.print(wifiConfigStage==1?"NETWORK NAME":"PASSWORD");
+    d.setTextColor(WHITE,BG); d.setCursor(8,66);
+    String shown=wifiEntry;
+    if(wifiConfigStage==2) { shown=""; for(size_t i=0;i<wifiEntry.length();i++) shown+="*"; }
+    if(shown.length()>29)shown=shown.substring(shown.length()-29);
+    d.print(shown);
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("TYPE THEN PRESS ENTER");
+    footer("ESC / '  CANCEL");
+    return;
+  }
+  if(WiFi.status()==WL_CONNECTED) {
+    d.setTextColor(UI_CYAN,BG); d.setCursor(8,48); d.print("CONNECTED");
+    d.setTextColor(WHITE,BG); d.setCursor(8,66); d.print(WiFi.SSID());
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,82); d.print(WiFi.localIP().toString());
+    d.setCursor(8,98); d.printf("SIGNAL %d dBm",WiFi.RSSI());
+  } else {
+    d.setTextColor(UI_PINK,BG); d.setCursor(8,54); d.print("NOT CONNECTED");
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,75); d.print(savedSsid.length()?savedSsid:"NO NETWORK SAVED");
+  }
+  footer("ENTER CONFIGURE  ESC / ' BACK");
+}
+void startNetworkSetup() {
+  wifiConfigStage=1; wifiEntry="";
+  drawNetworkScreen();
+}
+void saveNetworkSetup() {
+  if(wifiConfigStage!=2) return;
+  savedPassword=wifiEntry;
+  preferences.putString("ssid",savedSsid);
+  preferences.putString("pass",savedPassword);
+  wifiConfigStage=0;
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_STA); WiFi.setSleep(false); WiFi.begin(savedSsid.c_str(),savedPassword.c_str());
+  drawNetworkScreen();
+}
+void drawVoiceScreen() {
+  header("MIC FX");
+  auto &d=M5Cardputer.Display;
+  const char* names[]={"CLEAN","ECHO","ROBOT","FUZZ"};
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,49); d.print(names[voiceEffect]);
+  d.setTextColor(UI_CYAN,BG); d.setCursor(8,68); d.printf("GAIN %d",voiceGain);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,87); d.print("LIVE MIC -> SPEAKER");
+  d.setCursor(8,101); d.print("HALF-DUPLEX MONITOR");
+  footer(",./; FX   -/+ GAIN");
+}
+void runVoiceChunk() {
+  if(M5Cardputer.Speaker.isPlaying()) return;
+  if(!captureMic(voiceInput,512,180)) return;
+  M5Cardputer.Speaker.setVolume(170);
+  for(size_t i=0;i<512;i++) {
+    int32_t dry=(int32_t)voiceInput[i]*voiceGain, wet=dry;
+    if(voiceEffect==1) {
+      int32_t delayed=voiceDelay[voiceDelayPos];
+      wet=dry+(delayed*55)/100;
+      voiceDelay[voiceDelayPos]=(int16_t)constrain(dry+(delayed*35)/100,-32768,32767);
+      voiceDelayPos=(voiceDelayPos+1)%8192;
+    } else if(voiceEffect==2) {
+      float mod=(voicePhase++%64)<32?1.0f:-1.0f;
+      wet=(int32_t)(dry*mod*0.72f);
+    } else if(voiceEffect==3) {
+      float x=constrain((float)dry/12000.0f,-5.0f,5.0f);
+      wet=(int32_t)(tanhf(x)*22000.0f);
+    }
+    voiceOutput[i]=(int16_t)constrain(wet,-32768,32767);
+  }
+  M5Cardputer.Speaker.playRaw(voiceOutput,512,16000,false,1,0,true);
+}
+#if JOHNNY_USB_MSC
+bool beginUsbMode() {
+  if(!sdReady) return false;
+  if(audioStarted) { M5Cardputer.Speaker.stop(); audioStarted=false; }
+  if(wavBuffer) { free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
+  SD.end(); sdReady=false; sdBus.end();
+  sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
+  if(!usbSd.cardBegin(SdSpiConfig(SD_CS,DEDICATED_SPI,SD_SCK_MHZ(20),&sdBus))) {
+    usbSd.end(); sdBus.end(); sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
+    sdReady=SD.begin(SD_CS,sdBus,20000000); return false;
+  }
+  msc.vendorID("JOHNNY"); msc.productID("CARDPUTER SD"); msc.productRevision("1.0");
+  msc.onRead(mscRead); msc.onWrite(mscWrite); msc.onStartStop(mscStartStop);
+  uint32_t sectors=(uint32_t)usbSd.card()->sectorCount();
+  if(!msc.begin(sectors,512)) {
+    usbSd.end(); sdBus.end(); sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
+    sdReady=SD.begin(SD_CS,sdBus,20000000); return false;
+  }
+  msc.mediaPresent(true); usbHostEjected=false;
+  if(!usbStarted) { USB.begin(); usbStarted=true; }
+  usbActive=true;
+  return true;
+}
+void endUsbMode() {
+  msc.mediaPresent(false);
+  delay(80);
+  usbSd.end();
+  sdBus.end(); sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
+  sdReady=SD.begin(SD_CS,sdBus,20000000);
+  usbActive=false;
+}
+#else
+bool beginUsbMode() { return false; }
+void endUsbMode() {}
+#endif
+void drawUsbScreen(bool ok) {
+  header("USB DRIVE");
+  auto &d=M5Cardputer.Display;
+  if(ok) {
+    d.setTextColor(UI_CYAN,BG); d.setCursor(8,52); d.print("SD CARD EXPORTED");
+    d.setTextColor(WHITE,BG); d.setCursor(8,70); d.print("PC CAN READ / WRITE");
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("EJECT BEFORE DISCONNECT");
+  } else {
+    d.setTextColor(UI_PINK,BG); d.setCursor(8,52); d.print("USB MSC UNAVAILABLE");
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,70); d.print("CHECK SD CARD / USB MODE");
+  }
+  footer("ESC / '  RETURN TO JOHNNY");
 }
 String parentPath(const String &p) {
   if(p=="/") return "/";
