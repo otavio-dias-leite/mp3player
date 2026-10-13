@@ -24,3 +24,5 @@ h2{margin:0 0 18px;color:#f4d6ff;font:700 12px 'Space Mono',monospace;letter-spa
 .tiles div:hover,.tiles a:hover{border-color:var(--pink);background:#32154a}
 @media(max-width:580px){main{width:calc(100% - 28px)}.hero{padding:75px 0 45px}.steps{grid-template-columns:1fr}.steps div{padding:14px}.steps b{display:inline;margin:0 0 0 13px}.tiles{grid-template-columns:repeat(2,1fr)}.tiles div{min-height:72px;padding:14px}}
 @media(prefers-reduced-motion:reduce){.glitch:before,.glitch:after{animation:none}}
+
+.tagline{margin:-16px 0 34px;color:#d9b8ff;font:12px 'Space Mono',monospace;letter-spacing:.16em;text-transform:lowercase;text-shadow:0 0 14px #a855f777}
