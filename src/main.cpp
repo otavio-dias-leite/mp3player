@@ -742,8 +742,10 @@ void serviceAudio() {
     const bool wasRadio=audioIsRadio;
     stopAudio();
     audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
-    if(screen==MUSIC && musicNowPlaying) drawMusicInfo(audioNowTitle);
-    else if(screen==RADIO) drawRadioScreen();
+    if(!screenSaverActive) {
+      if(screen==MUSIC && musicNowPlaying) drawMusicInfo(audioNowTitle);
+      else if(screen==RADIO) drawRadioScreen();
+    }
   }
 }
 void setAudioVolume(int value) {
@@ -765,6 +767,16 @@ void drawMusicInfo(const String &name) {
   d.setTextSize(1); d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);
   d.setCursor(8,113);
   d.printf("%s  VOL %02d",audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.c_str(),audioVolume);
+  if(entryCount>1) {
+    int previous=(selected+entryCount-1)%entryCount;
+    int next=(selected+1)%entryCount;
+    d.setTextColor(UI_MUTED,BG); d.setCursor(8,59); d.print("< ");
+    String prevName=entries[previous]; if(prevName.length()>12) prevName=prevName.substring(0,9)+"...";
+    d.print(prevName);
+    d.setCursor(152,59); d.print("> ");
+    String nextName=entries[next]; if(nextName.length()>12) nextName=nextName.substring(0,9)+"...";
+    d.print(nextName);
+  }
   footer("< > NEXT/PREV  ENTER PAUSE  +/- VOL");
 }
 void drawRadioScreen() {
@@ -795,7 +807,8 @@ void drawRadioScreen() {
     }
   }
   d.setTextColor(audioStarted && audioIsRadio?UI_PINK:UI_MUTED,BG); d.setCursor(8,112);
-  String status=audioIsRadio?(audioPaused?"RADIO PAUSED":"LIVE STREAM"):audioStatusMessage;
+  String status=audioIsRadio?(audioPaused?"RADIO PAUSED":"LIVE STREAM"):radioMessage;
+  if(status=="SELECT A STATION" || status.length()==0) status=audioStatusMessage;
   d.print(status.substring(0,30));
   footer("UP/DN STATION  ENTER PLAY  SPACE PAUSE");
 }
@@ -915,11 +928,11 @@ void loop() {
     if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
   }
   serviceAudio();
-  if(screen==NETWORK && wifiConfigStage==0) {
+  if(!screenSaverActive && screen==NETWORK && wifiConfigStage==0) {
     int status=(int)WiFi.status();
     if(status!=lastWiFiStatus) { lastWiFiStatus=status; drawNetworkScreen(); }
   }
-  if(screen==NETWORK && wifiConfigStage==1 && wifiScanPending) {
+  if(!screenSaverActive && screen==NETWORK && wifiConfigStage==1 && wifiScanPending) {
     int result=WiFi.scanComplete();
     if(result>=0) {
       wifiNetworkCount=min(result,20);
