@@ -94,14 +94,15 @@ public:
   bool ConsumeSample(int16_t sample[2]) override {
     if(!speaker_)return false;
     if(bufferIndex_>=kBufferSamples)flush();
-    const int32_t l=Amplify(sample[LEFTCHANNEL]),r=Amplify(sample[RIGHTCHANNEL]);
-    const int16_t mono=audioEqualizer.processMono((l+r)/2,hertz);
+    const int32_t rawLeft=sample[LEFTCHANNEL],rawRight=sample[RIGHTCHANNEL];
+    const int16_t equalized=audioEqualizer.processMono((rawLeft+rawRight)/2,hertz);
+    // Record after EQ but before the listening-volume control.
     if(radioRecording&&radioRecordQueue){
       if(radioRecordSampleRate==0)radioRecordSampleRate=hertz;
-      recordSamples_[recordIndex_++]=mono;
+      recordSamples_[recordIndex_++]=equalized;
       if(recordIndex_>=RADIO_RECORD_BLOCK_SAMPLES)sendRecordBlock();
     }
-    buffers_[bufferSlot_][bufferIndex_++]=mono;
+    buffers_[bufferSlot_][bufferIndex_++]=(int16_t)Amplify(equalized);
     return true;
   }
   void flush() override {
@@ -132,7 +133,7 @@ private:
     RadioRecordBlock block{};block.count=(uint16_t)recordIndex_;
     memcpy(block.samples,recordSamples_,recordIndex_*sizeof(int16_t));
     if(!radioRecordQueue||xQueueSend(radioRecordQueue,&block,0)!=pdTRUE){
-      radioRecording=false;radioRecordStopRequested=true;radioRecordFailed=true;
+      radioRecording=false;radioRecordStopRequested=true;radioRecordFailed=true;radioRecordState=3;
     }
     recordIndex_=0;
   }
