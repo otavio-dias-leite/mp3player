@@ -22,7 +22,7 @@ jobs:
       - name: Read firmware version
         id: version
         shell: bash
-        run: echo "value=$(tr -d '\\r\\n' < VERSION)" >> "$GITHUB_OUTPUT"
+        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
       - name: Publish versioned firmware release
         uses: softprops/action-gh-release@v2
         with:
