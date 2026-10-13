@@ -39,8 +39,8 @@ String selectedFile;
 uint8_t* wavBuffer = nullptr;
 size_t wavLength = 0;
 bool audioStarted = false;
-const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "PHOTOS", "MIC FX", "WI-FI", "USB DRIVE", "SYSTEM"};
-constexpr int APP_COUNT = 9;
+const char* apps[] = {"SYNTH", "TUNER", "MUSIC", "FILES", "WI-FI", "USB", "SYSTEM"};
+constexpr int APP_COUNT = 7;
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
@@ -536,7 +536,7 @@ void openApp() {
     case 7:screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     default:
       screen=ABOUT; header("SYSTEM");
-      M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY OS / CARDPUTER-ADV");
+      M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
       M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH");
       M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND");
       M5Cardputer.Display.setCursor(8,101); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
@@ -629,13 +629,6 @@ if(usbActive) endUsbMode();
     if(k.up||c==';'||k.left||c==','){if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(music);}
     else if(k.down||c=='.'||k.right||c=='/'){if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(music);}
     else if(k.enter)openFile(music);
-  } else if(screen==VOICE) {
-    if(k.left||c==','){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
-    else if(k.right||c=='/'){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
-    else if(k.up||c==';'){voiceEffect=(voiceEffect+3)%4;drawVoiceScreen();}
-    else if(k.down||c=='.'){voiceEffect=(voiceEffect+1)%4;drawVoiceScreen();}
-    else if(c=='-'){voiceGain=max(1,voiceGain-1);drawVoiceScreen();}
-    else if(c=='='){voiceGain=min(5,voiceGain+1);drawVoiceScreen();}
     else if(k.enter){recordVoiceTake();drawVoiceScreen();}
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
