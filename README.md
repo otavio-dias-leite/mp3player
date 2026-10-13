@@ -23,9 +23,9 @@ A tela inicial organiza os aplicativos em três camadas:
 - **SYSTEM:** FILES, USB TRANSFER, WI-FI, BLUETOOTH, UPDATE FIRMWARE e INSTALL APPS.
 - **GAMES:** CONWAY LIFE e DOOM 1993.
 
-Os módulos existentes (sintetizador, afinador, player, rádio, equalizador, arquivos, USB, Wi-Fi e Conway Life) são acessados pelos novos menus. O save do Conway Life é gravado em `/JOHNNY/life.sav` no microSD ao sair do jogo.
+Os módulos existentes (sintetizador, afinador, player, rádio, equalizador, arquivos, USB, Wi-Fi e Conway Life) são acessados pelos novos menus. O save do Conway Life é gravado em `/JOHNNY/life.sav` no microSD ao sair do jogo. O gravador de microfone salva WAV PCM mono de 16 kHz em `/RECORDINGS/MICxxxx.WAV`.
 
-**Itens ainda não implementados:** gravador de microfone independente, pareamento/gerenciamento Bluetooth, catálogo e instalador de aplicativos e port nativo de DOOM 1993. Eles aparecem no menu como entradas identificadas, mas ainda não executam essas funções.
+**Itens ainda não implementados:** pareamento/gerenciamento Bluetooth, catálogo e instalador de aplicativos e port nativo de DOOM 1993. Eles aparecem no menu como entradas identificadas, mas ainda não executam essas funções.
 
 ## Atualização OTA
 
