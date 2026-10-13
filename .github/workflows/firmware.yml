@@ -1,0 +1,24 @@
+name: Firmware build
+
+on:
+  push:
+    branches:
+      - main
+      - feat/battery-saver-radio-player-site
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-cardputer-adv:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio
+      - name: Build firmware
+        run: pio run -e cardputer-adv
