@@ -1,34 +1,38 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#10071f">
-<meta name="description" content="Instale o JOHNNY OS no M5Stack Cardputer-Adv.">
-<title>JOHNNY OS</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#13071f">
+<meta name="description" content="JOHNNY OS para M5Stack Cardputer-Adv">
+<title>JOHNNY</title>
 <link rel="stylesheet" href="style.css">
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </head>
 <body>
 <main>
-<header><a href="#">JOHNNY<span> OS</span></a><span>CARDPUTER-ADV / ESP32-S3</span></header>
-<section class="install" id="install">
-<h1>JOHNNY OS</h1>
-<p>Seu instrumento. Seu deck. Seu Cardputer.</p>
+<section class="hero">
+<h1 class="glitch" data-text="JOHNNY">JOHNNY</h1>
 <esp-web-install-button manifest="firmware/manifest.json">
-<button slot="activate">INSTALAR FIRMWARE <span>↗</span></button>
-<span slot="unsupported">Use Chrome ou Edge em um computador compatível com USB.</span>
-<span slot="not-allowed">A conexão USB serial não está disponível neste navegador.</span>
+<button slot="activate">INSTALL <span>↗</span></button>
 </esp-web-install-button>
-<div class="how"><h2>COMO INSTALAR</h2><ol><li>Desligue o Cardputer-Adv.</li><li>Segure G0 e conecte o cabo USB para entrar no modo de gravação.</li><li>Pressione instalar, selecione a porta USB e confirme a gravação.</li></ol><small>Compatível com Chrome ou Edge • USB • A gravação pode apagar os dados existentes.</small></div>
 </section>
-<section class="features"><h2>RECURSOS</h2><div class="tiles">
-<article><b>01</b><h3>POCKET SYNTH</h3><p>Sintetizador cromático, oitavas e timbres.</p></article>
-<article><b>02</b><h3>CHROMATIC TUNER</h3><p>Ferramentas de afinação para instrumentos.</p></article>
-<article><b>03</b><h3>MUSIC PLAYER</h3><p>Reprodução de arquivos WAV PCM pelo microSD.</p></article>
-<article><b>04</b><h3>SD EXPLORER</h3><p>Navegue por pastas e arquivos do cartão.</p></article>
-<article><b>05</b><h3>PHOTO VIEWER</h3><p>Área de visualização de imagens em evolução.</p></article>
-<article><b>06</b><h3>SYSTEM</h3><p>Informações do dispositivo e estado do cartão.</p></article>
-</div></section>
-<footer><span>JOHNNY OS / PERSONAL DECK</span><a href="https://github.com/otavio-dias-leite/johnny">CÓDIGO-FONTE ↗</a></footer>
+<section class="how">
+<h2>HOW TO INSTALL</h2>
+<div class="steps">
+<div>01 <b>POWER OFF</b></div>
+<div>02 <b>HOLD G0 + CONNECT USB</b></div>
+<div>03 <b>SELECT PORT + INSTALL</b></div>
+</div>
+</section>
+<section class="features">
+<h2>FEATURES</h2>
+<div class="tiles">
+<div>SYNTH</div><div>TUNER</div><div>MUSIC</div>
+<div>SD FILES</div><div>PHOTO</div><div>MIC FX</div>
+<div>WI-FI</div><div>USB DRIVE</div><div>SYSTEM</div>
+</div>
+</section>
 </main>
-</body></html>
+</body>
+</html>
