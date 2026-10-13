@@ -3,7 +3,6 @@ name: Build and publish JOHNNY firmware
 on:
   push:
     branches: [main]
-    tags: ["v*"]
 
 permissions:
   contents: write
@@ -20,10 +19,16 @@ jobs:
         run: pip install platformio
       - name: Build Cardputer-Adv firmware
         run: pio run -e cardputer-adv
-      - name: Publish firmware asset
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Read firmware version
+        id: version
+        shell: bash
+        run: echo "value=$(tr -d '\\r\\n' < VERSION)" >> "$GITHUB_OUTPUT"
+      - name: Publish versioned firmware release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.value }}
+          target_commitish: main
+          name: JOHNNY v${{ steps.version.outputs.value }}
           files: .pio/build/cardputer-adv/firmware.bin
-          name: JOHNNY ${{ github.ref_name }}
           generate_release_notes: true
+          fail_on_unmatched_files: true
