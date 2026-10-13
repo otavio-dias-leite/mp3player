@@ -468,7 +468,7 @@ void drawFiles(bool musicMode=false) {
     shown++;
   }
   if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
-  footer("ARROWS MOVE  ENTER OPEN");
+  footer(",./; MOVE  ENTER OPEN  ESC / ' BACK");
 }
 bool startWav(const String &path) {
   if (wavBuffer) { M5Cardputer.Speaker.stop(); free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
@@ -495,7 +495,7 @@ void drawMusicInfo(const String &name) {
   String n=name; if(n.length()>34)n=n.substring(0,31)+"...";
   d.print(n);
   d.setTextColor(UI_MUTED,BG); d.setCursor(8,113); d.print(audioStarted?"WAV PLAYING":"WAV ONLY / SELECT TO PLAY");
-  footer("ESC  RETURN TO LIBRARY");
+  footer("ESC / '  RETURN TO LIBRARY");
 }
 void openFile(bool musicMode) {
   if(!sdReady)return;
