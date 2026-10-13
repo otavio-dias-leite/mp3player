@@ -265,6 +265,8 @@ void runVoiceChunk() {
   }
   M5Cardputer.Speaker.playRaw(voiceOutput,512,16000,false,1,0,true);
 }
+bool beginUsbMode();
+void drawUsbScreen(bool ok);
 String safeSdPath(String path) {
   path.trim();
   path.replace("\\","/");
@@ -278,9 +280,15 @@ void usbReplyError(const char* reason) {
 void processUsbCommand(String line) {
   line.trim();
   if(line=="PING") { Serial.println("JOHNNY/1"); return; }
+  if(line=="ENTER") {
+    if(beginUsbMode()) { screen=USBMODE; drawUsbScreen(true); Serial.println("READY"); }
+    else usbReplyError("SD");
+    return;
+  }
   if(line=="EXIT") {
     usbActive=false; screen=HOME; drawHome(); Serial.println("BYE"); return;
   }
+  if(!usbActive) { usbReplyError("MODE"); return; }
   if(line.startsWith("LIST\t")) {
     String path=safeSdPath(line.substring(5));
     if(path.length()==0) { usbReplyError("PATH"); return; }
@@ -354,7 +362,6 @@ bool beginUsbMode() {
   if(!sdReady) return false;
   if(audioStarted) { M5Cardputer.Speaker.stop(); audioStarted=false; }
   if(wavBuffer) { free(wavBuffer); wavBuffer=nullptr; wavLength=0; }
-  Serial.begin(115200);
   usbCommandLine="";
   usbActive=true;
   return true;
@@ -534,6 +541,7 @@ void setup() {
   randomSeed(esp_random());
   sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
   sdReady=SD.begin(SD_CS,sdBus,20000000);
+  Serial.begin(115200);
   preferences.begin("johnny",false);
   savedSsid=preferences.getString("ssid","");
   savedPassword=preferences.getString("pass","");
@@ -562,7 +570,7 @@ void loop() {
     }
   }
   if(screen==VOICE && !M5Cardputer.Speaker.isPlaying()) runVoiceChunk();
-  if(screen==USBMODE && usbActive) serialTransferTask();
+  if(Serial.available()>0) serialTransferTask();
 
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
