@@ -203,6 +203,7 @@ Preferences preferences;
 String savedSsid, savedPassword, wifiEntry;
 uint8_t wifiConfigStage=0;
 int lastWiFiStatus=-1;
+int lastAboutWiFiStatus=-1;
 String wifiNetworks[20];
 int wifiNetworkRSSI[20];
 int wifiNetworkAuth[20];
@@ -1671,6 +1672,7 @@ void loop() {
   if(!screenSaverActive&&screen==LIFE&&lifeRunning&&millis()-lifeLastStep>=lifeIntervalMs){stepLife();drawLife();}
   static uint8_t lastRecorderDisplayState=255;
   if(screen==RADIO&&!screenSaverActive&&lastRecorderDisplayState!=radioRecordState){lastRecorderDisplayState=radioRecordState;drawRadioScreen();}
+  if(screen==ABOUT&&!screenSaverActive){int status=(int)WiFi.status();if(status!=lastAboutWiFiStatus){lastAboutWiFiStatus=status;drawDeviceStatus();}}
   if(!screenSaverActive && screen==NETWORK && wifiConfigStage==0) {
     int status=(int)WiFi.status();
     if(status!=lastWiFiStatus) { lastWiFiStatus=status; drawNetworkScreen(); }
