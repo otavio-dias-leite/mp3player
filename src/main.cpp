@@ -347,25 +347,32 @@ void drawAppIcon(uint8_t app,int x,int y,uint16_t color){
   else {d.drawCircle(x+10,y+10,7,color);d.drawCircle(x+10,y+10,2,color);d.drawFastHLine(x+1,y+10,4,color);d.drawFastHLine(x+15,y+10,4,color);d.drawFastVLine(x+10,y+1,4,color);d.drawFastVLine(x+10,y+15,4,color);}
 }
 void drawHome(){
-  auto& d=M5Cardputer.Display;d.fillScreen(BG);
-  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(7,5);d.print("JOHNNY");
-  d.setTextColor(UI_MUTED,BG);d.setCursor(67,5);d.print("CARDPUTER CONSOLE");
-  drawBatteryIndicator();d.drawFastHLine(7,18,226,UI_PURPLE);
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(9,25);d.print("APPLICATIONS");
+  auto& d=M5Cardputer.Display;
+  d.fillScreen(BG);
+  d.setTextSize(1);
+  d.setTextColor(UI_PINK,BG);d.setCursor(8,5);d.print("JOHNNY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(62,5);d.print("CARDPUTER ADV");
+  drawBatteryIndicator();
+  d.drawFastHLine(7,18,226,UI_PURPLE);
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(9,25);d.print("MAIN MENU");
   const char* labels[APP_COUNT]={"HACK","GAMES","MUSIC","SYSTEM"};
-  const char* hints[APP_COUNT]={"NETWORK TOOLS","MINI GAMES","AUDIO STUDIO","DEVICE TOOLS"};
+  const char* hints[APP_COUNT]={"NETWORK & SECURITY","ARCADE & CLASSICS","PLAYER & AUDIO TOOLS","DEVICE & CONNECTIVITY"};
   for(int i=0;i<APP_COUNT;i++){
-    const int col=i%2,row=i/2,x=8+col*114,y=42+row*36;
-    const bool active=(i==selected);const uint16_t fill=active?PANEL:BG;
-    d.fillRoundRect(x,y,108,31,4,fill);d.drawRoundRect(x,y,108,31,4,active?UI_PINK:0x5140);
-    drawAppIcon((uint8_t)i,x+5,y+6,active?UI_PINK:UI_LAVENDER);
-    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+29,y+7);d.print(labels[i]);
-    d.setTextColor(active?UI_PINK:UI_MUTED,fill);d.setCursor(x+29,y+19);d.print(hints[i]);
-    d.setTextColor(active?UI_PINK:UI_MUTED,fill);d.setCursor(x+91,y+10);d.print(active?">":" ");
+    const int x=8,y=39+i*19;
+    const bool active=(i==selected);
+    const uint16_t fill=active?PANEL:BG;
+    d.fillRoundRect(x,y,224,17,3,fill);
+    if(active)d.drawRoundRect(x,y,224,17,3,UI_PURPLE);
+    drawAppIcon((uint8_t)i,x+4,y+1,active?UI_PINK:UI_MUTED);
+    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+27,y+3);d.print(labels[i]);
+    d.setTextColor(active?UI_LAVENDER:UI_MUTED,fill);d.setCursor(x+84,y+4);d.print(hints[i]);
+    if(active){d.setTextColor(UI_PINK,fill);d.setCursor(220,y+4);d.print(">");}
   }
-  d.drawFastHLine(7,119,226,0x5140);d.setTextColor(UI_MUTED,BG);
-  d.setCursor(10,126);d.print("ARROWS SELECT   ENTER OPEN   TAB SLEEP");
+  d.drawFastHLine(7,117,226,0x5140);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(9,123);
+  d.print("UP/DOWN SELECT   ENTER OPEN   TAB SLEEP");
 }
+
 void drawModuleIcon(uint8_t type,int x,int y,uint16_t color){
   auto& d=M5Cardputer.Display;
   if(type==0){d.drawRoundRect(x+2,y+4,7,6,1,color);d.drawCircle(x+5,y+4,2,color);}
