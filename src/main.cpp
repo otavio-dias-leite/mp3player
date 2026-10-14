@@ -187,7 +187,8 @@ String audioStatusMessage="STOPPED";
 String audioNowTitle;
 String audioTrackPath, audioTrackExtension, audioTrackArtist, audioTrackAlbum, audioTrackTitle;
 static uint8_t audioCoverData[40U*1024U];
-alignas(4) static uint8_t audioDecodeBuffer[8192];
+alignas(4) static uint8_t audioDecodeBuffer[4096];
+alignas(8) static uint8_t mp3DecoderWorkspace[AudioGeneratorMP3::preAllocSize()];
 uint32_t musicProgressLastDraw=0;
 uint8_t musicProgressLastValue=255;
 uint32_t audioCoverSize=0;
@@ -1029,7 +1030,7 @@ void stopAudio() {
   while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);
 }
 AudioGenerator* createAudioDecoder(const String& extension) {
-  if(extension=="mp3") return new AudioGeneratorMP3();
+  if(extension=="mp3") return new AudioGeneratorMP3(mp3DecoderWorkspace,sizeof(mp3DecoderWorkspace));
   if(extension=="wav") return new AudioGeneratorWAV();
   if(extension=="flac") return new AudioGeneratorFLAC();
   if(extension=="aac") return new AudioGeneratorAAC();
@@ -1068,8 +1069,13 @@ bool startAudioSource(AudioFileSource* source, const String& title, const String
     return false;
   }
   if(!audioDecoder->begin(audioInputBuffer,audioOutput)) {
-    audioStatusMessage=(extension=="ogg" || extension=="opus" || extension=="oga")?
-      "OGG MUST BE OPUS":"DECODE / STREAM ERROR";
+    Serial.printf("JOHNNY AUDIO: decoder begin failed; format=%s, bytes=%lu, heap=%lu, largest=%lu\\n",
+      extension.c_str(),(unsigned long)(audioRawSource?audioRawSource->getSize():0),
+      (unsigned long)ESP.getFreeHeap(),(unsigned long)ESP.getMaxAllocHeap());
+    if(extension=="mp3") audioStatusMessage="MP3 INIT / MEMORY ERROR";
+    else if(extension=="wav") audioStatusMessage="WAV MUST BE PCM 8/16 BIT";
+    else if(extension=="ogg" || extension=="opus" || extension=="oga") audioStatusMessage="OGG MUST BE OPUS";
+    else audioStatusMessage="AUDIO FORMAT / INIT ERROR";
     stopAudioLocked();
     if(audioMutex) xSemaphoreGive(audioMutex);
     return false;
