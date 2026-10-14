@@ -113,6 +113,8 @@ jobs:
           for f in bootloader.bin partitions.bin boot_app0.bin firmware.bin manifest.json; do
             test -s "_site/firmware/$f"
           done
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
