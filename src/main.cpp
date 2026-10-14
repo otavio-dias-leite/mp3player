@@ -351,20 +351,27 @@ void splash() {
   auto &d=M5Cardputer.Display;
   d.fillScreen(BG);
   d.setTextSize(3);
-  d.setTextColor(UI_PURPLE,BG);
-  d.setCursor(38,48); d.print("JOHNNY");
-  delay(350);
-  for(int i=0;i<10;i++) {
-    int y=random(43,87), x=random(12,45), w=random(70,205);
-    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_PURPLE);
-    d.setTextColor(i%2?UI_PINK:UI_PURPLE,BG);
-    d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
-    delay(32);
+  // Short cyberpunk boot animation: offset color channels, scanline cuts and
+  // randomized horizontal tearing, then settle on a clean title.
+  for(int frame=0;frame<14;frame++) {
+    d.fillScreen(BG);
+    int x=38+random(-3,4), y=48+random(-2,3);
+    d.setTextColor(UI_PINK,BG); d.setCursor(x-2,y); d.print("JOHNNY");
+    d.setTextColor(UI_LAVENDER,BG); d.setCursor(x+2,y); d.print("JOHNNY");
+    d.setTextColor(WHITE,BG); d.setCursor(x,y); d.print("JOHNNY");
+    for(int cut=0;cut<3;cut++) {
+      int sy=random(43,83), sx=random(8,180), sw=random(18,65);
+      d.fillRect(sx,sy,sw,random(1,3),random(2)?UI_PINK:UI_PURPLE);
+    }
+    if(frame%3==0) d.fillRect(0,random(42,88),240,2,BG);
+    delay(38);
   }
   d.fillScreen(BG);
-  d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
-  d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
-  delay(1100);
+  d.setTextColor(UI_PURPLE,BG); d.setCursor(38,43); d.print("JOHNNY");
+  d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
+  d.drawFastHLine(38,96,164,UI_PURPLE);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(85,108); d.printf("BOOT %s",JOHNNY_VERSION);
+  delay(1250);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
