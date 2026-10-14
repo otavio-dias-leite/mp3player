@@ -100,7 +100,7 @@ Na guitarra, o sintetizador usa buffers alternados e canal de áudio independent
 
 ## Atualização e compilação
 
-A opção SYSTEM → UPDATE FIRMWARE baixa `firmware.bin` da última GitHub Release. É necessária uma conexão Wi-Fi funcional. A atualização usa HTTPS e o mecanismo OTA do ESP32.
+A opção SYSTEM → UPDATE FIRMWARE baixa `firmware.bin` da GitHub Release marcada como latest. O workflow publica automaticamente uma Release OTA após um push em `main` que compile com sucesso; builds de pull request geram apenas artefatos de validação. É necessária uma conexão Wi-Fi funcional. A atualização usa HTTPS e o mecanismo OTA do ESP32.
 
 Para compilar e gravar com PlatformIO:
 
