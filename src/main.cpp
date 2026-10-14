@@ -376,8 +376,8 @@ void pianoScreen() {
   d.setTextColor(UI_MUTED,BG); d.setCursor(8,75); d.print("FLAT: S=Db  A=Gb  L=Bb");
   d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,89); d.print("-/+ VOL  [/] OCT  ;/. PATCH");
   d.setTextColor(synthRecording?UI_PINK:UI_MUTED,BG); d.setCursor(8,103);
-  d.printf("R: %s  %s",synthRecording?"REC":"READY",synthRecordPath.length()?synthRecordPath.substring(12):"NO TAKE");
-  footer("R START/STOP RECORDING");
+  d.printf("P: %s  %s",synthRecording?"REC":"READY",synthRecordPath.length()?synthRecordPath.substring(12):"NO TAKE");
+  footer("P START/STOP RECORDING");
 }
 void writeWavHeader(File& file,uint32_t dataBytes,uint32_t sampleRate);
 void startSynthRecording() {
@@ -1302,7 +1302,7 @@ void tickMiniGame(){
   else if(screen==TETRIS){tetY++;if(tetY>14){tetY=0;tetX=random(0,7);tetType=random(0,7);gameScore+=5;}}
 }
 void startWebServer(){
-  webServer.on("/",HTTP_GET,[]{webServer.send(200,"text/html","<!doctype html><meta name='viewport' content='width=device-width'><title>JOHNNY</title><style>body{background:#100818;color:#eee;font:16px sans-serif;padding:20px}a{color:#f19f}li{margin:10px}</style><h1>JOHNNY / CARDPUTER</h1><p>Arquivos do microSD</p><ul id='files'></ul><script>async function load(){let a=await(await fetch('/api/list')).json();files.innerHTML=a.map(x=>'<li>'+(x.dir?'📁 ':'📄 ')+'<a href="/download?path='+encodeURIComponent(x.path)+'">'+x.name+'</a> '+(x.dir?'':'('+x.size+' bytes)')+'</li>').join('')}load()</script>");});
+  webServer.on("/",HTTP_GET,[]{webServer.send(200,"text/html",R"JOHNNYHTML(<!doctype html><meta name='viewport' content='width=device-width'><title>JOHNNY</title><style>body{background:#100818;color:#eee;font:16px sans-serif;padding:20px}a{color:#f19f}li{margin:10px}</style><h1>JOHNNY / CARDPUTER</h1><p>Arquivos do microSD</p><ul id='files'></ul><script>async function load(){let a=await(await fetch('/api/list')).json();files.innerHTML=a.map(x=>'<li>'+(x.dir?'📁 ':'📄 ')+'<a href="/download?path='+encodeURIComponent(x.path)+'">'+x.name+'</a> '+(x.dir?'':'('+x.size+' bytes)')+'</li>').join('')}load()</script>)JOHNNYHTML");});
   webServer.on("/api/list",HTTP_GET,[]{String path=webServer.hasArg("path")?safeSdPath(webServer.arg("path")):"/";if(!sdReady||!path.length()){webServer.send(503,"application/json","[]");return;}File dir=SD.open(path);if(!dir||!dir.isDirectory()){if(dir)dir.close();webServer.send(404,"application/json","[]");return;}String json="[";bool first=true;File f=dir.openNextFile();while(f){String name=String(f.name());int slash=name.lastIndexOf('/');if(slash>=0)name=name.substring(slash+1);if(name.length()){if(!first)json+=",";first=false;String full=path=="/"?"/"+name:path+"/"+name;json+="{\"name\":\""+name+"\",\"path\":\""+full+"\",\"dir\":"+String(f.isDirectory()?"true":"false")+",\"size\":"+String((unsigned long)f.size())+"}";}f.close();f=dir.openNextFile();}dir.close();json+="]";webServer.send(200,"application/json",json);});
   webServer.on("/download",HTTP_GET,[]{String path=safeSdPath(webServer.arg("path"));if(!sdReady||!path.length()){webServer.send(400,"text/plain","Invalid path");return;}File f=SD.open(path,FILE_READ);if(!f||f.isDirectory()){if(f)f.close();webServer.send(404,"text/plain","Not found");return;}webServer.streamFile(f,"application/octet-stream");f.close();});
   webServer.begin();webServerStarted=true;
@@ -1571,7 +1571,7 @@ if(usbActive) endUsbMode();
     else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
     else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c==']'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
-    else if(c=='r'||c=='R'){if(synthRecording)stopSynthRecording();else startSynthRecording();pianoScreen();}
+    else if(c=='p'||c=='P'){if(synthRecording)stopSynthRecording();else startSynthRecording();pianoScreen();}
     else if(c)playNote(c);
   } else if(screen==TUNER) {
     if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
