@@ -1784,7 +1784,7 @@ void loop() {
     return;
   }
 
-  bool back=(k.esc || c==0x1B || c=='`' || c=='~');
+  bool back=(c==0x1B || c=='`' || c=='~' || (k.del && screen!=RADIO && screen!=HACKINPUT && screen!=NETWORK));
   if(back) {
     if(screen==MICREC){stopMicRecording();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=3;drawCategoryMenu();}
@@ -1829,15 +1829,15 @@ if(usbActive) endUsbMode();
   } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) {
     int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:(screen==GAMESMENU?GAMES_MENU_COUNT:HACK_MENU_COUNT));
     if(k.enter){openApp();delay(8);return;}
-    if(k.up||c==';')selected=max(0,selected-1);
-    else if(k.down||c=='.')selected=min(count-1,selected+1);
+    if(c==';')selected=max(0,selected-1);
+    else if(c=='.')selected=min(count-1,selected+1);
     drawCategoryMenu();
   } else if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
-    if(k.left||c==',')selected=(selected+APP_COUNT-1)%APP_COUNT;
-    else if(k.right||c=='/')selected=(selected+1)%APP_COUNT;
-    else if(k.up||c==';')selected=max(0,selected-2);
-    else if(k.down||c=='.')selected=min(APP_COUNT-1,selected+2);
+    if(c==',')selected=(selected+APP_COUNT-1)%APP_COUNT;
+    else if(c=='/')selected=(selected+1)%APP_COUNT;
+    else if(c==';')selected=max(0,selected-2);
+    else if(c=='.')selected=min(APP_COUNT-1,selected+2);
     drawHome();
   } else if(screen==PIANO) {
     if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
@@ -1853,23 +1853,23 @@ if(usbActive) endUsbMode();
     if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
   } else if(screen==MUSIC) {
     if(musicNowPlaying) {
-      if(k.left||c==',')moveMusicTrack(-1);
-      else if(k.right||c=='/') moveMusicTrack(1);
+      if(c==',')moveMusicTrack(-1);
+      else if(c=='/') moveMusicTrack(1);
       else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicInfo(audioNowTitle);}
       else if(c=='p'||c=='P') {stopAudio();musicNowPlaying=false;audioStatusMessage="STOPPED";drawFiles(true);}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
-      else if(k.down||c==';') {seekAudioStep(-1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
-      else if(k.up||c=='.') {seekAudioStep(1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
+      else if(c==';') {seekAudioStep(-1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
+      else if(c=='.') {seekAudioStep(1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
       else if(c=='s'||c=='S'){audioShuffle=!audioShuffle;drawMusicInfo(audioNowTitle);}
       else if(c=='r'||c=='R'){audioRepeatMode=(audioRepeatMode+1)%3;drawMusicInfo(audioNowTitle);}
-    } else {      if(k.up||c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
-      else if(k.down||c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
+    } else {      if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
+      else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
     }
   } else if(screen==FILES) {
-    if(k.up||c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(false);}
-    else if(k.down||c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(false);}
+    if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(false);}
+    else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(false);}
     else if(k.enter) openFile(false);
   } else if(screen==RADIO) {
     if(radioEditingUrl) {
@@ -1908,10 +1908,10 @@ if(usbActive) endUsbMode();
     }
 
   } else if(screen==EQSCREEN) {
-    if(k.up||c==';'){eqSelectedBand=max(0,eqSelectedBand-1);drawEqScreen();}
-    else if(k.down||c=='.'){eqSelectedBand=min((int)JOHNNY_EQ_BANDS-1,eqSelectedBand+1);drawEqScreen();}
-    else if(k.left||c==','){setEqBandGain(eqSelectedBand,audioEqGainDb[eqSelectedBand]-0.5f);drawEqScreen();}
-    else if(k.right||c=='/'){setEqBandGain(eqSelectedBand,audioEqGainDb[eqSelectedBand]+0.5f);drawEqScreen();}
+    if(c==';'){eqSelectedBand=max(0,eqSelectedBand-1);drawEqScreen();}
+    else if(c=='.'){eqSelectedBand=min((int)JOHNNY_EQ_BANDS-1,eqSelectedBand+1);drawEqScreen();}
+    else if(c==','){setEqBandGain(eqSelectedBand,audioEqGainDb[eqSelectedBand]-0.5f);drawEqScreen();}
+    else if(c=='/'){setEqBandGain(eqSelectedBand,audioEqGainDb[eqSelectedBand]+0.5f);drawEqScreen();}
     else if(c=='-'||c=='_'){setEqBandGain(eqSelectedBand,audioEqGainDb[eqSelectedBand]-0.5f);drawEqScreen();}
     else if(c=='='||c=='+'){setEqBandGain(eqSelectedBand,audioEqGainDb[eqSelectedBand]+0.5f);drawEqScreen();}
     else if(c=='p'||c=='P'){applyEqPreset(eqPreset<0?0:(eqPreset+1)%4);drawEqScreen();}
