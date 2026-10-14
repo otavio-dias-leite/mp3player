@@ -296,7 +296,7 @@ void header(const char* title) {
   d.setTextSize(2); d.setTextColor(WHITE,BG); d.setCursor(8,25); d.print(title);
   d.setTextSize(1);
 }
-void footer(const char* s="ESC / '  BACK") {
+void footer(const char* s="ESC  BACK") {
   auto &d=M5Cardputer.Display;
   d.drawFastHLine(7,117,226,0x5140);
   d.setTextColor(UI_MUTED,BG); d.setCursor(8,124); d.print(s);
@@ -713,7 +713,7 @@ void drawUsbScreen(bool ok) {
     d.setTextColor(UI_PINK,BG); d.setCursor(8,52); d.print("SD CARD NOT READY");
     d.setTextColor(UI_MUTED,BG); d.setCursor(8,70); d.print("INSERT / CHECK MICROSD");
   }
-  footer("ESC / '  RETURN TO JOHNNY");
+  footer("ESC  RETURN TO JOHNNY");
 }
 String parentPath(const String &p) {
   if(p=="/") return "/";
@@ -1062,7 +1062,7 @@ void drawRadioScreen() {
   else if(radioRecordState==4)status="SAVED: "+radioRecordPath.substring(max(0,(int)radioRecordPath.length()-24));
   else if(radioRecordState==5)status="RECORDING ERROR";
   d.print(status.substring(0,30));
-  footer("R REC/STOP  SPACE PAUSE  Q EQ");
+  footer("R REC/STOP  SPACE PAUSE");
 }
 void playSelectedTrack() {
   if(selected<0 || selected>=entryCount || entryIsDir[selected]) return;
@@ -1501,8 +1501,7 @@ if(usbActive) endUsbMode();
     else if(c=='/')selected=(selected+1)%APP_COUNT;
     drawHome();
   } else if(screen==PIANO) {
-    if(c=='q'||c=='Q'){eqReturnScreen=PIANO;screen=EQSCREEN;drawEqScreen();}
-    else if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
+    if(false){} else if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(c==';'){pianoEffect=(pianoEffect+4)%5;pianoScreen();}
     else if(c=='.'){pianoEffect=(pianoEffect+1)%5;pianoScreen();}
@@ -1515,8 +1514,7 @@ if(usbActive) endUsbMode();
     if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
   } else if(screen==MUSIC) {
     if(musicNowPlaying) {
-      if(c=='q'||c=='Q'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
-      else if(c==',')moveMusicTrack(-1);
+      if(false){} else if(c==',')moveMusicTrack(-1);
       else if(c=='/') moveMusicTrack(1);
       else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicInfo(audioNowTitle);}
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawMusicInfo(audioNowTitle);}
@@ -1524,8 +1522,7 @@ if(usbActive) endUsbMode();
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
       else if(c==';') moveMusicTrack(-1);
       else if(c=='.') moveMusicTrack(1);
-    } else {      if(c=='q'||c=='Q'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
-      else if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
+    } else {      if(false){} else if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
       else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
     }
@@ -1547,8 +1544,7 @@ if(usbActive) endUsbMode();
       } else if(c==8||c==127) {if(radioEntry.length())radioEntry.remove(radioEntry.length()-1);drawRadioScreen();}
       else if(c&&isprint((unsigned char)c)&&radioEntry.length()<180) {radioEntry+=c;drawRadioScreen();}
     } else {
-      if(c=='q'||c=='Q'){eqReturnScreen=RADIO;screen=EQSCREEN;drawEqScreen();}
-      else if(c=='r'||c=='R'){
+      if(false){} else if(c=='r'||c=='R'){
         if(radioRecordState==1||radioRecordState==2)stopRadioRecording();else startRadioRecording();
         drawRadioScreen();
       }
