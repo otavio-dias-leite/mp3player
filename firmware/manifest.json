@@ -7,20 +7,8 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "https://github.com/otavio-dias-leite/johnny/releases/download/v0.0.0-alpha.18/bootloader.bin",
+          "path": "https://github.com/otavio-dias-leite/johnny/releases/download/v0.0.0-alpha.18/johnny-cardputer-adv-full.bin",
           "offset": 0
-        },
-        {
-          "path": "https://github.com/otavio-dias-leite/johnny/releases/download/v0.0.0-alpha.18/partitions.bin",
-          "offset": 32768
-        },
-        {
-          "path": "https://github.com/otavio-dias-leite/johnny/releases/download/v0.0.0-alpha.18/boot_app0.bin",
-          "offset": 57344
-        },
-        {
-          "path": "https://github.com/otavio-dias-leite/johnny/releases/download/v0.0.0-alpha.18/firmware.bin",
-          "offset": 65536
         }
       ]
     }
