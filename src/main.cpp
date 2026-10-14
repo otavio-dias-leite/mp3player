@@ -158,6 +158,7 @@ constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
 enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
 Screen eqReturnScreen=HOME;
+int categoryScroll=0;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
 const float eqPresets[4][JOHNNY_EQ_BANDS]={{0,0,0,0,0},{2.5f,1.5f,0,-1.0f,-1.5f},{-2.0f,-1.0f,2.5f,2.0f,0.5f},{4.0f,2.0f,0,-1.0f,-2.0f}};
@@ -339,47 +340,42 @@ void footer(const char* s="") {
 void drawHome(){
   auto& d=M5Cardputer.Display;d.fillScreen(BG);
   d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(7,5);d.print("JOHNNY");
-  d.setTextColor(UI_MUTED,BG);d.setCursor(75,5);d.print("WAKE UP, SAMURAI");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(67,5);d.print("CARDPUTER CONSOLE");
   drawBatteryIndicator();d.drawFastHLine(7,18,226,UI_PURPLE);
-  const char* previous=apps[(selected+APP_COUNT-1)%APP_COUNT];
-  const char* next=apps[(selected+1)%APP_COUNT];
-  d.setTextColor(UI_MUTED,BG);d.setCursor(4,67);d.print("<");d.setCursor(5,81);d.print(previous);
-  d.setCursor(228,67);d.print(">");d.setCursor(194,81);d.print(next);
-  d.fillRoundRect(48,30,144,78,9,PANEL);d.drawRoundRect(48,30,144,78,9,UI_PINK);
-  const int cx=120,cy=61;
-  if(selected==0){
-    d.drawLine(cx,cy+15,cx,cy-5,UI_LAVENDER);d.drawCircle(cx,cy-9,3,UI_PINK);
-    d.drawArc(cx,cy-8,12,12,210,330,UI_PINK);d.drawArc(cx,cy-8,22,22,210,330,UI_LAVENDER);
-    d.drawFastHLine(cx-15,cy+17,30,UI_PURPLE);
-  }else if(selected==1){
-    d.fillRoundRect(cx-29,cy-12,58,27,8,UI_LAVENDER);
-    d.fillRect(cx-19,cy-3,16,4,BG);d.fillRect(cx-13,cy-9,4,16,BG);
-    d.fillCircle(cx+13,cy-4,4,UI_PINK);d.fillCircle(cx+23,cy+5,3,UI_PURPLE);
-  }else if(selected==2){
-    d.drawLine(cx-12,cy+11,cx-12,cy-16,UI_LAVENDER);d.drawLine(cx-12,cy-16,cx+11,cy-20,UI_LAVENDER);
-    d.drawLine(cx+11,cy-20,cx+11,cy+6,UI_LAVENDER);d.fillCircle(cx-17,cy+12,6,UI_PINK);d.fillCircle(cx+6,cy+7,6,UI_PINK);
-    d.drawLine(cx-12,cy-8,cx+11,cy-12,UI_LAVENDER);
-  }else{
-    d.drawRoundRect(cx-17,cy-16,34,34,5,UI_LAVENDER);d.drawRoundRect(cx-9,cy-8,18,18,3,UI_PINK);
-    for(int n=0;n<4;n++){int off=-12+n*8;d.drawFastVLine(cx+off,cy-21,5,UI_PURPLE);d.drawFastVLine(cx+off,cy+18,5,UI_PURPLE);d.drawFastHLine(cx-22,cy+off,5,UI_PURPLE);d.drawFastHLine(cx+18,cy+off,5,UI_PURPLE);}
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(9,25);d.print("APPLICATIONS");
+  const char* labels[APP_COUNT]={"HACK","GAMES","MUSIC","SYSTEM"};
+  const char* hints[APP_COUNT]={"NETWORK TOOLS","MINI GAMES","AUDIO STUDIO","DEVICE TOOLS"};
+  for(int i=0;i<APP_COUNT;i++){
+    const int col=i%2,row=i/2,x=8+col*114,y=42+row*36;
+    const bool active=(i==selected);const uint16_t fill=active?PANEL:BG;
+    d.fillRoundRect(x,y,108,31,4,fill);d.drawRoundRect(x,y,108,31,4,active?UI_PINK:0x5140);
+    d.fillRoundRect(x+6,y+7,17,17,3,active?UI_PURPLE:0x3028);
+    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+29,y+7);d.print(labels[i]);
+    d.setTextColor(active?UI_PINK:UI_MUTED,fill);d.setCursor(x+29,y+19);d.print(hints[i]);
+    d.setTextColor(active?UI_PINK:UI_MUTED,fill);d.setCursor(x+91,y+10);d.print(active?">":" ");
   }
-  d.setTextSize(2);d.setTextColor(WHITE,PANEL);d.setCursor(selected==3?82:88,86);d.print(apps[selected]);d.setTextSize(1);
-  for(int i=0;i<APP_COUNT;i++)d.fillCircle(108+i*8,115,2,i==selected?UI_PINK:UI_MUTED);
-  d.drawFastHLine(7,123,226,0x5140);d.setTextColor(UI_MUTED,BG);d.setCursor(17,127);d.print(", / . CHANGE SECTION   ENTER OPEN");
+  d.drawFastHLine(7,119,226,0x5140);d.setTextColor(UI_MUTED,BG);
+  d.setCursor(10,126);d.print("ARROWS SELECT   ENTER OPEN   TAB SLEEP");
 }
 void drawCategoryMenu(){
   bool music=screen==MUSICMENU,system=screen==SYSTEMMENU,games=screen==GAMESMENU;
   const char* title=music?"MUSIC":(system?"SYSTEM":(games?"GAMES":"HACK"));
   const char** items=music?musicMenuItems:(system?systemMenuItems:(games?gamesMenuItems:hackMenuItems));
   int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
+  const int visible=5;
+  if(selected<0)selected=0;if(selected>=count)selected=count-1;
+  if(selected<categoryScroll)categoryScroll=selected;
+  if(selected>=categoryScroll+visible)categoryScroll=selected-visible+1;
   header(title);auto& d=M5Cardputer.Display;
-  for(int i=0;i<count;i++){
-    int y=43+i*12;bool active=i==selected;uint16_t bg=active?PANEL:BG;
-    d.fillRoundRect(7,y-1,225,9,2,bg);
-    d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);
-    d.printf("%c %02d  %s",active?'>':' ',i+1,items[i]);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(9,39);d.printf("%02d MODULES",count);
+  for(int row=0;row<visible;row++){
+    int i=categoryScroll+row;if(i>=count)break;
+    int y=51+row*13;bool active=i==selected;uint16_t bg=active?PANEL:BG;
+    d.fillRoundRect(7,y,225,11,3,bg);if(active)d.drawRoundRect(7,y,225,11,3,UI_PURPLE);
+    d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(13,y+2);d.printf("%c  %02d  %s",active?'>':' ',i+1,items[i]);
+    d.setTextColor(active?UI_LAVENDER:UI_MUTED,bg);d.setCursor(216,y+2);d.print(active?">":" ");
   }
-  footer("");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(9,119);d.print("UP/DOWN SELECT   ENTER LAUNCH");footer("");
 }
 void drawDeviceStatus(){
   header("DEVICE STATUS");auto& d=M5Cardputer.Display;bool connected=WiFi.status()==WL_CONNECTED;
@@ -397,8 +393,7 @@ void drawDeviceStatus(){
 
 void drawUpdateInfo(){
   header("FIRMWARE UPDATE");auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
-  d.setCursor(8,47);d.print("SOURCE: GITHUB RELEASES");d.setTextColor(UI_MUTED,BG);
-  d.setCursor(8,64);d.print(WiFi.status()==WL_CONNECTED?"WI-FI CONNECTED":"WI-FI OFFLINE");
+  d.setCursor(8,47);d.print("SOURCE: GITHUB RELEASES");d.setTextColor(UI_MUTED,BG);  d.setCursor(8,64);d.print(WiFi.status()==WL_CONNECTED?"WI-FI CONNECTED":"WI-FI OFFLINE");
   d.setCursor(8,82);d.print(updateMessage.substring(0,34));d.setCursor(8,94);d.print(updateMessage.substring(34,68));
   footer("ENTER INSTALL LATEST  ESC BACK");
 }
@@ -417,20 +412,20 @@ void showUnavailable(const char* title,const char* message){
   d.setCursor(8,52);d.print(message);footer("ESC BACK");
 }
 void splash(){
-  auto& d=M5Cardputer.Display;
-  for(int frame=0;frame<14;frame++){
-    d.fillScreen(BG);const int jitter=(frame%4==0)?(int)random(-3,4):0;
-    d.setTextSize(3);d.setTextColor(UI_PURPLE,BG);d.setCursor(38+jitter+2,49);d.print("JOHNNY");
-    d.setTextColor(UI_PINK,BG);d.setCursor(38+jitter-2,49);d.print("JOHNNY");
+  auto& d=M5Cardputer.Display;d.setBrightness(190);
+  for(int frame=0;frame<24;frame++){
+    d.fillScreen(BG);const int jitter=(frame%3==0)?(int)random(-5,6):0;d.setTextSize(3);
+    d.setTextColor(UI_PURPLE,BG);d.setCursor(38+jitter+3,49);d.print("JOHNNY");
+    d.setTextColor(UI_PINK,BG);d.setCursor(38+jitter-3,49);d.print("JOHNNY");
     d.setTextColor(WHITE,BG);d.setCursor(38+jitter,49);d.print("JOHNNY");
     d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(52,83);d.print("wake fuck up samurai");
-    if(frame%3==0){int y=random(40,94);d.fillRect(random(16,150),y,random(24,95),2,UI_PINK);}
-    if(frame%4==1)d.drawFastHLine(12,100+frame%8,random(120,220),UI_PURPLE);
-    d.drawFastHLine(18,109,204,0x5140);d.fillRect(18,109,((frame+1)*204)/14,2,UI_PINK);delay(24);
+    if(frame%2==0){const int y=random(37,101),x=random(5,155),w=random(35,115);d.fillRect(x,y,w,1,UI_PINK);if(frame%4==0)d.fillRect(x+random(-5,8),y+2,w-random(0,12),1,UI_PURPLE);}
+    if(frame%5==1)d.fillRect(0,random(30,104),240,2,0x5140);
+    d.drawFastHLine(18,109,204,0x5140);d.fillRect(18,109,((frame+1)*204)/24,2,UI_PINK);delay(22);
   }
   d.fillScreen(BG);d.setTextSize(3);d.setTextColor(WHITE,BG);d.setCursor(38,49);d.print("JOHNNY");
   d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(52,83);d.print("wake fuck up samurai");
-  d.drawFastHLine(18,109,204,UI_PURPLE);delay(220);
+  d.drawFastHLine(18,109,204,UI_PURPLE);delay(260);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
@@ -797,8 +792,7 @@ void serviceWebServer(){
 void startNetworkSetup() {
   stopAudio();wifiScanOnly=false;
   WiFi.mode(WIFI_STA); WiFi.disconnect(false,false);
-  wifiNetworkCount=0; wifiSelected=0; wifiScroll=0; wifiScanPending=true;
-  wifiConfigStage=1; WiFi.scanDelete(); WiFi.scanNetworks(true,false);
+  wifiNetworkCount=0; wifiSelected=0; wifiScroll=0; wifiScanPending=true;  wifiConfigStage=1; WiFi.scanDelete(); WiFi.scanNetworks(true,false);
   drawNetworkScreen();
 }
 void startWifiSurvey() {
@@ -1197,8 +1191,7 @@ bool loadFlacMetadata(const String& path){
       commentCount=min(commentCount,(uint32_t)128);
       for(uint32_t i=0;i<commentCount&&file.position()+4<=blockEnd;i++){
         uint32_t commentLength=0;if(!readFlacLE32(file,commentLength)||commentLength>blockEnd-file.position())break;
-        if(commentLength>0&&commentLength<=512){
-          char comment[513];if(file.read((uint8_t*)comment,commentLength)!=commentLength)break;comment[commentLength]='\0';
+        if(commentLength>0&&commentLength<=512){          char comment[513];if(file.read((uint8_t*)comment,commentLength)!=commentLength)break;comment[commentLength]='\0';
           char* equal=strchr(comment,'=');if(equal){*equal='\0';String key=String(comment);key.toUpperCase();String value=String(equal+1);value.trim();
             if(key=="TITLE"&&value.length())audioTrackTitle=value;
             else if(key=="ARTIST"&&value.length())audioTrackArtist=value;
@@ -1597,8 +1590,7 @@ void drawLife(){
   for(int y=0;y<LIFE_ROWS;y++)for(int x=0;x<LIFE_COLS;x++){
     int px=ox+x*cell,py=oy+y*cell;
     if(lifeGrid[y][x])d.fillRect(px+1,py+1,3,3,UI_PINK);else d.fillRect(px+1,py+1,3,3,BG);
-    if(x==lifeCursorX&&y==lifeCursorY)d.drawRect(px,py,cell,cell,UI_LAVENDER);
-  }
+    if(x==lifeCursorX&&y==lifeCursorY)d.drawRect(px,py,cell,cell,UI_LAVENDER);  }
   footer("SPACE RUN/PAUSE  N STEP  ARROWS MOVE");
 }
 void startRadioRecording(){
@@ -1865,6 +1857,8 @@ if(usbActive) endUsbMode();
     if(k.enter) { openApp(); delay(8); return; }
     if(c==',')selected=(selected+APP_COUNT-1)%APP_COUNT;
     else if(c=='/')selected=(selected+1)%APP_COUNT;
+    else if(c==';')selected=max(0,selected-2);
+    else if(c=='.')selected=min(APP_COUNT-1,selected+2);
     drawHome();
   } else if(screen==PIANO) {
     if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
