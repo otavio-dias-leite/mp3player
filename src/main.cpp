@@ -355,7 +355,7 @@ void runFirmwareUpdate(){
 }
 void showUnavailable(const char* title,const char* message){
   screen=ABOUT;header(title);auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
-  d.setCursor(8,52);d.print(message);footer("ESC / ' BACK");
+  d.setCursor(8,52);d.print(message);footer("ESC BACK");
 }
 void splash() {
   auto &d=M5Cardputer.Display;
@@ -538,7 +538,7 @@ void drawNetworkScreen() {
     String masked=""; for(size_t i=0;i<wifiEntry.length() && i<28;i++) masked+="*";
     d.print(masked);
     d.setTextColor(UI_MUTED,BG); d.setCursor(8,105); d.print("TYPE PASSWORD + ENTER");
-    footer("ESC / ' BACK TO NETWORKS");
+    footer("ESC BACK TO NETWORKS");
     return;
   }
   if(WiFi.status()==WL_CONNECTED) {
@@ -550,7 +550,7 @@ void drawNetworkScreen() {
     d.setTextColor(UI_PINK,BG); d.setCursor(8,54); d.print("NOT CONNECTED");
     d.setTextColor(UI_MUTED,BG); d.setCursor(8,75); d.print(savedSsid.length()?savedSsid:"NO NETWORK SAVED");
   }
-  footer("ENTER SEARCH NETWORKS  ESC / ' BACK");
+  footer("ENTER SEARCH NETWORKS  ESC BACK");
 }
 void startNetworkSetup() {
   WiFi.mode(WIFI_STA); WiFi.disconnect(false,false);
@@ -775,7 +775,7 @@ void scanDirectory(bool musicMode=false) {
     shown++;
   }
   if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
-  footer(",./; MOVE  ENTER OPEN  ESC / ' BACK");
+  footer(",./; MOVE  ENTER OPEN  ESC BACK");
 }
 
 void drawMusicInfo(const String &name);
@@ -1062,7 +1062,7 @@ void drawRadioScreen() {
   else if(radioRecordState==4)status="SAVED: "+radioRecordPath.substring(max(0,(int)radioRecordPath.length()-24));
   else if(radioRecordState==5)status="RECORDING ERROR";
   d.print(status.substring(0,30));
-  footer("R REC/STOP  SPACE PAUSE  E EQ");
+  footer("R REC/STOP  SPACE PAUSE  Q EQ");
 }
 void playSelectedTrack() {
   if(selected<0 || selected>=entryCount || entryIsDir[selected]) return;
@@ -1174,7 +1174,7 @@ void openLegacyApp() {
         M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(charging?UI_PINK:UI_MUTED,BG);
         M5Cardputer.Display.print(charging?"CHARGING [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY"));
       }
-      footer("ESC / ' BACK"); break;
+      footer("ESC BACK"); break;
   }
 }
 void setEqBandGain(int band,float gain){
@@ -1375,7 +1375,7 @@ void loop() {
   if(millis()-batteryLastSample>=30000UL) {
     batteryLastDraw=millis();
     refreshBatteryCache(true);
-    if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC / ' BACK"); } }
+    if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC BACK"); } }
   }
   serviceAudio();
   if(screen==MICREC&&micRecording)serviceMicRecorder();
@@ -1454,7 +1454,7 @@ void loop() {
     return;
   }
 
-  bool back=(c==0x1B || c==0x27 || c=='`' || c=='~');
+  bool back=(c==0x1B || c=='`' || c=='~');
   if(back) {
     if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
@@ -1501,7 +1501,7 @@ if(usbActive) endUsbMode();
     else if(c=='/')selected=(selected+1)%APP_COUNT;
     drawHome();
   } else if(screen==PIANO) {
-    if(c=='e'||c=='E'){eqReturnScreen=PIANO;screen=EQSCREEN;drawEqScreen();}
+    if(c=='q'||c=='Q'){eqReturnScreen=PIANO;screen=EQSCREEN;drawEqScreen();}
     else if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
     else if(c==';'){pianoEffect=(pianoEffect+4)%5;pianoScreen();}
@@ -1515,7 +1515,7 @@ if(usbActive) endUsbMode();
     if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
   } else if(screen==MUSIC) {
     if(musicNowPlaying) {
-      if(c=='e'||c=='E'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
+      if(c=='q'||c=='Q'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
       else if(c==',')moveMusicTrack(-1);
       else if(c=='/') moveMusicTrack(1);
       else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicInfo(audioNowTitle);}
@@ -1524,7 +1524,7 @@ if(usbActive) endUsbMode();
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
       else if(c==';') moveMusicTrack(-1);
       else if(c=='.') moveMusicTrack(1);
-    } else {      if(c=='e'||c=='E'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
+    } else {      if(c=='q'||c=='Q'){eqReturnScreen=MUSIC;screen=EQSCREEN;drawEqScreen();}
       else if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
       else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
@@ -1547,7 +1547,7 @@ if(usbActive) endUsbMode();
       } else if(c==8||c==127) {if(radioEntry.length())radioEntry.remove(radioEntry.length()-1);drawRadioScreen();}
       else if(c&&isprint((unsigned char)c)&&radioEntry.length()<180) {radioEntry+=c;drawRadioScreen();}
     } else {
-      if(c=='e'||c=='E'){eqReturnScreen=RADIO;screen=EQSCREEN;drawEqScreen();}
+      if(c=='q'||c=='Q'){eqReturnScreen=RADIO;screen=EQSCREEN;drawEqScreen();}
       else if(c=='r'||c=='R'){
         if(radioRecordState==1||radioRecordState==2)stopRadioRecording();else startRadioRecording();
         drawRadioScreen();
