@@ -979,6 +979,62 @@ bool loadSidecarCover(const String& trackPath){
   for(const String& path:candidates){if(!SD.exists(path.c_str()))continue;File image=SD.open(path,FILE_READ);if(!image)continue;uint32_t size=(uint32_t)image.size();if(size>0&&size<=sizeof(audioCoverData)&&image.read(audioCoverData,size)==size){audioCoverSize=size;audioCoverPng=path.endsWith(".png")||path.endsWith(".PNG");image.close();return true;}image.close();}
   return false;
 }
+
+bool readFlacBE32(File& file,uint32_t& value){
+  uint8_t b[4];if(file.read(b,4)!=4)return false;
+  value=((uint32_t)b[0]<<24)|((uint32_t)b[1]<<16)|((uint32_t)b[2]<<8)|(uint32_t)b[3];return true;
+}
+bool readFlacLE32(File& file,uint32_t& value){
+  uint8_t b[4];if(file.read(b,4)!=4)return false;
+  value=(uint32_t)b[0]|((uint32_t)b[1]<<8)|((uint32_t)b[2]<<16)|((uint32_t)b[3]<<24);return true;
+}
+bool loadFlacMetadata(const String& path){
+  File file=SD.open(path,FILE_READ);if(!file)return false;
+  uint8_t marker[4];if(file.read(marker,4)!=4||memcmp(marker,"fLaC",4)!=0){file.close();return false;}
+  bool lastBlock=false;uint8_t blocks=0;
+  while(!lastBlock&&blocks++<64&&file.position()+4<=file.size()){
+    uint8_t head[4];if(file.read(head,4)!=4)break;
+    lastBlock=(head[0]&0x80)!=0;uint8_t type=head[0]&0x7f;
+    uint32_t length=((uint32_t)head[1]<<16)|((uint32_t)head[2]<<8)|(uint32_t)head[3];
+    uint32_t blockEnd=(uint32_t)file.position()+length;
+    if(blockEnd>(uint32_t)file.size())break;
+    if(type==4&&length>=8){
+      uint32_t vendorLength=0,commentCount=0;
+      if(!readFlacLE32(file,vendorLength)||vendorLength>blockEnd-file.position()){file.seek(blockEnd);continue;}
+      file.seek((uint32_t)file.position()+vendorLength);
+      if(!readFlacLE32(file,commentCount)){file.seek(blockEnd);continue;}
+      commentCount=min(commentCount,(uint32_t)128);
+      for(uint32_t i=0;i<commentCount&&file.position()+4<=blockEnd;i++){
+        uint32_t commentLength=0;if(!readFlacLE32(file,commentLength)||commentLength>blockEnd-file.position())break;
+        if(commentLength>0&&commentLength<=512){
+          char comment[513];if(file.read((uint8_t*)comment,commentLength)!=commentLength)break;comment[commentLength]='\0';
+          char* equal=strchr(comment,'=');if(equal){*equal='\0';String key=String(comment);key.toUpperCase();String value=String(equal+1);value.trim();
+            if(key=="TITLE"&&value.length())audioTrackTitle=value;
+            else if(key=="ARTIST"&&value.length())audioTrackArtist=value;
+            else if(key=="ALBUM"&&value.length())audioTrackAlbum=value;
+          }
+        }else file.seek((uint32_t)file.position()+commentLength);
+      }
+    }else if(type==6&&length>=32){
+      uint32_t pictureType=0,mimeLength=0,descriptionLength=0,width=0,height=0,depth=0,colors=0,imageLength=0;
+      if(!readFlacBE32(file,pictureType)||!readFlacBE32(file,mimeLength)||mimeLength>blockEnd-file.position()){file.seek(blockEnd);continue;}
+      char mime[24]={0};
+      if(mimeLength<sizeof(mime)){file.read((uint8_t*)mime,mimeLength);mime[mimeLength]='\0';}
+      else file.seek((uint32_t)file.position()+mimeLength);
+      if(!readFlacBE32(file,descriptionLength)||descriptionLength>blockEnd-file.position()){file.seek(blockEnd);continue;}
+      file.seek((uint32_t)file.position()+descriptionLength);
+      if(!readFlacBE32(file,width)||!readFlacBE32(file,height)||!readFlacBE32(file,depth)||!readFlacBE32(file,colors)||!readFlacBE32(file,imageLength)){file.seek(blockEnd);continue;}
+      if(imageLength>0&&imageLength<=sizeof(audioCoverData)&&imageLength<=blockEnd-file.position()&&file.read(audioCoverData,imageLength)==imageLength){
+        bool jpg=imageLength>=4&&audioCoverData[0]==0xff&&audioCoverData[1]==0xd8;
+        bool png=imageLength>=8&&audioCoverData[0]==0x89&&audioCoverData[1]=='P'&&audioCoverData[2]=='N'&&audioCoverData[3]=='G';
+        if(jpg||png){audioCoverSize=imageLength;audioCoverPng=png;}
+      }
+    }
+    file.seek(blockEnd);
+  }
+  file.close();return true;
+}
+
 void loadTrackMetadata(const String& path){
   audioTrackPath=path;audioTrackExtension=audioExtension(path);audioTrackArtist="";audioTrackAlbum="";audioTrackTitle=path.substring(path.lastIndexOf('/')+1);int dot=audioTrackTitle.lastIndexOf('.');if(dot>0)audioTrackTitle.remove(dot);audioCoverSize=0;audioCoverPng=false;
   File file=SD.open(path,FILE_READ);if(file){uint8_t h[10]={0};if(file.read(h,sizeof(h))==sizeof(h)&&memcmp(h,"ID3",3)==0&&h[3]>=3&&h[3]<=4){uint32_t tagSize=id3Synchsafe32(h+6),tagEnd=min((uint32_t)file.size(),10U+tagSize);uint8_t fh[10];while((uint32_t)file.position()+10U<=tagEnd){if(file.read(fh,sizeof(fh))!=sizeof(fh)||fh[0]==0)break;char id[5]={(char)fh[0],(char)fh[1],(char)fh[2],(char)fh[3],0};uint32_t frameSize=h[3]==4?id3Synchsafe32(fh+4):id3BigEndian32(fh+4);if(frameSize==0)continue;uint32_t frameEnd=(uint32_t)file.position()+frameSize;if(frameEnd>tagEnd||frameEnd>(uint32_t)file.size())break;
@@ -986,6 +1042,7 @@ void loadTrackMetadata(const String& path){
       else if(strcmp(id,"APIC")==0&&frameSize<=sizeof(audioCoverData)){if(file.read(audioCoverData,frameSize)==frameSize)extractApicImage(frameSize);}
       file.seek(frameEnd);
     }}file.close();}
+  if(audioTrackExtension=="flac")loadFlacMetadata(path);
   if(audioCoverSize==0)loadSidecarCover(path);
 }
 
