@@ -1755,7 +1755,7 @@ void setup() {
     audioEqGainDb[i]=preferences.getFloat((String("eq")+String(i)).c_str(),fallback);
   }
   audioEqualizer.setAll(audioEqGainDb);
-  // Wi-Fi is started only when the user opens SYSTEM -> WI-FI or WEB RADIO.\n  // Avoid allocating the network stack during every cold boot.
+  // Wi-Fi starts only when requested from the menu; keep cold boot lean.
   auto micCfg=M5Cardputer.Mic.config();
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
