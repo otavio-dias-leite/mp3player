@@ -670,7 +670,7 @@ void runHackInput(){
     int split=hackInputValue.lastIndexOf(':');int port=split>0?hackInputValue.substring(split+1).toInt():0;
     String host=split>0?hackInputValue.substring(0,split):String("");IPAddress address;
     if(!address.fromString(host)||port<1||port>65535){hackResultMessage="USE IP:PORT";hackInputDone=true;drawHackInput();return;}
-    WiFiClient client;bool ok=client.connect(address,(uint16_t)port);client.stop();
+    WiFiClient client;bool ok=client.connect(address,(uint16_t)port,2500);client.stop();
     hackResultMessage=ok?"TCP OPEN / REACHABLE":"CLOSED / NO RESPONSE";
   }else if(hackInputMode==1){
     IPAddress address;hackResultMessage=WiFi.hostByName(hackInputValue.c_str(),address)?("DNS "+address.toString()):"DNS LOOKUP FAILED";
