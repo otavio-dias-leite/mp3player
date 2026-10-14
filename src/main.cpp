@@ -158,6 +158,8 @@ constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
 enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
 Screen eqReturnScreen=HOME;
+Screen appReturnMenu=MUSICMENU;
+int appReturnSelected=0;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
 const float eqPresets[4][JOHNNY_EQ_BANDS]={{0,0,0,0,0},{2.5f,1.5f,0,-1.0f,-1.5f},{-2.0f,-1.0f,2.5f,2.0f,0.5f},{4.0f,2.0f,0,-1.0f,-2.0f}};
@@ -1479,7 +1481,8 @@ void openApp(){
   if(screen==HOME){screen=selected==0?HACKMENU:(selected==1?GAMESMENU:(selected==2?MUSICMENU:SYSTEMMENU));selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
   if(menu==HACKMENU){if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item>=2&&item<=4){hackInputMode=(uint8_t)(item-2);hackInputValue="";hackResultMessage="";hackInputDone=false;screen=HACKINPUT;drawHackInput();return;}if(item==5){screen=HACKFX;hackFxSelected=0;hackFxPlaying=false;hackVisualFx=false;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
-  if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;screen=HOME;
+  if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
+  appReturnMenu=menu;appReturnSelected=item;screen=HOME;
   if(menu==MUSICMENU){if(item==5){screen=MICREC;micRecording=false;micRecordStatus="READY";drawMicRecorder();return;}const int map[]={0,1,2,3,7};selected=map[item];}
   else if(menu==SYSTEMMENU){if(item==3){screen=UPDATEINFO;updateMessage="PRESS ENTER TO INSTALL LATEST";drawUpdateInfo();return;}if(item==4){selected=9;openLegacyApp();return;}const int map[]={4,6,5};selected=map[item];}
   else selected=8;
@@ -1816,8 +1819,8 @@ void loop() {
 
   bool back=(c==0x1B || c=='`' || c=='~');
   if(back) {
-    if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
-    else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
+    if(screen==MICREC){stopMicRecording();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
+    else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=3;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU){screen=HOME;selected=0;drawHome();}
     else if(screen==BLESCAN){stopBleScan();screen=HACKMENU;selected=1;drawCategoryMenu();}
     else if(screen==HACKINFO){screen=HACKMENU;selected=6;drawCategoryMenu();}
@@ -1831,23 +1834,23 @@ void loop() {
       else if(screen==PIANO)pianoScreen();
       else if(screen==MUSIC)musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
       else if(screen==RADIO)drawRadioScreen();
-    }else if(screen==LIFE){saveLife();screen=HOME;drawHome();}
+    }else if(screen==LIFE){saveLife();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
       if(music && musicNowPlaying) {musicNowPlaying=false;drawFiles(true);}
       else if(currentPath!="/") {currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
-      else {screen=HOME;drawHome();}
+      else {screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     } else if(screen==RADIO) {
       if(radioEditingUrl) {radioEditingUrl=false;drawRadioScreen();}
-      else {screen=HOME;drawHome();}
+      else {screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     } else if(screen==USBMODE) {
 if(usbActive) endUsbMode();
-      screen=HOME;drawHome();
+      screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();
     } else {
       if(screen==PIANO)M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);
       if(screen==TUNER) stopMicCapture();
       if(screen==NETWORK && wifiConfigStage==2) { wifiConfigStage=1; wifiEntry=""; drawNetworkScreen(); }
-      else { wifiConfigStage=0; screen=HOME;drawHome(); }
+      else { wifiConfigStage=0;screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu(); }
     }
     delay(8); return;
   }
