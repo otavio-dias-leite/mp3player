@@ -442,18 +442,12 @@ int nearestMidi(float hz, float* cents) {
   if(cents)*cents=(raw-(float)midi)*100.0f;
   return midi;
 }
-void tunerScreen() {
-  header("CHROMATIC TUNER");
+void drawTunerReadout() {
   auto &d=M5Cardputer.Display;
-  const char* modeNames[]={"GUITAR","VIOLAO","UKULELE"};
-  d.setTextColor(UI_PINK,BG); d.setCursor(8,43);
-  d.printf("MODE: %s",modeNames[tunerInstrument]);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(166,43); d.print("<  >");
+  d.fillRect(7,55,226,61,BG);
   if(!tunerHasSignal) {
-    d.setTextColor(UI_LAVENDER,BG); d.setTextSize(2); d.setCursor(8,63); d.print("TOQUE UMA CORDA");
-    d.setTextSize(1); d.setTextColor(UI_MUTED,BG); d.setCursor(8,88); d.print("MANTENHA A NOTA SOANDO");
-    d.setCursor(8,101); d.print("A LEITURA FICA NA TELA POR 5s");
-    footer(", /  TROCAR INSTRUMENTO");
+    d.setTextColor(UI_LAVENDER,BG); d.setTextSize(2); d.setCursor(8,68); d.print("PLAY A STRING");
+    d.setTextSize(1);
     return;
   }
   const float* hzTable=(tunerInstrument==2)?ukeHz:guitarHz;
@@ -467,18 +461,22 @@ void tunerScreen() {
   }
   const uint16_t statusColor=(fabsf(cents)<=5.0f)?UI_LAVENDER:UI_PINK;
   d.fillRoundRect(8,56,224,51,4,PANEL);
-  d.setTextColor(UI_MUTED,PANEL); d.setCursor(16,63); d.printf("CORDA %s  /  ALVO %.1f Hz",nameTable[nearest],hzTable[nearest]);
+  d.setTextColor(UI_MUTED,PANEL); d.setCursor(16,63); d.printf("STRING %s / %.1f Hz",nameTable[nearest],hzTable[nearest]);
   d.setTextColor(WHITE,PANEL); d.setTextSize(2); d.setCursor(16,78); d.printf("%+.0f CENT",cents);
   d.setTextSize(1); d.setTextColor(UI_LAVENDER,PANEL); d.setCursor(156,83); d.printf("%.1f Hz",tunerFrequency);
   d.drawFastHLine(18,113,204,UI_PURPLE);
   d.drawFastVLine(120,109,9,UI_LAVENDER);
   int marker=120+(int)constrain(cents,-50.0f,50.0f)*2;
   d.fillCircle(marker,113,3,statusColor);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,101);
-  if(cents < -5.0f) { d.setTextColor(UI_PINK,BG); d.setCursor(8,101); d.print("GRAVE DEMAIS  ->  APERTE"); }
-  else if(cents > 5.0f) { d.setTextColor(UI_PINK,BG); d.setCursor(8,101); d.print("AGUDA DEMAIS  ->  AFROUXE"); }
-  else { d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,101); d.print("AFINADA  /  MANTENHA"); }
-  footer(", /  TROCAR INSTRUMENTO");
+}
+void tunerScreen() {
+  header("TUNER");
+  auto &d=M5Cardputer.Display;
+  const char* modeNames[]={"GUITAR","VIOLAO","UKULELE"};
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,43); d.print(modeNames[tunerInstrument]);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(166,43); d.print("<  >");
+  drawTunerReadout();
+  footer("");
 }
 void drawNetworkScreen() {
   header("WI-FI");
@@ -1381,7 +1379,7 @@ void loop() {
       }
     }
     if(tunerHasSignal && millis()-tunerLastSignalAt>5000UL) {tunerHasSignal=false;tunerFilteredFrequency=0;tunerFrequency=0;tunerMidi=-1;}
-    tunerScreen();
+    drawTunerReadout();
   }
   
   if(Serial.available()>0) serialTransferTask();
