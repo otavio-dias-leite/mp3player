@@ -230,8 +230,8 @@ const char* apps[] = {"MUSIC","SYSTEM","GAMES"};
 constexpr int APP_COUNT=3;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
 const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","BLUETOOTH","UPDATE FIRMWARE","INSTALL APPS"};
-const char* gamesMenuItems[]={"CONWAY LIFE","DOOM 1993"};
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=2;
+const char* gamesMenuItems[]={"CONWAY LIFE","GB / GBC CORE","GBA CORE","DOOM ENGINE"};
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=4;
 String placeholderTitle, placeholderMessage;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
@@ -270,25 +270,17 @@ void drawBatteryIndicator() {
   auto &d=M5Cardputer.Display;
   int level=batteryPercent();
   bool charging=batteryCharging();
-  d.fillRect(168,2,62,15,BG);
-  d.setTextSize(1); d.setTextColor(level>=0 && level<=15?UI_PINK:UI_MUTED,BG);
-  d.setCursor(169,6);
-  if(level>=0) d.printf("%3d%%",constrain(level,0,100)); else d.print("--%");
-  d.drawRoundRect(201,4,19,10,2,charging?UI_PINK:UI_LAVENDER);
-  d.fillRect(220,7,2,4,charging?UI_PINK:UI_LAVENDER);
-  if(level>=0) {
-    int width=constrain(level,0,100)*13/100;
-    if(width>0) d.fillRect(204,6,width,6,level<=15?UI_PINK:UI_LAVENDER);
-  }
-  if(charging) {
-    d.drawLine(228,3,223,9,UI_PINK);
-    d.drawLine(223,9,226,9,UI_PINK);
-    d.drawLine(226,9,222,15,UI_PINK);
-  }
+  d.fillRect(194,2,36,15,BG);
+  d.drawRoundRect(207,4,19,10,2,level>=0 && level<=15?UI_PINK:UI_LAVENDER);
+  d.fillRect(226,7,2,4,UI_LAVENDER);
+  if(level>=0) { int width=constrain(level,0,100)*13/100; if(width>0)d.fillRect(210,6,width,6,level<=15?UI_PINK:UI_LAVENDER); }
+  if(charging) { d.drawLine(202,3,198,9,UI_PINK); d.drawLine(198,9,201,9,UI_PINK); d.drawLine(201,9,197,15,UI_PINK); }
+  if(WiFi.status()==WL_CONNECTED) { d.drawArc(184,10,5,5,205,335,UI_LAVENDER); d.drawArc(184,10,3,3,205,335,UI_LAVENDER); d.fillCircle(184,13,1,UI_LAVENDER); }
+  else { d.drawLine(180,5,188,13,UI_MUTED); d.drawLine(188,5,180,13,UI_MUTED); }
 }
 void header(const char* title) {
   auto &d=M5Cardputer.Display;
-  d.fillScreen(BG);
+  d.fillRect(0,18,240,117,BG);
   d.setTextSize(1);
   d.setTextColor(UI_PINK,BG); d.setCursor(7,5); d.print("JOHNNY");
   drawBatteryIndicator();
@@ -304,21 +296,15 @@ void footer(const char* s="ESC  BACK") {
 void drawHome() {
   header("JOHNNY");
   auto& d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG);d.setCursor(8,43);d.printf("CARDPUTER-ADV  /  v%s",JOHNNY_VERSION);
   const int xs[3]={7,84,161};
-  const char* hints[]={"SOUND","TOOLS","PLAY"};
   for(int i=0;i<APP_COUNT;i++){
     int x=xs[i],y=59;bool on=i==selected;uint16_t fill=on?0x4810:PANEL;
     d.fillRoundRect(x,y,71,29,5,fill);
     d.drawRoundRect(x,y,71,29,5,on?UI_PINK:UI_PURPLE);
-    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+8,y+8);d.print(apps[i]);
-    d.setTextColor(on?UI_PINK:UI_MUTED,fill);d.setCursor(x+8,y+19);d.print(hints[i]);
+    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+8,y+11);d.print(apps[i]);
   }
-  const char* detail=selected==0?"SYNTH / TUNER / PLAYER / RADIO":(selected==1?"FILES / USB / WI-FI / UPDATES":"CONWAY LIFE / DOOM");
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,99);d.print(detail);
-  d.setTextColor(UI_MUTED,BG);d.setCursor(8,109);
-  d.printf("SD %s   WI-FI %s",sdReady?"READY":"MISSING",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE");
-  footer(", / . SELECT   ENTER OPEN");
+  d.setTextColor(sdReady?UI_LAVENDER:UI_PINK,BG); d.fillCircle(13,101,3,sdReady?UI_LAVENDER:UI_PINK);
+  footer("");
 }
 void drawCategoryMenu(){
   bool music=screen==MUSICMENU,system=screen==SYSTEMMENU;
@@ -326,15 +312,13 @@ void drawCategoryMenu(){
   const char** items=music?musicMenuItems:(system?systemMenuItems:gamesMenuItems);
   int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
   header(title);auto& d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG);d.setCursor(8,42);
-  d.print(music?"AUDIO / INSTRUMENTS":(system?"DEVICE / CONNECTIVITY":"GAMES / EXPERIMENTS"));
   for(int i=0;i<count;i++){
-    int y=55+i*10;bool active=i==selected;uint16_t bg=active?PANEL:BG;
+    int y=43+i*12;bool active=i==selected;uint16_t bg=active?PANEL:BG;
     d.fillRoundRect(7,y-1,225,9,2,bg);
     d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);
     d.printf("%c %02d  %s",active?'>':' ',i+1,items[i]);
   }
-  footer("UP/DN SELECT  ENTER OPEN  ESC BACK");
+  footer("");
 }
 void drawUpdateInfo(){
   header("FIRMWARE UPDATE");auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
@@ -361,20 +345,10 @@ void splash() {
   auto &d=M5Cardputer.Display;
   d.fillScreen(BG);
   d.setTextSize(3);
-  d.setTextColor(UI_PURPLE,BG);
+  d.setTextColor(WHITE,BG);
   d.setCursor(38,48); d.print("JOHNNY");
-  delay(350);
-  for(int i=0;i<10;i++) {
-    int y=random(43,87), x=random(12,45), w=random(70,205);
-    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_PURPLE);
-    d.setTextColor(i%2?UI_PINK:UI_PURPLE,BG);
-    d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
-    delay(32);
-  }
-  d.fillScreen(BG);
-  d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
-  d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
-  delay(1100);
+  d.setTextSize(1);
+  delay(500);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
@@ -1133,7 +1107,7 @@ void openApp(){
     if(item==5){showUnavailable("APP CATALOG","GitHub app installer is not integrated.");return;}
     const int map[]={4,6,5};selected=map[item];
   }else{
-    if(item==1){showUnavailable("DOOM 1993","Native DOOM port is not integrated.");return;}
+    if(item>0){showUnavailable(item==1?"GAME BOY / COLOR":(item==2?"GAME BOY ADVANCE":"DOOM ENGINE"),"EMULATOR CORE NOT INSTALLED");return;}
     selected=8;
   }
   openLegacyApp();
