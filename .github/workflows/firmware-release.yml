@@ -19,6 +19,8 @@ jobs:
         run: pip install platformio
       - name: Build Cardputer-Adv firmware
         run: pio run -e cardputer-adv
+      - name: Build minimal recovery firmware
+        run: pio run -e cardputer-recovery
       - name: Assemble complete flash image and install guide
         shell: bash
         run: |
@@ -35,6 +37,15 @@ jobs:
           test -n "$BOOT_APP0"
           test -n "$ESPTOOL"
           cp "$BUILD/firmware.bin" "$OUT/firmware.bin"
+          RECOVERY=".pio/build/cardputer-recovery"
+          test -s "$RECOVERY/firmware.bin"
+          python "$ESPTOOL" --chip esp32s3 merge_bin \\
+            -o "$OUT/johnny-recovery-cardputer-adv-full.bin" \\
+            --flash_mode dio --flash_freq 80m --flash_size 8MB \\
+            0x0 "$RECOVERY/bootloader.bin" \\
+            0x8000 "$RECOVERY/partitions.bin" \\
+            0xe000 "$OUT/boot_app0.bin" \\
+            0x10000 "$RECOVERY/firmware.bin"
           cp "$BUILD/bootloader.bin" "$OUT/bootloader.bin"
           cp "$BUILD/partitions.bin" "$OUT/partitions.bin"
           cp "$BOOT_APP0" "$OUT/boot_app0.bin"
@@ -80,6 +91,7 @@ jobs:
           files: |
             release/firmware.bin
             release/johnny-cardputer-adv-full.bin
+            release/johnny-recovery-cardputer-adv-full.bin
             release/LEIA-PRIMEIRO.txt
           generate_release_notes: true
           fail_on_unmatched_files: true
