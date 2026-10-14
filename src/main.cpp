@@ -504,7 +504,7 @@ void drawNetworkScreen() {
   auto &d=M5Cardputer.Display;
   if(wifiConfigStage==1) {
     d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,43);
-    d.print(wifiScanPending?"SCANNING NETWORKS...":(wifiScanOnly?"PASSIVE SURVEY":"SELECT A NETWORK"));
+    d.print(wifiScanPending?"SCANNING NETWORKS...":(wifiScanOnly?"WI-FI SURVEY":"SELECT A NETWORK"));
     if(!wifiScanPending && wifiNetworkCount==0) {
       d.setTextColor(UI_MUTED,BG); d.setCursor(8,68); d.print("NO NETWORKS FOUND");
       d.setCursor(8,83); d.print("PRESS R TO SCAN AGAIN");
@@ -545,6 +545,8 @@ void drawNetworkScreen() {
   footer("ENTER SEARCH NETWORKS  ESC BACK");
 }
 
+uint8_t audioProgressPercent();
+void drawBleScreen();
 void onBleScanComplete(BLEScanResults results){(void)results;bleScanDone=true;}
 void startBleScan(){
   bleCount=0;bleScanDone=false;bleScanning=false;hackMessage="STARTING PASSIVE SCAN";
@@ -1498,7 +1500,7 @@ void loop() {
   
   if(Serial.available()>0) serialTransferTask();
   serviceBleScan();
-  if(screen==HACKFX&&hackVisualFx&&millis()-hackFxLastFrame>=120){hackFxLastFrame=millis();M5Cardputer.Display.fillScreen((random(8)==0)?UI_PURPLE:BG);M5Cardputer.Display.setTextColor(UI_PINK,BG);M5Cardputer.Display.setCursor(random(8,160),random(35,110));M5Cardputer.Display.print("NO RF TX // OFFLINE");}
+  if(!screenSaverActive&&screen==HACKFX&&hackVisualFx&&millis()-hackFxLastFrame>=120){hackFxLastFrame=millis();M5Cardputer.Display.fillScreen((random(8)==0)?UI_PURPLE:BG);M5Cardputer.Display.setTextColor(UI_PINK,BG);M5Cardputer.Display.setCursor(random(8,160),random(35,110));M5Cardputer.Display.print("NO RF TX // OFFLINE");}
 
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
@@ -1587,8 +1589,8 @@ if(usbActive) endUsbMode();
     if(k.enter||k.space){if(micRecording)stopMicRecording();else startMicRecording();}
   } else if(screen==UPDATEINFO) {
     if(k.enter) runFirmwareUpdate();
-  } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) {
-    int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
+  } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) {
+    int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:(screen==GAMESMENU?GAMES_MENU_COUNT:HACK_MENU_COUNT));
     if(k.enter){openApp();delay(8);return;}
     if(c==';')selected=max(0,selected-1);
     else if(c=='.')selected=min(count-1,selected+1);
