@@ -2,8 +2,7 @@ name: Firmware build
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
     paths-ignore:
       - 'firmware/*.bin'
   pull_request:
@@ -26,24 +25,39 @@ jobs:
         run: python -m pip install --upgrade platformio
       - name: Build firmware
         run: pio run -e cardputer-adv
-      - name: Package firmware artifact
+      - name: Assemble complete USB image
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release/firmware
-          cp .pio/build/cardputer-adv/bootloader.bin release/firmware/bootloader.bin
-          cp .pio/build/cardputer-adv/partitions.bin release/firmware/partitions.bin
-          cp .pio/build/cardputer-adv/firmware.bin release/firmware/firmware.bin
+          BUILD=".pio/build/cardputer-adv"
+          OUT="release/firmware"
+          mkdir -p "$OUT"
           BOOT_APP0="$(find "$HOME/.platformio/packages/framework-arduinoespressif32" -name boot_app0.bin -print -quit)"
+          ESPTOOL="$(find "$HOME/.platformio/packages/tool-esptoolpy" -name esptool.py -print -quit)"
+          test -s "$BUILD/bootloader.bin"
+          test -s "$BUILD/partitions.bin"
+          test -s "$BUILD/firmware.bin"
           test -n "$BOOT_APP0"
-          cp "$BOOT_APP0" release/firmware/boot_app0.bin
+          test -n "$ESPTOOL"
+          cp "$BUILD/bootloader.bin" "$OUT/bootloader.bin"
+          cp "$BUILD/partitions.bin" "$OUT/partitions.bin"
+          cp "$BUILD/firmware.bin" "$OUT/firmware.bin"
+          cp "$BOOT_APP0" "$OUT/boot_app0.bin"
+          python "$ESPTOOL" --chip esp32s3 merge_bin \
+            -o "$OUT/johnny-cardputer-adv-full.bin" \
+            --flash_mode dio --flash_freq 80m --flash_size 8MB \
+            0x0 "$OUT/bootloader.bin" \
+            0x8000 "$OUT/partitions.bin" \
+            0xe000 "$OUT/boot_app0.bin" \
+            0x10000 "$OUT/firmware.bin"
+          test -s "$OUT/johnny-cardputer-adv-full.bin"
+          ls -lh "$OUT"/*.bin
       - name: Upload compiled firmware
         uses: actions/upload-artifact@v4
         with:
-          name: johnny-firmware-${{ github.sha }}
+          name: johnny-cardputer-adv-${{ github.sha }}
           path: release/firmware/
           if-no-files-found: error
-
       - name: Publish rolling latest release
         if: github.event_name != 'pull_request'
         env:
@@ -51,10 +65,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="johnny-${GITHUB_SHA:0:12}"
-          TITLE="JOHNNY latest — ${GITHUB_SHA:0:7}"
+          TAG="johnny-$(echo "$GITHUB_SHA" | cut -c1-12)"
+          TITLE="JOHNNY latest — $(echo "$GITHUB_SHA" | cut -c1-7)"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "$TITLE" --notes "Automated Cardputer ADV firmware build from commit ${GITHUB_SHA}." --target "$GITHUB_SHA" --latest
+            gh release create "$TAG" --title "$TITLE" --notes "Complete USB image and individual firmware parts built from commit $GITHUB_SHA." --target "$GITHUB_SHA" --latest
           fi
           gh release upload "$TAG" release/firmware/* --clobber
           gh release edit "$TAG" --title "$TITLE" --latest
