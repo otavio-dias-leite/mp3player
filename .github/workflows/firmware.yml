@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-cardputer-adv:
@@ -43,3 +43,18 @@ jobs:
           name: johnny-firmware-${{ github.sha }}
           path: release/firmware/
           if-no-files-found: error
+
+      - name: Publish rolling latest release
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="johnny-${GITHUB_SHA:0:12}"
+          TITLE="JOHNNY latest — ${GITHUB_SHA:0:7}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TITLE" --notes "Automated Cardputer ADV firmware build from commit ${GITHUB_SHA}." --latest
+          fi
+          gh release upload "$TAG" release/firmware/* --clobber
+          gh release edit "$TAG" --title "$TITLE" --latest
