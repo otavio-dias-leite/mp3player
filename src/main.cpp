@@ -4,6 +4,9 @@
 #include <SD.h>
 #include <math.h>
 #include <WiFi.h>
+#include <BLEDevice.h>
+#include <BLEScan.h>
+#include <BLEAdvertisedDevice.h>
 #include <WiFiClientSecure.h>
 #include <HTTPUpdate.h>
 #include <Preferences.h>
@@ -150,7 +153,7 @@ private:
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
 Screen eqReturnScreen=HOME;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
@@ -176,6 +179,12 @@ String radioEntry;
 String radioMessage="SELECT A STATION";
 String audioStatusMessage="STOPPED";
 String audioNowTitle;
+String audioTrackPath, audioTrackExtension, audioTrackArtist, audioTrackAlbum, audioTrackTitle;
+static uint8_t audioCoverData[40U*1024U];
+uint32_t audioCoverSize=0;
+bool audioCoverPng=false;
+bool audioShuffle=false;
+uint8_t audioRepeatMode=0;
 int audioVolume=14;
 AudioFileSource* audioRawSource=nullptr;
 AudioFileSourceBuffer* audioInputBuffer=nullptr;
@@ -190,6 +199,15 @@ int wifiNetworkRSSI[20];
 int wifiNetworkAuth[20];
 int wifiNetworkCount=0, wifiSelected=0, wifiScroll=0;
 bool wifiScanPending=false;
+bool wifiScanOnly=false;
+BLEScan* bleScanner=nullptr;
+bool bleInitialized=false;
+volatile bool bleScanDone=false;
+bool bleScanning=false;
+String bleNames[8];
+int bleRssi[8];
+int bleCount=0;
+String hackMessage;
 uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
@@ -226,12 +244,18 @@ int16_t batteryCachedMillivolts = -1;
 bool batteryCachedCharging = false;
 bool batteryCacheReady = false;
 bool screenSaverActive = false;
-const char* apps[] = {"MUSIC","SYSTEM","GAMES"};
-constexpr int APP_COUNT=3;
+const char* apps[] = {"MUSIC","SYSTEM","GAMES","HACK"};
+constexpr int APP_COUNT=4;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
-const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","BLUETOOTH","UPDATE FIRMWARE","INSTALL APPS"};
-const char* gamesMenuItems[]={"CONWAY LIFE","GB / GBC CORE","GBA CORE","DOOM ENGINE"};
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=4;
+const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS"};
+const char* gamesMenuItems[]={"CONWAY LIFE"};
+const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","SPAM FX (OFFLINE)","DEVICE / RF INFO"};
+const char* hackFxItems[]={"RICKROLL (LOCAL FILE)","NEVER FADE AWAY (LOCAL FILE)","VISUAL FX ONLY"};
+int hackFxSelected=0;
+bool hackFxPlaying=false;
+bool hackVisualFx=false;
+uint32_t hackFxLastFrame=0;
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=5, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=4, HACK_FX_COUNT=3;
 String placeholderTitle, placeholderMessage;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
@@ -293,23 +317,20 @@ void footer(const char* s="") {
   M5Cardputer.Display.drawFastHLine(7,117,226,0x5140);
 }
 void drawHome() {
-  header("JOHNNY");
-  auto& d=M5Cardputer.Display;
-  const int xs[3]={7,84,161};
+  header("JOHNNY");auto& d=M5Cardputer.Display;
+  const int xs[4]={7,124,7,124};const int ys[4]={43,43,79,79};
   for(int i=0;i<APP_COUNT;i++){
-    int x=xs[i],y=59;bool on=i==selected;uint16_t fill=on?0x4810:PANEL;
-    d.fillRoundRect(x,y,71,29,5,fill);
-    d.drawRoundRect(x,y,71,29,5,on?UI_PINK:UI_PURPLE);
-    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+8,y+11);d.print(apps[i]);
+    int x=xs[i],y=ys[i];bool on=i==selected;uint16_t fill=on?0x4810:PANEL;
+    d.fillRoundRect(x,y,109,28,5,fill);d.drawRoundRect(x,y,109,28,5,on?UI_PINK:UI_PURPLE);
+    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+10,y+10);d.print(apps[i]);
   }
-  d.setTextColor(sdReady?UI_LAVENDER:UI_PINK,BG); d.fillCircle(13,101,3,sdReady?UI_LAVENDER:UI_PINK);
-  footer("");
+  d.setTextColor(sdReady?UI_LAVENDER:UI_PINK,BG);d.fillCircle(13,113,2,sdReady?UI_LAVENDER:UI_PINK);footer("");
 }
 void drawCategoryMenu(){
-  bool music=screen==MUSICMENU,system=screen==SYSTEMMENU;
-  const char* title=music?"MUSIC":(system?"SYSTEM":"GAMES");
-  const char** items=music?musicMenuItems:(system?systemMenuItems:gamesMenuItems);
-  int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:GAMES_MENU_COUNT);
+  bool music=screen==MUSICMENU,system=screen==SYSTEMMENU,games=screen==GAMESMENU;
+  const char* title=music?"MUSIC":(system?"SYSTEM":(games?"GAMES":"HACK"));
+  const char** items=music?musicMenuItems:(system?systemMenuItems:(games?gamesMenuItems:hackMenuItems));
+  int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
   header(title);auto& d=M5Cardputer.Display;
   for(int i=0;i<count;i++){
     int y=43+i*12;bool active=i==selected;uint16_t bg=active?PANEL:BG;
@@ -483,7 +504,7 @@ void drawNetworkScreen() {
   auto &d=M5Cardputer.Display;
   if(wifiConfigStage==1) {
     d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,43);
-    d.print(wifiScanPending?"SCANNING NETWORKS...":"SELECT A NETWORK");
+    d.print(wifiScanPending?"SCANNING NETWORKS...":(wifiScanOnly?"PASSIVE SURVEY":"SELECT A NETWORK"));
     if(!wifiScanPending && wifiNetworkCount==0) {
       d.setTextColor(UI_MUTED,BG); d.setCursor(8,68); d.print("NO NETWORKS FOUND");
       d.setCursor(8,83); d.print("PRESS R TO SCAN AGAIN");
@@ -523,11 +544,71 @@ void drawNetworkScreen() {
   }
   footer("ENTER SEARCH NETWORKS  ESC BACK");
 }
+
+void onBleScanComplete(BLEScanResults results){(void)results;bleScanDone=true;}
+void startBleScan(){
+  bleCount=0;bleScanDone=false;bleScanning=false;hackMessage="STARTING PASSIVE SCAN";
+  if(!bleInitialized){BLEDevice::init("");bleInitialized=true;}
+  if(!bleScanner)bleScanner=BLEDevice::getScan();
+  if(!bleScanner){hackMessage="BLE INIT FAILED";return;}
+  bleScanner->setActiveScan(false);bleScanner->setInterval(100);bleScanner->setWindow(60);
+  bleScanning=bleScanner->start(5,onBleScanComplete,false);
+  if(!bleScanning)hackMessage="BLE SCAN START FAILED";
+}
+void serviceBleScan(){
+  if(!bleScanning||!bleScanDone||!bleScanner)return;
+  bleScanDone=false;bleScanning=false;BLEScanResults results=bleScanner->getResults();
+  bleCount=min(8,results.getCount());
+  for(int i=0;i<bleCount;i++){
+    BLEAdvertisedDevice device=results.getDevice((uint32_t)i);
+    String name=device.haveName()?String(device.getName().c_str()):String("UNKNOWN");
+    String address=String(device.getAddress().toString().c_str());
+    if(name.length()>12)name=name.substring(0,12);
+    bleNames[i]=name+" "+address.substring(max(0,(int)address.length()-5));
+    bleRssi[i]=device.haveRSSI()?device.getRSSI():-127;
+  }
+  hackMessage=bleCount?String(bleCount)+" DEVICES FOUND":"NO BLE DEVICES FOUND";
+  bleScanner->clearResults();if(screen==BLESCAN&&!screenSaverActive)drawBleScreen();
+}
+void drawBleScreen(){
+  header("BLE SCANNER");auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,42);d.print(bleScanning?"PASSIVE SCAN IN PROGRESS":hackMessage.substring(0,28));
+  for(int i=0;i<min(5,bleCount);i++){int y=57+i*11;d.setTextColor(WHITE,BG);d.setCursor(9,y);d.print(bleNames[i].substring(0,20));d.setTextColor(UI_MUTED,BG);d.setCursor(194,y);d.printf("%d",bleRssi[i]);}
+  footer("R RESCAN  ESC BACK");
+}
+void drawHackInfo(){
+  header("WIRELESS LAB");auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,46);d.print("PASSIVE TOOLS ONLY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,65);d.print("NO PACKET FLOODING");
+  d.setCursor(8,80);d.print("NO DECEPTIVE FREE WI-FI");
+  d.setCursor(8,98);d.print("USE ON YOUR OWN NETWORK");footer("ESC BACK");
+}
+void drawHackFxScreen(){
+  header("SPAM FX / OFFLINE");auto& d=M5Cardputer.Display;
+  if(hackFxPlaying){
+    d.setTextColor(UI_PINK,BG);d.setCursor(8,43);d.print("LOCAL AUDIO DEMO");
+    String title=audioTrackTitle.length()?audioTrackTitle:audioNowTitle;if(title.length()>30)title=title.substring(0,27)+"...";
+    d.setTextColor(WHITE,BG);d.setCursor(8,61);d.print(title);
+    d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,77);d.print(audioTrackArtist.length()?audioTrackArtist:"LOCAL FILE");
+    d.drawFastHLine(8,96,224,0x5140);d.drawFastHLine(8,96,(int)audioProgressPercent()*224/100,UI_PINK);
+    d.setCursor(8,108);d.print(audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.substring(0,24));
+    footer("ENTER PAUSE  P STOP  ESC BACK");return;
+  }
+  if(hackVisualFx){d.setTextColor(UI_PINK,BG);d.setCursor(8,48);d.print("OFFLINE VISUAL DEMO");d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,68);d.print("NO WI-FI / BLE PACKETS");d.setCursor(8,85);d.print("ARE TRANSMITTED");footer("ESC BACK");return;}
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,42);d.print("LOCAL MEDIA / NO RF TX");
+  for(int i=0;i<HACK_FX_COUNT;i++){int y=59+i*15;bool active=i==hackFxSelected;uint16_t bg=active?PANEL:BG;d.fillRoundRect(7,y-1,225,12,2,bg);d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);d.print(active?"> ":"  ");d.print(hackFxItems[i]);}
+  footer("ENTER RUN LOCAL DEMO  ESC BACK");
+}
+
 void startNetworkSetup() {
   WiFi.mode(WIFI_STA); WiFi.disconnect(false,false);
   wifiNetworkCount=0; wifiSelected=0; wifiScroll=0; wifiScanPending=true;
   wifiConfigStage=1; WiFi.scanDelete(); WiFi.scanNetworks(true,false);
   drawNetworkScreen();
+}
+void startWifiSurvey() {
+  WiFi.mode(WIFI_STA);wifiNetworkCount=0;wifiSelected=0;wifiScroll=0;wifiScanPending=true;
+  wifiConfigStage=1;wifiScanOnly=true;WiFi.scanDelete();WiFi.scanNetworks(true,false);drawNetworkScreen();
 }
 void saveNetworkSetup();
 void chooseNetwork(int index) {
@@ -549,6 +630,9 @@ void saveNetworkSetup() {
 }
 void stopAudio();
 bool beginUsbMode();
+void startBleScan();void drawBleScreen();void serviceBleScan();
+void drawHackFxScreen();void drawHackInfo();void runHackAudio(const String& keyword,const String& label);
+void moveMusicTrack(int direction);void playSelectedTrack();uint8_t audioProgressPercent();
 void drawUsbScreen(bool ok);
 String safeSdPath(String path) {
   path.trim();
@@ -839,6 +923,7 @@ bool startAudioSource(AudioFileSource* source, const String& title, const String
     return false;
   }
   audioNowTitle=title;
+  if(radio){audioTrackPath="";audioTrackExtension="";audioTrackArtist="";audioTrackAlbum="";audioTrackTitle=title;audioCoverSize=0;}
   audioIsRadio=radio;
   audioPaused=false;
   audioTaskEnded=false;
@@ -866,8 +951,42 @@ bool isOggOpusFile(const String& path) {
   }
   return false;
 }
+
+uint32_t id3Synchsafe32(const uint8_t* b){return ((uint32_t)(b[0]&0x7f)<<21)|((uint32_t)(b[1]&0x7f)<<14)|((uint32_t)(b[2]&0x7f)<<7)|(uint32_t)(b[3]&0x7f);}
+uint32_t id3BigEndian32(const uint8_t* b){return ((uint32_t)b[0]<<24)|((uint32_t)b[1]<<16)|((uint32_t)b[2]<<8)|(uint32_t)b[3];}
+String decodeId3Text(const uint8_t* data,size_t length){
+  if(!data||length<2)return "";const uint8_t encoding=data[0];String value;value.reserve(min((size_t)96,length));
+  if(encoding==1||encoding==2){size_t i=1;bool little=true;if(encoding==1&&length>=3&&data[1]==0xfe&&data[2]==0xff)little=false;if(encoding==1&&length>=3&&data[1]==0xff&&data[2]==0xfe)i=3;else if(encoding==1&&length>=3&&data[1]==0xfe&&data[2]==0xff)i=3;for(;i+1<length;i+=2){uint8_t lo=little?data[i]:data[i+1],hi=little?data[i+1]:data[i];if(lo==0&&hi==0)break;value+=(hi==0&&lo>=32)?(char)lo:'?';}}
+  else{for(size_t i=1;i<length&&data[i]!=0;i++){uint8_t ch=data[i];value+=(ch>=32||ch=='\t')?(char)ch:' ';}}
+  value.trim();return value;
+}
+bool extractApicImage(size_t length){
+  if(length<8)return false;size_t p=0;const uint8_t encoding=audioCoverData[p++];while(p<length&&audioCoverData[p]!=0)p++;if(p>=length)return false;p++;if(p>=length)return false;p++;
+  if(encoding==1||encoding==2){while(p+1<length&&!(audioCoverData[p]==0&&audioCoverData[p+1]==0))p+=2;if(p+1>=length)return false;p+=2;}
+  else{while(p<length&&audioCoverData[p]!=0)p++;if(p>=length)return false;p++;}
+  size_t start=length;for(size_t i=p;i+8<length;i++){if(audioCoverData[i]==0xff&&audioCoverData[i+1]==0xd8){start=i;audioCoverPng=false;break;}if(audioCoverData[i]==0x89&&audioCoverData[i+1]=='P'&&audioCoverData[i+2]=='N'&&audioCoverData[i+3]=='G'){start=i;audioCoverPng=true;break;}}
+  if(start>=length)return false;size_t end=length;if(!audioCoverPng){for(size_t i=length-2;i>start;i--)if(audioCoverData[i]==0xff&&audioCoverData[i+1]==0xd9){end=i+2;break;}}
+  if(end<=start||end-start>sizeof(audioCoverData))return false;memmove(audioCoverData,audioCoverData+start,end-start);audioCoverSize=(uint32_t)(end-start);return true;
+}
+bool loadSidecarCover(const String& trackPath){
+  int slash=trackPath.lastIndexOf('/');String folder=slash>=0?trackPath.substring(0,slash+1):"/";String base=slash>=0?trackPath.substring(slash+1):trackPath;int dot=base.lastIndexOf('.');if(dot>0)base=base.substring(0,dot);
+  String candidates[6]={folder+"cover.jpg",folder+"Cover.jpg",folder+"folder.jpg",folder+base+".jpg",folder+base+".png",String("/COVERS/")+base+".jpg"};
+  for(const String& path:candidates){if(!SD.exists(path.c_str()))continue;File image=SD.open(path,FILE_READ);if(!image)continue;uint32_t size=(uint32_t)image.size();if(size>0&&size<=sizeof(audioCoverData)&&image.read(audioCoverData,size)==size){audioCoverSize=size;audioCoverPng=path.endsWith(".png")||path.endsWith(".PNG");image.close();return true;}image.close();}
+  return false;
+}
+void loadTrackMetadata(const String& path){
+  audioTrackPath=path;audioTrackExtension=audioExtension(path);audioTrackArtist="";audioTrackAlbum="";audioTrackTitle=path.substring(path.lastIndexOf('/')+1);int dot=audioTrackTitle.lastIndexOf('.');if(dot>0)audioTrackTitle.remove(dot);audioCoverSize=0;audioCoverPng=false;
+  File file=SD.open(path,FILE_READ);if(file){uint8_t h[10]={0};if(file.read(h,sizeof(h))==sizeof(h)&&memcmp(h,"ID3",3)==0&&h[3]>=3&&h[3]<=4){uint32_t tagSize=id3Synchsafe32(h+6),tagEnd=min((uint32_t)file.size(),10U+tagSize);uint8_t fh[10];while((uint32_t)file.position()+10U<=tagEnd){if(file.read(fh,sizeof(fh))!=sizeof(fh)||fh[0]==0)break;char id[5]={(char)fh[0],(char)fh[1],(char)fh[2],(char)fh[3],0};uint32_t frameSize=h[3]==4?id3Synchsafe32(fh+4):id3BigEndian32(fh+4);if(frameSize==0)continue;uint32_t frameEnd=(uint32_t)file.position()+frameSize;if(frameEnd>tagEnd||frameEnd>(uint32_t)file.size())break;
+      if((strcmp(id,"TIT2")==0||strcmp(id,"TPE1")==0||strcmp(id,"TALB")==0)&&frameSize<=512){uint8_t txt[512];if(file.read(txt,frameSize)==frameSize){String v=decodeId3Text(txt,frameSize);if(strcmp(id,"TIT2")==0&&v.length())audioTrackTitle=v;else if(strcmp(id,"TPE1")==0)audioTrackArtist=v;else if(strcmp(id,"TALB")==0)audioTrackAlbum=v;}}
+      else if(strcmp(id,"APIC")==0&&frameSize<=sizeof(audioCoverData)){if(file.read(audioCoverData,frameSize)==frameSize)extractApicImage(frameSize);}
+      file.seek(frameEnd);
+    }}file.close();}
+  if(audioCoverSize==0)loadSidecarCover(path);
+}
+
 bool startLocalAudio(const String& path) {
   if(!sdReady) { audioStatusMessage="NO SD CARD"; return false; }
+  stopAudio();loadTrackMetadata(path);
   const String ext=audioExtension(path);
   if(ext!="mp3" && ext!="wav" && ext!="flac" && ext!="aac" && ext!="ogg" && ext!="opus" && ext!="oga") {
     audioStatusMessage="UNSUPPORTED FORMAT";
@@ -887,6 +1006,21 @@ bool startLocalAudio(const String& path) {
   if(!startAudioSource(source,title,ext,false)) return false;
   return true;
 }
+
+bool findAudioKeywordRecursive(const String& directory,const String& keyword,String& found,int depth){
+  if(depth<0)return false;File dir=SD.open(directory);if(!dir||!dir.isDirectory()){if(dir)dir.close();return false;}File entry=dir.openNextFile();
+  while(entry){String raw=String(entry.name());bool isDir=entry.isDirectory();entry.close();String path=raw.startsWith("/")?raw:(directory=="/"?"/"+raw:directory+"/"+raw);
+    if(isDir){if(path!="/System Volume Information"&&path!="/JOHNNY"&&findAudioKeywordRecursive(path,keyword,found,depth-1)){dir.close();return true;}}
+    else{String low=raw;low.toLowerCase();if(isPlayableAudio(low)&&low.indexOf(keyword)>=0){found=path;dir.close();return true;}}
+    entry=dir.openNextFile();
+  }dir.close();return false;
+}
+void runHackAudio(const String& keyword,const String& label){
+  stopAudio();hackFxPlaying=false;hackVisualFx=false;String path;
+  if(!sdReady||!findAudioKeywordRecursive("/",keyword,path,3)){hackMessage=label+" FILE NOT FOUND ON MICROSD";drawHackFxScreen();return;}
+  bool ok=startLocalAudio(path);hackFxPlaying=ok;if(!ok)hackMessage=audioStatusMessage;else hackMessage=label+" PLAYING";drawHackFxScreen();
+}
+
 bool startRadioStream(const String& url, const String& title) {
   stopAudio();
   if(WiFi.status()!=WL_CONNECTED) {
@@ -910,6 +1044,22 @@ bool startRadioStream(const String& url, const String& title) {
   radioMessage=ok?"LIVE / CONNECTED":audioStatusMessage;
   return ok;
 }
+uint8_t audioProgressPercent(){if(!audioMutex||xSemaphoreTake(audioMutex,0)!=pdTRUE)return 0;uint32_t pos=0,size=0;if(audioRawSource){size=audioRawSource->getSize();pos=audioRawSource->getPos();if(audioInputBuffer){uint32_t n=audioInputBuffer->getFillLevel();pos=pos>n?pos-n:0;}}xSemaphoreGive(audioMutex);if(!size)return 0;if(pos>size)pos=size;return (uint8_t)((uint64_t)pos*100ULL/size);}
+bool seekAudioStep(int direction){
+  if(!audioStarted||audioIsRadio||!audioMutex)return false;
+  if(xSemaphoreTake(audioMutex,pdMS_TO_TICKS(250))!=pdTRUE){audioStatusMessage="AUDIO BUSY";return false;}
+  if(!audioRawSource||!audioInputBuffer||!audioDecoder){xSemaphoreGive(audioMutex);return false;}
+  uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos(),buffered=audioInputBuffer->getFillLevel();pos=pos>buffered?pos-buffered:0;
+  if(size<4096){xSemaphoreGive(audioMutex);return false;}
+  int64_t target=(int64_t)pos+(int64_t)direction*(int64_t)max((uint32_t)4096,size/20U);if(target<0)target=0;if(target>(int64_t)size-1)target=(int64_t)size-1;
+  bool paused=audioPaused;audioDecoder->stop();delete audioDecoder;audioDecoder=nullptr;delete audioInputBuffer;audioInputBuffer=nullptr;
+  if(!audioRawSource->seek((int32_t)target,SEEK_SET))audioRawSource->seek(0,SEEK_SET);
+  audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,8192);audioDecoder=createAudioDecoder(audioTrackExtension);
+  bool ok=audioInputBuffer&&audioDecoder&&audioDecoder->begin(audioInputBuffer,audioOutput);
+  if(ok){audioStarted=true;audioPaused=paused;audioTaskEnded=false;audioStatusMessage=paused?"PAUSED":"PLAYING";audioEqualizer.reset();}
+  else{if(audioDecoder){delete audioDecoder;audioDecoder=nullptr;}if(audioInputBuffer){delete audioInputBuffer;audioInputBuffer=nullptr;}audioStarted=false;audioPaused=true;audioStatusMessage="SEEK FAILED";}
+  xSemaphoreGive(audioMutex);return ok;
+}
 void serviceAudio() {
   bool ended=false;
   bool wasRadio=false;
@@ -922,13 +1072,9 @@ void serviceAudio() {
     xSemaphoreGive(audioMutex);
   }
   if(!ended) return;
-  stopAudio();
-  audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
-  if(wasRadio) radioMessage=audioStatusMessage;
-  if(!screenSaverActive) {
-    if(screen==MUSIC && musicNowPlaying) drawMusicInfo(audioNowTitle);
-    else if(screen==RADIO) drawRadioScreen();
-  }
+  stopAudio();audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";if(wasRadio)radioMessage=audioStatusMessage;
+  else if(screen==MUSIC&&musicNowPlaying&&entryCount>0){if(audioRepeatMode==2)playSelectedTrack();else if(audioShuffle)moveMusicTrack(1);else if(selected<entryCount-1)moveMusicTrack(1);else if(audioRepeatMode==1){selected=0;while(selected<entryCount&&entryIsDir[selected])selected++;if(selected<entryCount)playSelectedTrack();}}
+  if(!screenSaverActive){if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);else if(screen==RADIO)drawRadioScreen();}
 }
 void audioTask(void* parameter) {
   (void)parameter;
@@ -959,43 +1105,18 @@ void setAudioVolume(int value) {
   if(audioOutput) audioOutput->SetGain((float)audioVolume/21.0f);
   if(audioMutex) xSemaphoreGive(audioMutex);
 }
-void drawMusicInfo(const String &name) {
-  header("JOHNNY MUSIC");
-  auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,42);
-  d.print("NOW PLAYING");
-  d.fillRoundRect(91,49,58,43,5,PANEL);
-  d.drawCircle(120,70,19,UI_PURPLE);
-  d.drawCircle(120,70,12,UI_PINK);
-  d.drawCircle(120,70,5,UI_LAVENDER);
-  int previous=-1, next=-1;
-  for(int step=1;step<entryCount;step++) {
-    int candidate=(selected-step+entryCount)%entryCount;
-    if(!entryIsDir[candidate] && isPlayableAudio(entries[candidate])) {previous=candidate;break;}
-  }
-  for(int step=1;step<entryCount;step++) {
-    int candidate=(selected+step)%entryCount;
-    if(!entryIsDir[candidate] && isPlayableAudio(entries[candidate])) {next=candidate;break;}
-  }
-  d.setTextColor(UI_LAVENDER,BG);
-  d.setCursor(8,59);
-  if(previous>=0) {
-    String title=entries[previous]; if(title.length()>8) title=title.substring(0,7)+"~";
-    d.printf("< %s",title.c_str());
-  } else d.print("< --");
-  d.setCursor(171,59);
-  if(next>=0) {
-    String title=entries[next]; if(title.length()>8) title=title.substring(0,7)+"~";
-    d.printf("> %s",title.c_str());
-  } else d.print("> --");
-  String label=name;
-  if(label.length()>34) label=label.substring(0,31)+"...";
-  d.setTextSize(1); d.setTextColor(WHITE,BG); d.setCursor(8,98);
-  d.print(label);
-  d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);
-  d.setCursor(8,109);
-  d.printf("%s  VOL %02d",audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.c_str(),audioVolume);
-  footer("< > NEXT/PREV  ENTER PAUSE  +/- VOL");
+void drawMusicInfo(const String &name){
+  header("JOHNNY MUSIC");auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,39);d.print("NOW PLAYING");d.fillRoundRect(8,49,62,62,5,PANEL);
+  bool cover=false;if(audioCoverSize>0)cover=audioCoverPng?d.drawPng(audioCoverData,audioCoverSize,9,50,60,60):d.drawJpg(audioCoverData,audioCoverSize,9,50,60,60);
+  if(!cover){d.drawCircle(39,80,20,UI_PURPLE);d.drawCircle(39,80,13,UI_PINK);d.drawCircle(39,80,5,UI_LAVENDER);}
+  d.setTextColor(WHITE,BG);String title=audioTrackTitle.length()?audioTrackTitle:name;if(title.length()>23)title=title.substring(0,20)+"...";d.setCursor(78,51);d.print(title);
+  d.setTextColor(UI_LAVENDER,BG);String artist=audioTrackArtist.length()?audioTrackArtist:"UNKNOWN ARTIST";if(artist.length()>24)artist=artist.substring(0,21)+"...";d.setCursor(78,66);d.print(artist);
+  String album=audioTrackAlbum.length()?audioTrackAlbum:"LOCAL LIBRARY";if(album.length()>24)album=album.substring(0,21)+"...";d.setTextColor(UI_MUTED,BG);d.setCursor(78,80);d.print(album);
+  d.drawFastHLine(78,96,151,0x5140);uint8_t pct=audioProgressPercent();d.drawFastHLine(78,96,(int)pct*151/100,UI_PINK);d.fillCircle(78+(int)pct*151/100,96,3,UI_LAVENDER);
+  d.setCursor(78,103);d.printf("%3u%%",pct);d.setCursor(125,103);d.printf("%s REP:%s",audioShuffle?"SHUF":"ORDER",audioRepeatMode==0?"OFF":(audioRepeatMode==1?"ALL":"ONE"));
+  d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);d.setCursor(8,115);d.printf("%s VOL %02d",audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.c_str(),audioVolume);
+  footer("< > TRACK  UP/DN SEEK  ENTER PAUSE");
 }
 void drawRadioScreen() {
   header("WEB RADIO");
@@ -1051,7 +1172,8 @@ void playSelectedTrack() {
   }
 }
 void moveMusicTrack(int direction) {
-  if(entryCount<=0) return;
+  if(entryCount<=0)return;
+  if(audioShuffle&&direction>0){int choices=0;for(int i=0;i<entryCount;i++)if(!entryIsDir[i]&&isPlayableAudio(entries[i]))choices++;if(choices){int pick=random(choices);for(int i=0;i<entryCount;i++)if(!entryIsDir[i]&&isPlayableAudio(entries[i]))if(pick--==0){selected=i;playSelectedTrack();return;}}}
   int candidate=selected;
   for(int tries=0;tries<entryCount;tries++) {
     candidate=(candidate+direction+entryCount)%entryCount;
@@ -1091,22 +1213,13 @@ void drawLife();
 bool loadLife();
 void openLegacyApp();
 void openApp(){
-  if(screen==HOME){screen=selected==0?MUSICMENU:(selected==1?SYSTEMMENU:GAMESMENU);selected=0;drawCategoryMenu();return;}
+  if(screen==HOME){screen=selected==0?MUSICMENU:(selected==1?SYSTEMMENU:(selected==2?GAMESMENU:HACKMENU));selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
-  if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
-  screen=HOME;
-  if(menu==MUSICMENU){
-    if(item==5){screen=MICREC;micRecording=false;micRecordStatus="READY";drawMicRecorder();return;}
-    const int map[]={0,1,2,3,7};selected=map[item];
-  }else if(menu==SYSTEMMENU){
-    if(item==3){showUnavailable("BLUETOOTH","Bluetooth pairing is not integrated.");return;}
-    if(item==4){screen=UPDATEINFO;updateMessage="PRESS ENTER TO INSTALL LATEST";drawUpdateInfo();return;}
-    if(item==5){showUnavailable("APP CATALOG","GitHub app installer is not integrated.");return;}
-    const int map[]={4,6,5};selected=map[item];
-  }else{
-    if(item>0){showUnavailable(item==1?"GAME BOY / COLOR":(item==2?"GAME BOY ADVANCE":"DOOM ENGINE"),"EMULATOR CORE NOT INSTALLED");return;}
-    selected=8;
-  }
+  if(menu==HACKMENU){if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item==2){screen=HACKFX;hackFxSelected=0;hackFxPlaying=false;hackVisualFx=false;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
+  if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;screen=HOME;
+  if(menu==MUSICMENU){if(item==5){screen=MICREC;micRecording=false;micRecordStatus="READY";drawMicRecorder();return;}const int map[]={0,1,2,3,7};selected=map[item];}
+  else if(menu==SYSTEMMENU){if(item==3){screen=UPDATEINFO;updateMessage="PRESS ENTER TO INSTALL LATEST";drawUpdateInfo();return;}if(item==4){selected=9;openLegacyApp();return;}const int map[]={4,6,5};selected=map[item];}
+  else selected=8;
   openLegacyApp();
 }
 void openLegacyApp() {
@@ -1130,6 +1243,7 @@ void openLegacyApp() {
     case 6: screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     case 7: eqReturnScreen=MUSICMENU;screen=EQSCREEN;selected=4;drawEqScreen();break;
     case 8: screen=LIFE;if(!loadLife())seedLife();drawLife();break;
+    case 9: screen=ABOUT;header("DEVICE STATUS");M5Cardputer.Display.setTextColor(WHITE,BG);M5Cardputer.Display.setCursor(8,49);M5Cardputer.Display.print("JOHNNY / CARDPUTER ADV");M5Cardputer.Display.setTextColor(UI_LAVENDER,BG);M5Cardputer.Display.setCursor(8,67);M5Cardputer.Display.printf("SD: %s",sdReady?"READY":"NOT FOUND");M5Cardputer.Display.setCursor(8,81);M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"CONNECTED":"OFFLINE");M5Cardputer.Display.setCursor(8,95);M5Cardputer.Display.printf("BLE: %s",bleInitialized?"READY":"IDLE");M5Cardputer.Display.setCursor(8,109);M5Cardputer.Display.printf("BATTERY: %d%%",batteryPercent());footer("ESC BACK");break;
     default:
       screen=ABOUT; header("SYSTEM");
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
@@ -1383,6 +1497,8 @@ void loop() {
   }
   
   if(Serial.available()>0) serialTransferTask();
+  serviceBleScan();
+  if(screen==HACKFX&&hackVisualFx&&millis()-hackFxLastFrame>=120){hackFxLastFrame=millis();M5Cardputer.Display.fillScreen((random(8)==0)?UI_PURPLE:BG);M5Cardputer.Display.setTextColor(UI_PINK,BG);M5Cardputer.Display.setCursor(random(8,160),random(35,110));M5Cardputer.Display.print("NO RF TX // OFFLINE");}
 
   if(!M5Cardputer.Keyboard.isChange() || !M5Cardputer.Keyboard.isPressed()) { delay(4); return; }
   auto k=M5Cardputer.Keyboard.keysState();
@@ -1391,7 +1507,7 @@ void loop() {
     screenSaverActive=!screenSaverActive;
     if(screenSaverActive) M5Cardputer.Display.fillScreen(BLACK);
     else if(screen==HOME) drawHome();
-    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) drawCategoryMenu();
+    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) drawCategoryMenu();
     else if(screen==UPDATEINFO) drawUpdateInfo();
     else if(screen==MICREC) drawMicRecorder();
     else if(screen==PIANO) pianoScreen();
@@ -1404,12 +1520,15 @@ void loop() {
     else if(screen==EQSCREEN)drawEqScreen();
     else if(screen==LIFE)drawLife();
     else if(screen==ABOUT)openApp();
+    else if(screen==BLESCAN)drawBleScreen();
+    else if(screen==HACKFX)drawHackFxScreen();
+    else if(screen==HACKINFO)drawHackInfo();
     return;
   }
   if(screenSaverActive) {
     screenSaverActive=false;
     if(screen==HOME) drawHome();
-    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU) drawCategoryMenu();
+    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) drawCategoryMenu();
     else if(screen==UPDATEINFO) drawUpdateInfo();
     else if(screen==MICREC) drawMicRecorder();
     else if(screen==PIANO) pianoScreen();
@@ -1422,6 +1541,9 @@ void loop() {
     else if(screen==EQSCREEN)drawEqScreen();
     else if(screen==LIFE)drawLife();
     else if(screen==ABOUT)openApp();
+    else if(screen==BLESCAN)drawBleScreen();
+    else if(screen==HACKFX)drawHackFxScreen();
+    else if(screen==HACKINFO)drawHackInfo();
     return;
   }
 
@@ -1429,7 +1551,11 @@ void loop() {
   if(back) {
     if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
-    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU){screen=HOME;selected=0;drawHome();}
+    else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU){screen=HOME;selected=0;drawHome();}
+    else if(screen==BLESCAN){if(bleScanning&&bleScanner)bleScanner->stop();bleScanning=false;bleScanDone=false;screen=HACKMENU;selected=1;drawCategoryMenu();}
+    else if(screen==HACKINFO){screen=HACKMENU;selected=3;drawCategoryMenu();}
+    else if(screen==HACKFX){if(hackFxPlaying)stopAudio();hackFxPlaying=false;hackVisualFx=false;screen=HACKMENU;selected=2;drawCategoryMenu();}
+    else if(screen==NETWORK&&wifiScanOnly){wifiScanOnly=false;wifiConfigStage=0;screen=HACKMENU;selected=0;drawCategoryMenu();}
     else if(screen==EQSCREEN){
       screen=eqReturnScreen;
       if(screen==HOME)drawHome();
@@ -1492,8 +1618,10 @@ if(usbActive) endUsbMode();
       else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawMusicInfo(audioNowTitle);}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
-      else if(c==';') moveMusicTrack(-1);
-      else if(c=='.') moveMusicTrack(1);
+      else if(c==';') {seekAudioStep(-1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
+      else if(c=='.') {seekAudioStep(1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
+      else if(c=='s'||c=='S'){audioShuffle=!audioShuffle;drawMusicInfo(audioNowTitle);}
+      else if(c=='r'||c=='R'){audioRepeatMode=(audioRepeatMode+1)%3;drawMusicInfo(audioNowTitle);}
     } else {      if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
       else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
@@ -1559,15 +1687,22 @@ if(usbActive) endUsbMode();
     else if(k.enter){toggleLifeCell();drawLife();}
     else if(c=='-'||c=='_'){lifeIntervalMs=min(1000,(int)lifeIntervalMs+50);drawLife();}
     else if(c=='='||c=='+'){lifeIntervalMs=max(50,(int)lifeIntervalMs-50);drawLife();}
+  } else if(screen==BLESCAN) {
+    if(c=='r'||c=='R'){if(bleScanning&&bleScanner)bleScanner->stop();startBleScan();drawBleScreen();}
+  } else if(screen==HACKINFO) {
+    // ESC returns to the HACK menu.
+  } else if(screen==HACKFX) {
+    if(hackFxPlaying){if(k.enter||k.space){toggleAudioPause();drawHackFxScreen();}else if(c=='p'||c=='P'){stopAudio();hackFxPlaying=false;drawHackFxScreen();}}
+    else if(!hackVisualFx){if(c==';')hackFxSelected=max(0,hackFxSelected-1);else if(c=='.')hackFxSelected=min(HACK_FX_COUNT-1,hackFxSelected+1);else if(k.enter){if(hackFxSelected==0)runHackAudio("rick","RICKROLL");else if(hackFxSelected==1)runHackAudio("never fade away","NEVER FADE AWAY");else{hackVisualFx=true;hackFxLastFrame=0;drawHackFxScreen();}}if(!hackVisualFx)drawHackFxScreen();}
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
       if(k.enter) startNetworkSetup();
       else if(c=='.') {WiFi.disconnect(false,false);drawNetworkScreen();}
     } else if(wifiConfigStage==1) {
-      if(c=='r'||c=='R') startNetworkSetup();
+      if(c=='r'||c=='R') {if(wifiScanOnly)startWifiSurvey();else startNetworkSetup();}
       else if(c==';') {if(wifiSelected>0)wifiSelected--;if(wifiSelected<wifiScroll)wifiScroll=wifiSelected;drawNetworkScreen();}
       else if(c=='.') {if(wifiSelected<wifiNetworkCount-1)wifiSelected++;if(wifiSelected>=wifiScroll+5)wifiScroll=wifiSelected-4;drawNetworkScreen();}
-      else if(k.enter && !wifiScanPending) chooseNetwork(wifiSelected);
+      else if(k.enter && !wifiScanPending) {if(wifiScanOnly){hackMessage=wifiNetworks[wifiSelected]+" "+String(wifiNetworkRSSI[wifiSelected])+" dBm";drawNetworkScreen();}else chooseNetwork(wifiSelected);}
     } else if(wifiConfigStage==2) {
       if(k.enter) saveNetworkSetup();
       else if(c && isprint((unsigned char)c) && wifiEntry.length()<63) {wifiEntry+=c;drawNetworkScreen();}
