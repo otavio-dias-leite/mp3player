@@ -373,8 +373,9 @@ void drawCategoryMenu(){
   const char** items=music?musicMenuItems:(system?systemMenuItems:(games?gamesMenuItems:hackMenuItems));
   int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
   header(title);auto& d=M5Cardputer.Display;
+  const int rowStep=count>6?10:12;
   for(int i=0;i<count;i++){
-    int y=43+i*12;bool active=i==selected;uint16_t bg=active?PANEL:BG;
+    int y=43+i*rowStep;bool active=i==selected;uint16_t bg=active?PANEL:BG;
     d.fillRoundRect(7,y-1,225,9,2,bg);
     d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);
     d.printf("%c %02d  %s",active?'>':' ',i+1,items[i]);
@@ -1821,7 +1822,7 @@ void loop() {
     else if(screen==BLESCAN){stopBleScan();screen=HACKMENU;selected=1;drawCategoryMenu();}
     else if(screen==HACKINFO){screen=HACKMENU;selected=6;drawCategoryMenu();}
     else if(screen==HACKINPUT){screen=HACKMENU;selected=hackInputMode+2;drawCategoryMenu();}
-    else if(screen==HACKFX){if(hackFxPlaying)stopAudio();hackFxPlaying=false;hackVisualFx=false;screen=HACKMENU;selected=2;drawCategoryMenu();}
+    else if(screen==HACKFX){if(hackFxPlaying)stopAudio();hackFxPlaying=false;hackVisualFx=false;screen=HACKMENU;selected=5;drawCategoryMenu();}
     else if(screen==NETWORK&&wifiScanOnly){wifiScanOnly=false;wifiConfigStage=0;screen=HACKMENU;selected=0;drawCategoryMenu();}
     else if(screen==EQSCREEN){
       screen=eqReturnScreen;
