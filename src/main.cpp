@@ -175,7 +175,6 @@ String entries[48];
 bool entryIsDir[48];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
 int pianoOctave=0,pianoEffect=4,pianoVolume=85;
-File synthRecordFile; bool synthRecording=false; uint32_t synthRecordBytes=0; String synthRecordPath;
 bool musicNowPlaying=false;
 int radioSelected=0;
 bool radioEditingUrl=false;
@@ -351,57 +350,32 @@ void splash() {
   auto &d=M5Cardputer.Display;
   d.fillScreen(BG);
   d.setTextSize(3);
-  // Short cyberpunk boot animation: offset color channels, scanline cuts and
-  // randomized horizontal tearing, then settle on a clean title.
-  for(int frame=0;frame<14;frame++) {
-    d.fillScreen(BG);
-    int x=38+random(-3,4), y=48+random(-2,3);
-    d.setTextColor(UI_PINK,BG); d.setCursor(x-2,y); d.print("JOHNNY");
-    d.setTextColor(UI_LAVENDER,BG); d.setCursor(x+2,y); d.print("JOHNNY");
-    d.setTextColor(WHITE,BG); d.setCursor(x,y); d.print("JOHNNY");
-    for(int cut=0;cut<3;cut++) {
-      int sy=random(43,83), sx=random(8,180), sw=random(18,65);
-      d.fillRect(sx,sy,sw,random(1,3),random(2)?UI_PINK:UI_PURPLE);
-    }
-    if(frame%3==0) d.fillRect(0,random(42,88),240,2,BG);
-    delay(38);
+  d.setTextColor(UI_PURPLE,BG);
+  d.setCursor(38,48); d.print("JOHNNY");
+  delay(350);
+  for(int i=0;i<10;i++) {
+    int y=random(43,87), x=random(12,45), w=random(70,205);
+    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_PURPLE);
+    d.setTextColor(i%2?UI_PINK:UI_PURPLE,BG);
+    d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
+    delay(32);
   }
   d.fillScreen(BG);
-  d.setTextColor(UI_PURPLE,BG); d.setCursor(38,43); d.print("JOHNNY");
-  d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
-  d.drawFastHLine(38,96,164,UI_PURPLE);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(85,108); d.printf("BOOT %s",JOHNNY_VERSION);
-  delay(1250);
+  d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
+  d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
+  delay(1100);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,38);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,40);
   d.printf("OCT %d  %s  VOL %d%%",4+pianoOctave,effectNames[pianoEffect],pianoVolume);
-  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,51); d.print("NATURAL: Q W E R T Y U");
-  d.setTextColor(UI_PINK,BG); d.setCursor(8,63); d.print("SHARP: 1 2 3 4 5");
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,75); d.print("FLAT: S=Db  A=Gb  L=Bb");
-  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,89); d.print("-/+ VOL  [/] OCT  ;/. PATCH");
-  d.setTextColor(synthRecording?UI_PINK:UI_MUTED,BG); d.setCursor(8,103);
-  d.printf("P: %s  %s",synthRecording?"REC":"READY",synthRecordPath.length()?synthRecordPath.substring(12):"NO TAKE");
-  footer("P START/STOP RECORDING");
-}
-void writeWavHeader(File& file,uint32_t dataBytes,uint32_t sampleRate);
-void startSynthRecording() {
-  if(!sdReady){synthRecordPath="NO SD CARD";return;}
-  if(!SD.exists("/RECORDINGS"))SD.mkdir("/RECORDINGS");
-  String candidate;
-  for(int i=1;i<=9999;i++){char name[36];snprintf(name,sizeof(name),"/RECORDINGS/SYNTH%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}
-  if(candidate.length()==0||SD.exists(candidate)){synthRecordPath="NO FREE FILE";return;}
-  synthRecordFile=SD.open(candidate,FILE_WRITE);
-  if(!synthRecordFile){synthRecordPath="OPEN FAILED";return;}
-  uint8_t blank[44]{};synthRecordFile.write(blank,sizeof(blank));
-  synthRecordPath=candidate;synthRecordBytes=0;synthRecording=true;
-}
-void stopSynthRecording() {
-  if(!synthRecording)return;
-  synthRecording=false;
-  if(synthRecordFile){writeWavHeader(synthRecordFile,synthRecordBytes,22050);synthRecordFile.flush();synthRecordFile.close();}
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,53); d.print("WHITE: Q W E R T Y U");
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,65); d.print("SHARP: Z X C V B N M");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,77); d.print("FLAT: S=Db  A=Gb  L=Bb");
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,91); d.print("-/+ VOL   [/] OCT   ;/. PATCH");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,105); d.print("PATCH: SINE / DRIVE / FUZZ / SQUARE / GUITAR");
+  footer("PLAY NOTES WITH KEYBOARD");
 }
 void playNote(char c) {
   c=(char)tolower((unsigned char)c);
@@ -410,13 +384,14 @@ void playNote(char c) {
   const char* white=strchr(whiteKeys,c);
   int semitone=-1;
   if(white) semitone=whiteSemitones[(int)(white-whiteKeys)];
-  const char* sharpKeys="12345";
-  const int sharpSemitones[5]={1,3,6,8,10};
+  const char* sharpKeys="zxcvbnm";
+  const int sharpSemitones[7]={1,3,5,6,8,10,11};
   const char* sharp=strchr(sharpKeys,c);
   if(sharp) semitone=sharpSemitones[(int)(sharp-sharpKeys)];
-  if(c=='s')semitone=1;
-  else if(c=='a')semitone=6;
-  else if(c=='l')semitone=10;
+  // Alternate flat spellings for the most common black keys.
+  if(c=='s')semitone=1;       // Db = C#
+  else if(c=='a')semitone=6;  // Gb = F#
+  else if(c=='l')semitone=10; // Bb = A#
   if(semitone<0)return;
   const int midi=60+pianoOctave*12+semitone;
   const float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
@@ -444,11 +419,6 @@ void playNote(char c) {
     const float release=expf(-(float)i/(22050.0f*(pianoEffect==4?0.14f:0.32f)));
     v*=attack*release;
     synthEqBuffer[i]=audioEqualizer.processMono((int32_t)lrintf(v*gain*256.0f),22050);
-  }
-  if(synthRecording && synthRecordFile) {
-    size_t bytes=NOTE_SAMPLES*sizeof(int16_t);
-    if(synthRecordFile.write((const uint8_t*)synthEqBuffer,bytes)==bytes)synthRecordBytes+=(uint32_t)bytes;
-    else stopSynthRecording();
   }
   M5Cardputer.Speaker.playRaw(synthEqBuffer,NOTE_SAMPLES,22050,false,1,0,true);
   if(audioMutex)xSemaphoreGive(audioMutex);
@@ -1309,7 +1279,7 @@ void tickMiniGame(){
   else if(screen==TETRIS){tetY++;if(tetY>14){tetY=0;tetX=random(0,7);tetType=random(0,7);gameScore+=5;}}
 }
 void startWebServer(){
-  webServer.on("/",HTTP_GET,[]{webServer.send(200,"text/html",R"JOHNNYHTML(<!doctype html><meta name='viewport' content='width=device-width'><title>JOHNNY</title><style>body{background:#100818;color:#eee;font:16px sans-serif;padding:20px}a{color:#f19f}li{margin:10px}</style><h1>JOHNNY / CARDPUTER</h1><p>Arquivos do microSD</p><ul id='files'></ul><script>async function load(){let a=await(await fetch('/api/list')).json();files.innerHTML=a.map(x=>'<li>'+(x.dir?'📁 ':'📄 ')+'<a href="/download?path='+encodeURIComponent(x.path)+'">'+x.name+'</a> '+(x.dir?'':'('+x.size+' bytes)')+'</li>').join('')}load()</script>)JOHNNYHTML");});
+  webServer.on("/",HTTP_GET,[]{webServer.send(200,"text/html","<!doctype html><meta name='viewport' content='width=device-width'><title>JOHNNY</title><style>body{background:#100818;color:#eee;font:16px sans-serif;padding:20px}a{color:#f19f}li{margin:10px}</style><h1>JOHNNY / CARDPUTER</h1><p>Arquivos do microSD</p><ul id='files'></ul><script>async function load(){let a=await(await fetch('/api/list')).json();files.innerHTML=a.map(x=>'<li>'+(x.dir?'📁 ':'📄 ')+'<a href="/download?path='+encodeURIComponent(x.path)+'">'+x.name+'</a> '+(x.dir?'':'('+x.size+' bytes)')+'</li>').join('')}load()</script>");});
   webServer.on("/api/list",HTTP_GET,[]{String path=webServer.hasArg("path")?safeSdPath(webServer.arg("path")):"/";if(!sdReady||!path.length()){webServer.send(503,"application/json","[]");return;}File dir=SD.open(path);if(!dir||!dir.isDirectory()){if(dir)dir.close();webServer.send(404,"application/json","[]");return;}String json="[";bool first=true;File f=dir.openNextFile();while(f){String name=String(f.name());int slash=name.lastIndexOf('/');if(slash>=0)name=name.substring(slash+1);if(name.length()){if(!first)json+=",";first=false;String full=path=="/"?"/"+name:path+"/"+name;json+="{\"name\":\""+name+"\",\"path\":\""+full+"\",\"dir\":"+String(f.isDirectory()?"true":"false")+",\"size\":"+String((unsigned long)f.size())+"}";}f.close();f=dir.openNextFile();}dir.close();json+="]";webServer.send(200,"application/json",json);});
   webServer.on("/download",HTTP_GET,[]{String path=safeSdPath(webServer.arg("path"));if(!sdReady||!path.length()){webServer.send(400,"text/plain","Invalid path");return;}File f=SD.open(path,FILE_READ);if(!f||f.isDirectory()){if(f)f.close();webServer.send(404,"text/plain","Not found");return;}webServer.streamFile(f,"application/octet-stream");f.close();});
   webServer.begin();webServerStarted=true;
@@ -1522,7 +1492,6 @@ void loop() {
 
   bool back=(c==0x1B || c=='`' || c=='~');
   if(back) {
-    if(screen==PIANO && synthRecording) stopSynthRecording();
     if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU){screen=HOME;selected=0;drawHome();}
@@ -1578,7 +1547,6 @@ if(usbActive) endUsbMode();
     else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
     else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c==']'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
-    else if(c=='p'||c=='P'){if(synthRecording)stopSynthRecording();else startSynthRecording();pianoScreen();}
     else if(c)playNote(c);
   } else if(screen==TUNER) {
     if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
