@@ -19,10 +19,6 @@
 #include <AudioFileSourceBuffer.h>
 #include <AudioFileSourceICYStream.h>
 #include <AudioGeneratorMP3.h>
-#include <AudioGeneratorWAV.h>
-#include <AudioGeneratorFLAC.h>
-#include <AudioGeneratorAAC.h>
-#include <AudioGeneratorOpus.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <freertos/task.h>
@@ -973,8 +969,8 @@ String parentPath(const String &p) {
 }
 bool isPlayableAudio(String name) {
   name.toLowerCase();
-  return name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".flac") ||
-         name.endsWith(".aac") || name.endsWith(".ogg") || name.endsWith(".opus") || name.endsWith(".oga");
+  // Keep the player deliberately narrow: MP3 is the only advertised local format.
+  return name.endsWith(".mp3");
 }
 void scanMusicRecursive(const String& folder,uint8_t depth) {
   if(depth>5 || entryCount>=96) return;
@@ -1102,10 +1098,6 @@ void stopAudio() {
 }
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3(mp3DecoderWorkspace,sizeof(mp3DecoderWorkspace));
-  if(extension=="wav") return new AudioGeneratorWAV();
-  if(extension=="flac") return new AudioGeneratorFLAC();
-  if(extension=="aac") return new AudioGeneratorAAC();
-  if(extension=="ogg" || extension=="opus" || extension=="oga") return new AudioGeneratorOpus();
   return nullptr;
 }
 bool startAudioSource(AudioFileSource* source, const String& title, const String& extension, bool radio) {
@@ -1763,10 +1755,7 @@ void setup() {
     audioEqGainDb[i]=preferences.getFloat((String("eq")+String(i)).c_str(),fallback);
   }
   audioEqualizer.setAll(audioEqGainDb);
-  if(savedSsid.length()) {
-    WiFi.mode(WIFI_STA); WiFi.setSleep(false);
-    WiFi.begin(savedSsid.c_str(),savedPassword.c_str());
-  }
+  // Wi-Fi is started only when the user opens SYSTEM -> WI-FI or WEB RADIO.\n  // Avoid allocating the network stack during every cold boot.
   auto micCfg=M5Cardputer.Mic.config();
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
