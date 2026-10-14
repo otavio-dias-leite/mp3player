@@ -153,7 +153,7 @@ private:
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
 Screen eqReturnScreen=HOME;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
@@ -203,6 +203,8 @@ int wifiNetworkAuth[20];
 int wifiNetworkCount=0, wifiSelected=0, wifiScroll=0;
 bool wifiScanPending=false;
 bool wifiScanOnly=false;
+int wifiNetworkChannel[20]={};
+String wifiNetworkBssid[20];
 BLEScan* bleScanner=nullptr;
 bool bleInitialized=false;
 volatile bool bleScanDone=false;
@@ -211,6 +213,9 @@ String bleNames[8];
 int bleRssi[8];
 int bleCount=0;
 String hackMessage;
+String hackInputValue, hackResultMessage;
+uint8_t hackInputMode=0;
+bool hackInputDone=false;
 uint32_t tunerLastSample=0;
 float tunerFrequency=0.0f, tunerCents=0.0f;
 int tunerMidi=-1;
@@ -222,7 +227,12 @@ bool usbActive=false;
 String usbCommandLine;
 bool micStarted=false;
 uint32_t micWarmupUntil=0;
-int8_t synthBuffer[8192];
+constexpr size_t SYNTH_SAMPLES=8192;
+constexpr uint8_t SYNTH_AUDIO_CHANNEL=2;
+static int16_t synthAudioBuffers[3][SYNTH_SAMPLES];
+static float synthSineTable[1024];
+uint8_t synthAudioBufferIndex=0;
+bool synthSineReady=false;
 const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE","GUITAR"};
 String selectedFile;
 volatile bool audioStarted = false;
@@ -247,18 +257,18 @@ int16_t batteryCachedMillivolts = -1;
 bool batteryCachedCharging = false;
 bool batteryCacheReady = false;
 bool screenSaverActive = false;
-const char* apps[] = {"MUSIC","SYSTEM","GAMES","HACK"};
+const char* apps[] = {"HACK","GAMES","MUSIC","SYSTEM"};
 constexpr int APP_COUNT=4;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
 const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS"};
 const char* gamesMenuItems[]={"CONWAY LIFE"};
-const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","SPAM FX (OFFLINE)","DEVICE / RF INFO"};
+const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","SPAM FX / OFFLINE","NETWORK / RADIO INFO"};
 const char* hackFxItems[]={"RICKROLL (LOCAL FILE)","NEVER FADE AWAY (LOCAL FILE)","VISUAL FX ONLY"};
 int hackFxSelected=0;
 bool hackFxPlaying=false;
 bool hackVisualFx=false;
 uint32_t hackFxLastFrame=0;
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=5, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=4, HACK_FX_COUNT=3;
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=5, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=7, HACK_FX_COUNT=3;
 String placeholderTitle, placeholderMessage;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
@@ -319,15 +329,36 @@ void footer(const char* s="") {
   (void)s;
   M5Cardputer.Display.drawFastHLine(7,117,226,0x5140);
 }
-void drawHome() {
-  header("JOHNNY");auto& d=M5Cardputer.Display;
-  const int xs[4]={7,124,7,124};const int ys[4]={43,43,79,79};
-  for(int i=0;i<APP_COUNT;i++){
-    int x=xs[i],y=ys[i];bool on=i==selected;uint16_t fill=on?0x4810:PANEL;
-    d.fillRoundRect(x,y,109,28,5,fill);d.drawRoundRect(x,y,109,28,5,on?UI_PINK:UI_PURPLE);
-    d.setTextColor(on?WHITE:UI_MUTED,fill);d.setCursor(x+10,y+10);d.print(apps[i]);
+void drawHome(){
+  auto& d=M5Cardputer.Display;d.fillScreen(BG);
+  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(7,5);d.print("JOHNNY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(75,5);d.print("WAKE UP, SAMURAI");
+  drawBatteryIndicator();d.drawFastHLine(7,18,226,UI_PURPLE);
+  const char* previous=apps[(selected+APP_COUNT-1)%APP_COUNT];
+  const char* next=apps[(selected+1)%APP_COUNT];
+  d.setTextColor(UI_MUTED,BG);d.setCursor(4,67);d.print("<");d.setCursor(5,81);d.print(previous);
+  d.setCursor(228,67);d.print(">");d.setCursor(194,81);d.print(next);
+  d.fillRoundRect(48,30,144,78,9,PANEL);d.drawRoundRect(48,30,144,78,9,UI_PINK);
+  const int cx=120,cy=61;
+  if(selected==0){
+    d.drawLine(cx,cy+15,cx,cy-5,UI_LAVENDER);d.drawCircle(cx,cy-9,3,UI_PINK);
+    d.drawArc(cx,cy-8,12,12,210,330,UI_PINK);d.drawArc(cx,cy-8,22,22,210,330,UI_LAVENDER);
+    d.drawFastHLine(cx-15,cy+17,30,UI_PURPLE);
+  }else if(selected==1){
+    d.fillRoundRect(cx-29,cy-12,58,27,8,UI_LAVENDER);
+    d.fillRect(cx-19,cy-3,16,4,BG);d.fillRect(cx-13,cy-9,4,16,BG);
+    d.fillCircle(cx+13,cy-4,4,UI_PINK);d.fillCircle(cx+23,cy+5,3,UI_PURPLE);
+  }else if(selected==2){
+    d.drawLine(cx-12,cy+11,cx-12,cy-16,UI_LAVENDER);d.drawLine(cx-12,cy-16,cx+11,cy-20,UI_LAVENDER);
+    d.drawLine(cx+11,cy-20,cx+11,cy+6,UI_LAVENDER);d.fillCircle(cx-17,cy+12,6,UI_PINK);d.fillCircle(cx+6,cy+7,6,UI_PINK);
+    d.drawLine(cx-12,cy-8,cx+11,cy-12,UI_LAVENDER);
+  }else{
+    d.drawRoundRect(cx-17,cy-16,34,34,5,UI_LAVENDER);d.drawRoundRect(cx-9,cy-8,18,18,3,UI_PINK);
+    for(int n=0;n<4;n++){int off=-12+n*8;d.drawFastVLine(cx+off,cy-21,5,UI_PURPLE);d.drawFastVLine(cx+off,cy+18,5,UI_PURPLE);d.drawFastHLine(cx-22,cy+off,5,UI_PURPLE);d.drawFastHLine(cx+18,cy+off,5,UI_PURPLE);}
   }
-  d.setTextColor(sdReady?UI_LAVENDER:UI_PINK,BG);d.fillCircle(13,113,2,sdReady?UI_LAVENDER:UI_PINK);footer("");
+  d.setTextSize(2);d.setTextColor(WHITE,PANEL);d.setCursor(selected==3?82:88,86);d.print(apps[selected]);d.setTextSize(1);
+  for(int i=0;i<APP_COUNT;i++)d.fillCircle(108+i*8,115,2,i==selected?UI_PINK:UI_MUTED);
+  d.drawFastHLine(7,123,226,0x5140);d.setTextColor(UI_MUTED,BG);d.setCursor(17,127);d.print(", / . CHANGE SECTION   ENTER OPEN");
 }
 void drawCategoryMenu(){
   bool music=screen==MUSICMENU,system=screen==SYSTEMMENU,games=screen==GAMESMENU;
@@ -364,14 +395,21 @@ void showUnavailable(const char* title,const char* message){
   screen=ABOUT;header(title);auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
   d.setCursor(8,52);d.print(message);footer("ESC BACK");
 }
-void splash() {
-  auto &d=M5Cardputer.Display;
-  d.fillScreen(BG);
-  d.setTextSize(3);
-  d.setTextColor(WHITE,BG);
-  d.setCursor(38,48); d.print("JOHNNY");
-  d.setTextSize(1);
-  delay(500);
+void splash(){
+  auto& d=M5Cardputer.Display;
+  for(int frame=0;frame<14;frame++){
+    d.fillScreen(BG);const int jitter=(frame%4==0)?(int)random(-3,4):0;
+    d.setTextSize(3);d.setTextColor(UI_PURPLE,BG);d.setCursor(38+jitter+2,49);d.print("JOHNNY");
+    d.setTextColor(UI_PINK,BG);d.setCursor(38+jitter-2,49);d.print("JOHNNY");
+    d.setTextColor(WHITE,BG);d.setCursor(38+jitter,49);d.print("JOHNNY");
+    d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(52,83);d.print("wake fuck up samurai");
+    if(frame%3==0){int y=random(40,94);d.fillRect(random(16,150),y,random(24,95),2,UI_PINK);}
+    if(frame%4==1)d.drawFastHLine(12,100+frame%8,random(120,220),UI_PURPLE);
+    d.drawFastHLine(18,109,204,0x5140);d.fillRect(18,109,((frame+1)*204)/14,2,UI_PINK);delay(24);
+  }
+  d.fillScreen(BG);d.setTextSize(3);d.setTextColor(WHITE,BG);d.setCursor(38,49);d.print("JOHNNY");
+  d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(52,83);d.print("wake fuck up samurai");
+  d.drawFastHLine(18,109,204,UI_PURPLE);delay(220);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
@@ -388,36 +426,38 @@ void pianoScreen() {
   d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,108); d.print("- / + VOLUME   [ / ] OCTAVE");
   footer(", . / ; ARROWS   UP/DOWN TIMBRE");
 }
-void playNote(char c) {
-  const char* keys="qwertyu";
-  const char* pos=strchr(keys,(char)tolower((unsigned char)c));
-  if(!pos) return;
+float synthWave(uint32_t phase){return synthSineTable[(uint16_t)(phase>>22)];}
+void playNote(char c){
+  const char* keys="qwertyu";const char* pos=strchr(keys,(char)tolower((unsigned char)c));
+  if(!pos||pianoVolume<=0)return;
+  if(!synthSineReady){for(size_t i=0;i<1024;i++)synthSineTable[i]=sinf(6.28318530718f*(float)i/1024.0f);synthSineReady=true;}
+  if(M5Cardputer.Speaker.isPlaying(SYNTH_AUDIO_CHANNEL)>=2)return;
+  if(audioMutex&&xSemaphoreTake(audioMutex,pdMS_TO_TICKS(4))!=pdTRUE)return;
   const int scale[7]={0,2,4,5,7,9,11};
   const int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
-  const float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
-  if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
-  M5Cardputer.Speaker.stop();M5Cardputer.Speaker.setVolume(255);audioEqualizer.reset();  const float gain=(float)pianoVolume*1.27f;
+  const float hz=440.0f*powf(2.0f,((float)midi-69.0f)/12.0f);
+  const uint32_t phaseStep=(uint32_t)((double)hz*(4294967296.0/22050.0));
+  const float gain=(float)pianoVolume*1.27f*256.0f;
   const float guitarDecay=0.30f+0.34f*(82.0f/max(hz,82.0f));
-  for(size_t i=0;i<8192;i++) {
-    const float phase=6.2831853f*hz*((float)i/22050.0f);
-    float v=sinf(phase);
-    if(pianoEffect==1) {      v=tanhf(v*3.8f)/tanhf(3.8f);
-    } else if(pianoEffect==2) {
-      v=tanhf((sinf(phase)+0.55f*sinf(phase*2.0f)+0.28f*sinf(phase*3.0f))*5.0f);
-    } else if(pianoEffect==3) {
-      v=(v>=0.0f)?0.72f:-0.72f;
-    } else if(pianoEffect==4) {
-      // Plucked-string patch: a short pick transient and decaying harmonics.
-      const float body=sinf(phase)+0.42f*sinf(phase*2.0f)+0.18f*sinf(phase*3.0f)+0.07f*sinf(phase*4.0f);
-      const float decay=expf(-(float)i/(22050.0f*guitarDecay));
-      const float pick=0.22f*expf(-(float)i/85.0f)*sinf(phase*6.7f);
-      v=(body*decay+pick)*0.72f;
+  const float guitarDecayStep=expf(-1.0f/(22050.0f*guitarDecay)),pickDecayStep=expf(-1.0f/85.0f);
+  float guitarEnvelope=1.0f,pickEnvelope=1.0f;uint32_t phase=0;
+  const uint8_t slot=synthAudioBufferIndex;int16_t* samples=synthAudioBuffers[slot];
+  for(size_t i=0;i<SYNTH_SAMPLES;i++){
+    float value=synthWave(phase);
+    if(pianoEffect==1)value=tanhf(value*3.8f)/tanhf(3.8f);
+    else if(pianoEffect==2)value=tanhf((value+0.55f*synthWave(phase*2U)+0.28f*synthWave(phase*3U))*5.0f);
+    else if(pianoEffect==3)value=(value>=0.0f)?0.72f:-0.72f;
+    else if(pianoEffect==4){
+      const float body=value+0.42f*synthWave(phase*2U)+0.18f*synthWave(phase*3U)+0.07f*synthWave(phase*4U);
+      value=(body*guitarEnvelope+0.22f*pickEnvelope*synthWave(phase*7U))*0.72f;
+      guitarEnvelope*=guitarDecayStep;pickEnvelope*=pickDecayStep;
     }
-    const float envelope=(i<80)?((float)i/80.0f):1.0f;    v*=envelope;
-    synthBuffer[i]=(int8_t)constrain((int)lroundf(v*gain),-127,127);
+    if(i<80)value*=((float)i/80.0f);
+    samples[i]=audioEqualizer.processMono((int32_t)lrintf(value*gain),22050);phase+=phaseStep;
   }
-  static int16_t synthEqBuffer[8192];
-  for(size_t i=0;i<8192;i++)synthEqBuffer[i]=audioEqualizer.processMono((int32_t)synthBuffer[i]*256,22050);  M5Cardputer.Speaker.playRaw(synthEqBuffer,8192,22050,false,1,0,true);  if(audioMutex)xSemaphoreGive(audioMutex);
+  const bool queued=M5Cardputer.Speaker.playRaw(samples,SYNTH_SAMPLES,22050,false,1,SYNTH_AUDIO_CHANNEL,false);
+  if(queued)synthAudioBufferIndex=(uint8_t)((slot+1)%3);
+  if(audioMutex)xSemaphoreGive(audioMutex);
 }
 void stopMicCapture() {
   if(micStarted) M5Cardputer.Mic.end();
@@ -1294,7 +1334,7 @@ void drawLife();
 bool loadLife();
 void openLegacyApp();
 void openApp(){
-  if(screen==HOME){screen=selected==0?MUSICMENU:(selected==1?SYSTEMMENU:(selected==2?GAMESMENU:HACKMENU));selected=0;drawCategoryMenu();return;}
+  if(screen==HOME){screen=selected==0?HACKMENU:(selected==1?GAMESMENU:(selected==2?MUSICMENU:SYSTEMMENU));selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
   if(menu==HACKMENU){if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item==2){screen=HACKFX;hackFxSelected=0;hackFxPlaying=false;hackVisualFx=false;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
   if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;screen=HOME;
@@ -1305,7 +1345,7 @@ void openApp(){
 }
 void openLegacyApp() {
   switch(selected) {
-    case 0: stopMicCapture(); stopAudio(); screen=PIANO; pianoScreen(); break;
+    case 0: stopMicCapture(); stopAudio(); audioEqualizer.reset(); screen=PIANO; pianoScreen(); break;
     case 1:
       stopAudio(); stopMicCapture(); screen=TUNER; tunerInstrument=1;
       tunerMidi=-1; tunerFrequency=0; tunerFilteredFrequency=0; tunerHasSignal=false;
@@ -1658,6 +1698,7 @@ void loop() {
 if(usbActive) endUsbMode();
       screen=HOME;drawHome();
     } else {
+      if(screen==PIANO)M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);
       if(screen==TUNER) stopMicCapture();
       if(screen==NETWORK && wifiConfigStage==2) { wifiConfigStage=1; wifiEntry=""; drawNetworkScreen(); }
       else { wifiConfigStage=0; screen=HOME;drawHome(); }
