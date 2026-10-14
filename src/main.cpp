@@ -175,6 +175,7 @@ String entries[48];
 bool entryIsDir[48];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
 int pianoOctave=0,pianoEffect=4,pianoVolume=85;
+File synthRecordFile; bool synthRecording=false; uint32_t synthRecordBytes=0; String synthRecordPath;
 bool musicNowPlaying=false;
 int radioSelected=0;
 bool radioEditingUrl=false;
@@ -368,14 +369,32 @@ void splash() {
 void pianoScreen() {
   header("POCKET SYNTH");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,40);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,38);
   d.printf("OCT %d  %s  VOL %d%%",4+pianoOctave,effectNames[pianoEffect],pianoVolume);
-  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,53); d.print("WHITE: Q W E R T Y U");
-  d.setTextColor(UI_PINK,BG); d.setCursor(8,65); d.print("SHARP: Z X C V B N M");
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,77); d.print("FLAT: S=Db  A=Gb  L=Bb");
-  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,91); d.print("-/+ VOL   [/] OCT   ;/. PATCH");
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,105); d.print("PATCH: SINE / DRIVE / FUZZ / SQUARE / GUITAR");
-  footer("PLAY NOTES WITH KEYBOARD");
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,51); d.print("NATURAL: Q W E R T Y U");
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,63); d.print("SHARP: 1 2 3 4 5");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,75); d.print("FLAT: S=Db  A=Gb  L=Bb");
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,89); d.print("-/+ VOL  [/] OCT  ;/. PATCH");
+  d.setTextColor(synthRecording?UI_PINK:UI_MUTED,BG); d.setCursor(8,103);
+  d.printf("R: %s  %s",synthRecording?"REC":"READY",synthRecordPath.length()?synthRecordPath.substring(12):"NO TAKE");
+  footer("R START/STOP RECORDING");
+}
+void writeWavHeader(File& file,uint32_t dataBytes,uint32_t sampleRate);
+void startSynthRecording() {
+  if(!sdReady){synthRecordPath="NO SD CARD";return;}
+  if(!SD.exists("/RECORDINGS"))SD.mkdir("/RECORDINGS");
+  String candidate;
+  for(int i=1;i<=9999;i++){char name[36];snprintf(name,sizeof(name),"/RECORDINGS/SYNTH%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}
+  if(candidate.length()==0||SD.exists(candidate)){synthRecordPath="NO FREE FILE";return;}
+  synthRecordFile=SD.open(candidate,FILE_WRITE);
+  if(!synthRecordFile){synthRecordPath="OPEN FAILED";return;}
+  uint8_t blank[44]{};synthRecordFile.write(blank,sizeof(blank));
+  synthRecordPath=candidate;synthRecordBytes=0;synthRecording=true;
+}
+void stopSynthRecording() {
+  if(!synthRecording)return;
+  synthRecording=false;
+  if(synthRecordFile){writeWavHeader(synthRecordFile,synthRecordBytes,22050);synthRecordFile.flush();synthRecordFile.close();}
 }
 void playNote(char c) {
   c=(char)tolower((unsigned char)c);
@@ -384,14 +403,13 @@ void playNote(char c) {
   const char* white=strchr(whiteKeys,c);
   int semitone=-1;
   if(white) semitone=whiteSemitones[(int)(white-whiteKeys)];
-  const char* sharpKeys="zxcvbnm";
-  const int sharpSemitones[7]={1,3,5,6,8,10,11};
+  const char* sharpKeys="12345";
+  const int sharpSemitones[5]={1,3,6,8,10};
   const char* sharp=strchr(sharpKeys,c);
   if(sharp) semitone=sharpSemitones[(int)(sharp-sharpKeys)];
-  // Alternate flat spellings for the most common black keys.
-  if(c=='s')semitone=1;       // Db = C#
-  else if(c=='a')semitone=6;  // Gb = F#
-  else if(c=='l')semitone=10; // Bb = A#
+  if(c=='s')semitone=1;
+  else if(c=='a')semitone=6;
+  else if(c=='l')semitone=10;
   if(semitone<0)return;
   const int midi=60+pianoOctave*12+semitone;
   const float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
@@ -419,6 +437,11 @@ void playNote(char c) {
     const float release=expf(-(float)i/(22050.0f*(pianoEffect==4?0.14f:0.32f)));
     v*=attack*release;
     synthEqBuffer[i]=audioEqualizer.processMono((int32_t)lrintf(v*gain*256.0f),22050);
+  }
+  if(synthRecording && synthRecordFile) {
+    size_t bytes=NOTE_SAMPLES*sizeof(int16_t);
+    if(synthRecordFile.write((const uint8_t*)synthEqBuffer,bytes)==bytes)synthRecordBytes+=(uint32_t)bytes;
+    else stopSynthRecording();
   }
   M5Cardputer.Speaker.playRaw(synthEqBuffer,NOTE_SAMPLES,22050,false,1,0,true);
   if(audioMutex)xSemaphoreGive(audioMutex);
@@ -1547,6 +1570,7 @@ if(usbActive) endUsbMode();
     else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
     else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c==']'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
+    else if(c=='r'||c=='R'){if(synthRecording)stopSynthRecording();else startSynthRecording();pianoScreen();}
     else if(c)playNote(c);
   } else if(screen==TUNER) {
     if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
