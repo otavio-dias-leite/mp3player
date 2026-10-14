@@ -274,7 +274,6 @@ const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE",
 const char* gamesMenuItems[]={"CONWAY LIFE"};
 const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL FX"};
 bool hackVisualFx=false;
-bool hackVisualFx=false;
 uint32_t hackFxLastFrame=0;
 constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=5, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=7;
 String updateMessage="CONNECT TO WI-FI";
