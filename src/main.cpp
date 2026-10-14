@@ -271,12 +271,12 @@ bool screenSaverActive = false;
 const char* apps[] = {"HACK","GAMES","MUSIC","SYSTEM"};
 constexpr int APP_COUNT=4;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
-const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS"};
+const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS","BLUETOOTH DEVICES"};
 const char* gamesMenuItems[]={"CONWAY LIFE"};
 const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL FX"};
 bool hackVisualFx=false;
 uint32_t hackFxLastFrame=0;
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=5, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=7;
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=7;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
 bool micRecording=false;
@@ -338,6 +338,13 @@ void footer(const char* s="") {
   (void)s;
   M5Cardputer.Display.drawFastHLine(7,117,226,0x5140);
 }
+void drawAppIcon(uint8_t app,int x,int y,uint16_t color){
+  auto& d=M5Cardputer.Display;
+  if(app==0){d.drawRoundRect(x+4,y+8,12,9,2,color);d.drawCircle(x+10,y+8,4,color);d.drawFastVLine(x+10,y+11,3,color);}
+  else if(app==1){d.drawRoundRect(x+1,y+5,19,11,5,color);d.drawFastHLine(x+4,y+10,6,color);d.drawFastVLine(x+7,y+7,7,color);d.drawCircle(x+15,y+9,1,color);d.drawCircle(x+18,y+12,1,color);}
+  else if(app==2){d.drawFastVLine(x+13,y+2,12,color);d.drawFastHLine(x+13,y+2,6,color);d.drawCircle(x+8,y+14,3,color);d.drawCircle(x+17,y+12,3,color);}
+  else {d.drawCircle(x+10,y+10,7,color);d.drawCircle(x+10,y+10,2,color);d.drawFastHLine(x+1,y+10,4,color);d.drawFastHLine(x+15,y+10,4,color);d.drawFastVLine(x+10,y+1,4,color);d.drawFastVLine(x+10,y+15,4,color);}
+}
 void drawHome(){
   auto& d=M5Cardputer.Display;d.fillScreen(BG);
   d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(7,5);d.print("JOHNNY");
@@ -350,7 +357,7 @@ void drawHome(){
     const int col=i%2,row=i/2,x=8+col*114,y=42+row*36;
     const bool active=(i==selected);const uint16_t fill=active?PANEL:BG;
     d.fillRoundRect(x,y,108,31,4,fill);d.drawRoundRect(x,y,108,31,4,active?UI_PINK:0x5140);
-    d.fillRoundRect(x+6,y+7,17,17,3,active?UI_PURPLE:0x3028);
+    drawAppIcon((uint8_t)i,x+5,y+6,active?UI_PINK:UI_LAVENDER);
     d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+29,y+7);d.print(labels[i]);
     d.setTextColor(active?UI_PINK:UI_MUTED,fill);d.setCursor(x+29,y+19);d.print(hints[i]);
     d.setTextColor(active?UI_PINK:UI_MUTED,fill);d.setCursor(x+91,y+10);d.print(active?">":" ");
@@ -1447,9 +1454,11 @@ void openLegacyApp();
 void openApp(){
   if(screen==HOME){screen=selected==0?HACKMENU:(selected==1?GAMESMENU:(selected==2?MUSICMENU:SYSTEMMENU));selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
-  if(menu==HACKMENU){if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item>=2&&item<=4){hackInputMode=(uint8_t)(item-2);hackInputValue="";hackResultMessage="";hackInputDone=false;screen=HACKINPUT;drawHackInput();return;}if(item==6){screen=HACKFX;hackVisualFx=true;hackFxLastFrame=0;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
+  if(menu==HACKMENU){appReturnMenu=HACKMENU;appReturnSelected=item;if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item>=2&&item<=4){hackInputMode=(uint8_t)(item-2);hackInputValue="";hackResultMessage="";hackInputDone=false;screen=HACKINPUT;drawHackInput();return;}if(item==6){screen=HACKFX;hackVisualFx=true;hackFxLastFrame=0;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
   if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
-  appReturnMenu=menu;appReturnSelected=item;screen=HOME;
+  appReturnMenu=menu;appReturnSelected=item;
+  if(menu==SYSTEMMENU&&item==5){screen=BLESCAN;startBleScan();drawBleScreen();return;}
+  screen=HOME;
   if(menu==MUSICMENU){if(item==5){screen=MICREC;micRecording=false;micRecordStatus="READY";drawMicRecorder();return;}const int map[]={0,1,2,3,7};selected=map[item];}
   else if(menu==SYSTEMMENU){if(item==3){screen=UPDATEINFO;updateMessage="PRESS ENTER TO INSTALL LATEST";drawUpdateInfo();return;}if(item==4){selected=9;openLegacyApp();return;}const int map[]={4,6,5};selected=map[item];}
   else selected=8;
@@ -1789,7 +1798,7 @@ void loop() {
     if(screen==MICREC){stopMicRecording();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=3;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU){screen=HOME;selected=0;drawHome();}
-    else if(screen==BLESCAN){stopBleScan();screen=HACKMENU;selected=1;drawCategoryMenu();}
+    else if(screen==BLESCAN){stopBleScan();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==HACKINFO){screen=HACKMENU;selected=5;drawCategoryMenu();}
     else if(screen==HACKINPUT){screen=HACKMENU;selected=hackInputMode+2;drawCategoryMenu();}
     else if(screen==HACKFX){hackVisualFx=false;screen=HACKMENU;selected=6;drawCategoryMenu();}
