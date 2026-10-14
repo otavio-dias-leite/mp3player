@@ -1515,6 +1515,7 @@ void loop() {
 
   bool back=(c==0x1B || c=='`' || c=='~');
   if(back) {
+    if(screen==PIANO && synthRecording) stopSynthRecording();
     if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU){screen=HOME;selected=0;drawHome();}
