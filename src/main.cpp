@@ -4,6 +4,7 @@
 #include <SD.h>
 #include <math.h>
 #include <WiFi.h>
+#include <WebServer.h>
 #include <WiFiClientSecure.h>
 #include <HTTPUpdate.h>
 #include <Preferences.h>
@@ -150,7 +151,7 @@ private:
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC, SNAKE, PONG, PACMAN, TETRIS };
 Screen eqReturnScreen=HOME;
 int eqSelectedBand=0,eqPreset=1;
 const char* eqPresetNames[]={"FLAT","WARM","VOCAL","BASS"};
@@ -158,6 +159,11 @@ const float eqPresets[4][JOHNNY_EQ_BANDS]={{0,0,0,0,0},{2.5f,1.5f,0,-1.0f,-1.5f}
 constexpr int LIFE_COLS=48,LIFE_ROWS=16;
 bool lifeGrid[LIFE_ROWS][LIFE_COLS]{},lifeNext[LIFE_ROWS][LIFE_COLS]{};
 bool lifeRunning=true;
+WebServer webServer(80); bool webServerStarted=false; uint32_t gameLastTick=0;
+int gameScore=0,gameOver=0; int snakeX[120],snakeY[120],snakeLen=4,snakeDir=1,foodX=12,foodY=7;
+int pongBallX=120,pongBallY=70,pongVX=2,pongVY=1,pongP1=67,pongP2=67;
+int pacX=1,pacY=1,pacDir=1; bool pacDots[9][15];
+int tetromino[4][4],tetX=3,tetY=0,tetType=0; uint8_t tetrisBoard[16][10]{};
 int lifeCursorX=LIFE_COLS/2,lifeCursorY=LIFE_ROWS/2;
 uint32_t lifeGeneration=0,lifeLastStep=0;
 uint16_t lifeIntervalMs=180;
@@ -230,8 +236,8 @@ const char* apps[] = {"MUSIC","SYSTEM","GAMES"};
 constexpr int APP_COUNT=3;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
 const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","BLUETOOTH","UPDATE FIRMWARE","INSTALL APPS"};
-const char* gamesMenuItems[]={"CONWAY LIFE","PRBOOM"};
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=2;
+const char* gamesMenuItems[]={"CONWAY LIFE","SNAKE","PONG","PAC-MAN","TETRIS"};
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=5;
 String placeholderTitle, placeholderMessage;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
@@ -1100,6 +1106,7 @@ void seedLife();
 void drawLife();
 bool loadLife();
 void openLegacyApp();
+void startWebServer(); void serviceWebServer(); void drawMiniGame(); void tickMiniGame();
 void openApp(){
   if(screen==HOME){screen=selected==0?MUSICMENU:(selected==1?SYSTEMMENU:GAMESMENU);selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
@@ -1114,8 +1121,7 @@ void openApp(){
     if(item==5){showUnavailable("APP CATALOG","GitHub app installer is not integrated.");return;}
     const int map[]={4,6,5};selected=map[item];
   }else{
-    if(item==1){showUnavailable("PRBOOM","ENGINE NOT INSTALLED");return;}
-    selected=8;
+    selected=8+item;
   }
   openLegacyApp();
 }
@@ -1140,6 +1146,10 @@ void openLegacyApp() {
     case 6: screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     case 7: eqReturnScreen=MUSICMENU;screen=EQSCREEN;selected=4;drawEqScreen();break;
     case 8: screen=LIFE;if(!loadLife())seedLife();drawLife();break;
+    case 9: screen=SNAKE;gameScore=0;gameOver=0;snakeLen=4;snakeDir=1;for(int i=0;i<snakeLen;i++){snakeX[i]=8-i;snakeY[i]=7;}foodX=random(2,28);foodY=random(2,14);gameLastTick=millis();drawMiniGame();break;
+    case 10: screen=PONG;gameScore=0;gameOver=0;pongBallX=120;pongBallY=68;pongVX=2;pongVY=1;pongP1=pongP2=67;gameLastTick=millis();drawMiniGame();break;
+    case 11: screen=PACMAN;gameScore=0;gameOver=0;pacX=1;pacY=1;pacDir=1;for(int y=0;y<9;y++)for(int x=0;x<15;x++)pacDots[y][x]=((x%4!=0)&&(y%3!=0))||((x==1&&y==1));gameLastTick=millis();drawMiniGame();break;
+    case 12: screen=TETRIS;gameScore=0;gameOver=0;memset(tetrisBoard,0,sizeof(tetrisBoard));tetX=3;tetY=0;tetType=random(0,7);gameLastTick=millis();drawMiniGame();break;
     default:
       screen=ABOUT; header("SYSTEM");
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
@@ -1227,14 +1237,43 @@ void drawLife(){
   header("CONWAY LIFE");auto& d=M5Cardputer.Display;
   d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,42);
   d.printf("GEN %lu  %s  %ums",(unsigned long)lifeGeneration,lifeRunning?"RUN":"PAUSE",lifeIntervalMs);
-  const int ox=24,oy=48,cell=4;
+  d.fillRoundRect(7,44,226,70,5,PANEL);
+  const int ox=18,oy=49,cell=4;
   for(int y=0;y<LIFE_ROWS;y++)for(int x=0;x<LIFE_COLS;x++){
     int px=ox+x*cell,py=oy+y*cell;
     if(lifeGrid[y][x])d.fillRect(px+1,py+1,3,3,UI_PINK);else d.fillRect(px+1,py+1,3,3,BG);
     if(x==lifeCursorX&&y==lifeCursorY)d.drawRect(px,py,cell,cell,UI_LAVENDER);
   }
-  footer("SPACE RUN/PAUSE  N STEP  ARROWS MOVE");
+  d.setTextColor(UI_PINK,BG);d.setCursor(8,108);d.printf("%lu CELLS",(unsigned long)[](){uint32_t n=0;for(int y=0;y<LIFE_ROWS;y++)for(int x=0;x<LIFE_COLS;x++)n+=lifeGrid[y][x];return n;}());
+  footer("SPACE RUN  N STEP  R RANDOM  C CLEAR");
 }
+
+bool gameWall(int x,int y){return x<0||x>=10||y<0||y>=16||tetrisBoard[y][x]!=0;}
+void drawMiniGame(){
+  const char* title=screen==SNAKE?"SNAKE":screen==PONG?"PONG":screen==PACMAN?"PAC-MAN":"TETRIS";
+  header(title);auto& d=M5Cardputer.Display;d.fillRoundRect(7,43,226,70,5,PANEL);
+  if(screen==SNAKE){for(int i=0;i<snakeLen;i++)d.fillRoundRect(13+snakeX[i]*7,48+snakeY[i]*4,6,4,1,i?UI_LAVENDER:UI_PINK);d.fillCircle(13+foodX*7,50+foodY*4,2,WHITE);}
+  else if(screen==PONG){d.fillRect(14,pongP1,3,22,UI_PINK);d.fillRect(223,pongP2,3,22,UI_LAVENDER);d.fillCircle(pongBallX,pongBallY,3,WHITE);d.drawFastVLine(120,46,64,UI_MUTED);}
+  else if(screen==PACMAN){for(int y=0;y<9;y++)for(int x=0;x<15;x++){int px=13+x*14,py=47+y*7;if(x%4==0||y%3==0)d.fillRect(px,py,12,5,UI_PURPLE);else if(pacDots[y][x])d.fillCircle(px+5,py+2,1,WHITE);}d.fillCircle(18+pacX*14,49+pacY*7,4,UI_PINK);}
+  else {for(int y=0;y<16;y++)for(int x=0;x<10;x++)if(tetrisBoard[y][x])d.fillRect(18+x*12,47+y*4,10,3,UI_LAVENDER);for(int y=0;y<2;y++)for(int x=0;x<4;x++)if((x+y+tetType)%3==0)d.fillRect(18+(tetX+x)*12,47+(tetY+y)*4,10,3,UI_PINK);}
+  d.setTextColor(UI_PINK,BG);d.setCursor(9,104);d.printf("SCORE %d",gameScore);
+  if(gameOver){d.setTextColor(WHITE,BG);d.setCursor(115,104);d.print("GAME OVER");}
+  footer("ARROWS MOVE  ENTER RESTART  ESC EXIT");
+}
+void tickMiniGame(){
+  if(screen==SNAKE){int nx=snakeX[0],ny=snakeY[0];if(snakeDir==0)ny--;if(snakeDir==1)nx++;if(snakeDir==2)ny++;if(snakeDir==3)nx--;if(nx<0||nx>=30||ny<0||ny>=16){gameOver=1;return;}for(int i=0;i<snakeLen;i++)if(snakeX[i]==nx&&snakeY[i]==ny){gameOver=1;return;}for(int i=snakeLen;i>0;i--){snakeX[i]=snakeX[i-1];snakeY[i]=snakeY[i-1];}snakeX[0]=nx;snakeY[0]=ny;if(nx==foodX&&ny==foodY){snakeLen=min(119,snakeLen+1);gameScore+=10;foodX=random(1,29);foodY=random(1,15);} }
+  else if(screen==PONG){pongBallX+=pongVX;pongBallY+=pongVY;if(pongBallY<47||pongBallY>111)pongVY=-pongVY;if(pongBallX<20&&pongBallY>=pongP1&&pongBallY<=pongP1+22)pongVX=abs(pongVX);if(pongBallX>218&&pongBallY>=pongP2&&pongBallY<=pongP2+22){pongVX=-abs(pongVX);gameScore++;}if(pongBallX<8||pongBallX>232)gameOver=1;}
+  else if(screen==PACMAN){if(pacDir==0)pacY=max(0,pacY-1);if(pacDir==1)pacX=min(14,pacX+1);if(pacDir==2)pacY=min(8,pacY+1);if(pacDir==3)pacX=max(0,pacX-1);if(pacDots[pacY][pacX]){pacDots[pacY][pacX]=false;gameScore+=10;}}
+  else if(screen==TETRIS){tetY++;if(tetY>14){tetY=0;tetX=random(0,7);tetType=random(0,7);gameScore+=5;}}
+}
+void startWebServer(){
+  webServer.on("/",HTTP_GET,[]{webServer.send(200,"text/html","<!doctype html><meta name='viewport' content='width=device-width'><title>JOHNNY</title><style>body{background:#100818;color:#eee;font:16px sans-serif;padding:20px}a{color:#f19f}li{margin:10px}</style><h1>JOHNNY / CARDPUTER</h1><p>Arquivos do microSD</p><ul id='files'></ul><script>async function load(){let a=await(await fetch('/api/list')).json();files.innerHTML=a.map(x=>'<li>'+(x.dir?'📁 ':'📄 ')+'<a href="/download?path='+encodeURIComponent(x.path)+'">'+x.name+'</a> '+(x.dir?'':'('+x.size+' bytes)')+'</li>').join('')}load()</script>");});
+  webServer.on("/api/list",HTTP_GET,[]{String path=webServer.hasArg("path")?safeSdPath(webServer.arg("path")):"/";if(!sdReady||!path.length()){webServer.send(503,"application/json","[]");return;}File dir=SD.open(path);if(!dir||!dir.isDirectory()){if(dir)dir.close();webServer.send(404,"application/json","[]");return;}String json="[";bool first=true;File f=dir.openNextFile();while(f){String name=String(f.name());int slash=name.lastIndexOf('/');if(slash>=0)name=name.substring(slash+1);if(name.length()){if(!first)json+=",";first=false;String full=path=="/"?"/"+name:path+"/"+name;json+="{\"name\":\""+name+"\",\"path\":\""+full+"\",\"dir\":"+String(f.isDirectory()?"true":"false")+",\"size\":"+String((unsigned long)f.size())+"}";}f.close();f=dir.openNextFile();}dir.close();json+="]";webServer.send(200,"application/json",json);});
+  webServer.on("/download",HTTP_GET,[]{String path=safeSdPath(webServer.arg("path"));if(!sdReady||!path.length()){webServer.send(400,"text/plain","Invalid path");return;}File f=SD.open(path,FILE_READ);if(!f||f.isDirectory()){if(f)f.close();webServer.send(404,"text/plain","Not found");return;}webServer.streamFile(f,"application/octet-stream");f.close();});
+  webServer.begin();webServerStarted=true;
+}
+void serviceWebServer(){if(webServerStarted&&WiFi.status()==WL_CONNECTED)webServer.handleClient();}
+
 void startRadioRecording(){
   if(!sdReady||!audioStarted||!audioIsRadio||WiFi.status()!=WL_CONNECTED){radioRecordState=5;return;}  if(!radioRecordQueue||!radioRecorderTaskReady||radioRecordState==1||radioRecordState==2||radioRecordState==3)return;
   SD.mkdir("/RECORDINGS");String candidate;
@@ -1349,6 +1388,7 @@ void setup() {
   if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,3,nullptr,1);
   radioRecordQueue=xQueueCreate(8,sizeof(RadioRecordBlock));
   if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,2,nullptr,0);
+  startWebServer();
   splash();selected=0;drawHome();
 }
 void loop() {
@@ -1361,6 +1401,8 @@ void loop() {
   serviceAudio();
   if(screen==MICREC&&micRecording)serviceMicRecorder();
   if(!screenSaverActive&&screen==LIFE&&lifeRunning&&millis()-lifeLastStep>=lifeIntervalMs){stepLife();drawLife();}
+  serviceWebServer();
+  if(!screenSaverActive&&(screen==SNAKE||screen==PONG||screen==PACMAN||screen==TETRIS)&&!gameOver&&millis()-gameLastTick>=180){tickMiniGame();drawMiniGame();gameLastTick=millis();}
   static uint8_t lastRecorderDisplayState=255;
   if(screen==RADIO&&!screenSaverActive&&lastRecorderDisplayState!=radioRecordState){lastRecorderDisplayState=radioRecordState;drawRadioScreen();}
   if(!screenSaverActive && screen==NETWORK && wifiConfigStage==0) {
@@ -1413,6 +1455,7 @@ void loop() {
     else if(screen==USBMODE)drawUsbScreen(usbActive);
     else if(screen==EQSCREEN)drawEqScreen();
     else if(screen==LIFE)drawLife();
+    else if(screen==SNAKE||screen==PONG||screen==PACMAN||screen==TETRIS)drawMiniGame();
     else if(screen==ABOUT)openApp();
     return;
   }
@@ -1448,6 +1491,7 @@ void loop() {
       else if(screen==MUSIC)musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
       else if(screen==RADIO)drawRadioScreen();
     }else if(screen==LIFE){saveLife();screen=HOME;drawHome();}
+    else if(screen==SNAKE||screen==PONG||screen==PACMAN||screen==TETRIS){screen=GAMESMENU;selected=0;drawCategoryMenu();}
     else if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
       if(music && musicNowPlaying) {musicNowPlaying=false;drawFiles(true);}
@@ -1557,6 +1601,12 @@ if(usbActive) endUsbMode();
     else if(c=='='||c=='+'){setEqBandGain(eqSelectedBand,audioEqGainDb[eqSelectedBand]+0.5f);drawEqScreen();}
     else if(c=='p'||c=='P'){applyEqPreset(eqPreset<0?0:(eqPreset+1)%4);drawEqScreen();}
     else if(c=='0'){applyEqPreset(0);drawEqScreen();}
+  } else if(screen==SNAKE||screen==PONG||screen==PACMAN||screen==TETRIS) {
+    if(gameOver){if(k.enter){screen=GAMESMENU;selected=0;drawCategoryMenu();}}
+    else if(c==';'){if(screen==SNAKE)snakeDir=3;else if(screen==PACMAN)pacDir=3;else if(screen==PONG)pongP1=max(18,pongP1-7);else if(screen==TETRIS)tetX=max(0,tetX-1);drawMiniGame();}
+    else if(c=='.'){if(screen==SNAKE)snakeDir=1;else if(screen==PACMAN)pacDir=1;else if(screen==PONG)pongP1=min(112,pongP1+7);else if(screen==TETRIS)tetX=min(6,tetX+1);drawMiniGame();}
+    else if(c==','){if(screen==SNAKE)snakeDir=2;else if(screen==PACMAN)pacDir=2;else if(screen==PONG)pongP2=max(18,pongP2-7);else if(screen==TETRIS)tetY=min(14,tetY+1);drawMiniGame();}
+    else if(c=='/'){if(screen==SNAKE)snakeDir=0;else if(screen==PACMAN)pacDir=0;else if(screen==PONG)pongP2=min(112,pongP2+7);else if(screen==TETRIS)tetY=min(14,tetY+1);drawMiniGame();}
   } else if(screen==LIFE) {
     if(c==' '||k.space){lifeRunning=!lifeRunning;lifeLastStep=millis();drawLife();}
     else if(c=='n'||c=='N'){lifeRunning=false;stepLife();drawLife();}
