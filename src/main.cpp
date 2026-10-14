@@ -368,48 +368,60 @@ void splash() {
 void pianoScreen() {
   header("POCKET SYNTH");
   auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,42);
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,40);
   d.printf("OCT %d  %s  VOL %d%%",4+pianoOctave,effectNames[pianoEffect],pianoVolume);
-  const char* labels[]={"DO","RE","MI","FA","SOL","LA","SI"};
-  for(int i=0;i<7;i++){
-    int x=5+i*33; uint16_t key=(i==1||i==3||i==6)?0xBDBF:0xEFFF;
-    d.fillRoundRect(x,57,30,43,3,key);
-    d.setTextColor(BG,key); d.setCursor(x+5,74); d.print(labels[i]);
-    d.setCursor(x+10,88); d.printf("%c","QWERTYU"[i]);
-  }
-  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,108); d.print("- / + VOLUME   [ / ] OCTAVE");
-  footer(", . / ; ARROWS   UP/DOWN TIMBRE");
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,53); d.print("WHITE: Q W E R T Y U");
+  d.setTextColor(UI_PINK,BG); d.setCursor(8,65); d.print("SHARP: Z X C V B N M");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,77); d.print("FLAT: S=Db  A=Gb  L=Bb");
+  d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,91); d.print("-/+ VOL   [/] OCT   ;/. PATCH");
+  d.setTextColor(UI_MUTED,BG); d.setCursor(8,105); d.print("PATCH: SINE / DRIVE / FUZZ / SQUARE / GUITAR");
+  footer("PLAY NOTES WITH KEYBOARD");
 }
 void playNote(char c) {
-  const char* keys="qwertyu";
-  const char* pos=strchr(keys,(char)tolower((unsigned char)c));
-  if(!pos) return;
-  const int scale[7]={0,2,4,5,7,9,11};
-  const int midi=60+pianoOctave*12+scale[(int)(pos-keys)];
+  c=(char)tolower((unsigned char)c);
+  const char* whiteKeys="qwertyu";
+  const int whiteSemitones[7]={0,2,4,5,7,9,11};
+  const char* white=strchr(whiteKeys,c);
+  int semitone=-1;
+  if(white) semitone=whiteSemitones[(int)(white-whiteKeys)];
+  const char* sharpKeys="zxcvbnm";
+  const int sharpSemitones[7]={1,3,5,6,8,10,11};
+  const char* sharp=strchr(sharpKeys,c);
+  if(sharp) semitone=sharpSemitones[(int)(sharp-sharpKeys)];
+  // Alternate flat spellings for the most common black keys.
+  if(c=='s')semitone=1;       // Db = C#
+  else if(c=='a')semitone=6;  // Gb = F#
+  else if(c=='l')semitone=10; // Bb = A#
+  if(semitone<0)return;
+  const int midi=60+pianoOctave*12+semitone;
   const float hz=440.0f*powf(2.0f,(midi-69)/12.0f);
-  if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
-  M5Cardputer.Speaker.stop();M5Cardputer.Speaker.setVolume(255);audioEqualizer.reset();  const float gain=(float)pianoVolume*1.27f;
-  const float guitarDecay=0.30f+0.34f*(82.0f/max(hz,82.0f));
-  for(size_t i=0;i<8192;i++) {
+  if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(30))!=pdTRUE)return;
+  M5Cardputer.Speaker.stop();
+  M5Cardputer.Speaker.setVolume(255);
+  audioEqualizer.reset();
+  const float gain=(float)pianoVolume*1.27f;
+  constexpr size_t NOTE_SAMPLES=4096;
+  const float guitarDecay=0.12f+0.10f*(82.0f/max(hz,82.0f));
+  static int16_t synthEqBuffer[NOTE_SAMPLES];
+  for(size_t i=0;i<NOTE_SAMPLES;i++) {
     const float phase=6.2831853f*hz*((float)i/22050.0f);
     float v=sinf(phase);
-    if(pianoEffect==1) {      v=tanhf(v*3.8f)/tanhf(3.8f);
-    } else if(pianoEffect==2) {
-      v=tanhf((sinf(phase)+0.55f*sinf(phase*2.0f)+0.28f*sinf(phase*3.0f))*5.0f);
-    } else if(pianoEffect==3) {
-      v=(v>=0.0f)?0.72f:-0.72f;
-    } else if(pianoEffect==4) {
-      // Plucked-string patch: a short pick transient and decaying harmonics.
+    if(pianoEffect==1) v=tanhf(v*3.8f)/tanhf(3.8f);
+    else if(pianoEffect==2) v=tanhf((sinf(phase)+0.55f*sinf(phase*2.0f)+0.28f*sinf(phase*3.0f))*5.0f);
+    else if(pianoEffect==3) v=(v>=0.0f)?0.72f:-0.72f;
+    else if(pianoEffect==4) {
       const float body=sinf(phase)+0.42f*sinf(phase*2.0f)+0.18f*sinf(phase*3.0f)+0.07f*sinf(phase*4.0f);
       const float decay=expf(-(float)i/(22050.0f*guitarDecay));
-      const float pick=0.22f*expf(-(float)i/85.0f)*sinf(phase*6.7f);
+      const float pick=0.22f*expf(-(float)i/65.0f)*sinf(phase*6.7f);
       v=(body*decay+pick)*0.72f;
     }
-    const float envelope=(i<80)?((float)i/80.0f):1.0f;    v*=envelope;
-    synthBuffer[i]=(int8_t)constrain((int)lroundf(v*gain),-127,127);
+    const float attack=(i<48)?((float)i/48.0f):1.0f;
+    const float release=expf(-(float)i/(22050.0f*(pianoEffect==4?0.14f:0.32f)));
+    v*=attack*release;
+    synthEqBuffer[i]=audioEqualizer.processMono((int32_t)lrintf(v*gain*256.0f),22050);
   }
-  static int16_t synthEqBuffer[8192];
-  for(size_t i=0;i<8192;i++)synthEqBuffer[i]=audioEqualizer.processMono((int32_t)synthBuffer[i]*256,22050);  M5Cardputer.Speaker.playRaw(synthEqBuffer,8192,22050,false,1,0,true);  if(audioMutex)xSemaphoreGive(audioMutex);
+  M5Cardputer.Speaker.playRaw(synthEqBuffer,NOTE_SAMPLES,22050,false,1,0,true);
+  if(audioMutex)xSemaphoreGive(audioMutex);
 }
 void stopMicCapture() {
   if(micStarted) M5Cardputer.Mic.end();
