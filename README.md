@@ -15,23 +15,19 @@ O jogo disponível nesta compilação é Conway's Game of Life.
 
 ## MUSIC PLAYER
 
-A biblioteca lê músicas do microSD e percorre diretórios. O firmware mantém a reprodução em blocos; não carrega uma faixa inteira na RAM.
+A biblioteca lê arquivos MP3 do microSD e percorre diretórios. O firmware mantém a reprodução em blocos; não carrega uma faixa inteira na RAM. Os outros formatos foram removidos desta versão para reduzir dependências e limitar caminhos de decodificação pouco testados.
 
 ### Formatos
 
-- MP3
-- WAV PCM
-- FLAC
-- AAC em fluxo compatível com o decoder
-- Ogg/Opus (.opus, .oga ou .ogg contendo Opus)
+- MP3 (CBR/VBR)
 
-O contêiner .ogg pode carregar codecs diferentes. Ogg/Opus é suportado; Ogg/Vorbis não está habilitado nesta compilação. Arquivos AAC dentro de MP4/M4A não devem ser presumidos compatíveis: o decoder usado espera um fluxo AAC compatível.
+A reprodução local está deliberadamente limitada a MP3. Arquivos com outras extensões não aparecem na biblioteca.
 
 ### Metadados e capas
 
 - MP3 e AAC com tags ID3v2.3/v2.4: título, artista, álbum e imagem APIC.
 - FLAC: comentários Vorbis (TITLE, ARTIST, ALBUM) e bloco de imagem PICTURE.
-- Para qualquer formato compatível, o player procura capas laterais no diretório da música: `cover.jpg`, `Cover.jpg`, `folder.jpg`, `nome-da-faixa.jpg` ou `nome-da-faixa.png`. Também procura `/COVERS/nome-da-faixa.jpg`.
+- Capas e decodificação de imagens foram removidas para reduzir uso de memória e evitar leituras adicionais no microSD.
 - Capas embutidas ou laterais são limitadas a 16 KiB de dados para manter o uso de RAM previsível. Uma imagem maior ou inválida é ignorada e o player mostra a arte padrão.
 
 ### Controles do player
@@ -44,7 +40,7 @@ O contêiner .ogg pode carregar codecs diferentes. Ogg/Opus é suportado; Ogg/Vo
 - `S`: alternar aleatório.
 - `R`: repetir desligado / repetir lista / repetir faixa.
 
-O indicador de progresso e o seek são aproximados, calculados pela posição no arquivo. Para evitar corromper o estado interno de decoders que exigem cabeçalhos ou páginas desde o início, o seek está habilitado apenas para MP3 e AAC compatível. Em WAV, FLAC e Ogg/Opus, a reprodução, pausa, parada e troca de faixa continuam disponíveis, mas o seek fica desabilitado. Em MP3 VBR, porcentagem de bytes não equivale perfeitamente a tempo decorrido.
+O indicador de progresso e o seek são aproximados, calculados pela posição no arquivo. Para evitar corromper o estado interno de decoders que exigem cabeçalhos ou páginas desde o início, o seek está habilitado apenas para MP3 e AAC compatível. O seek aproximado é habilitado apenas em MP3. Em MP3 VBR, porcentagem de bytes não equivale perfeitamente a tempo decorrido.
 
 O player não é um cliente Spotify e não transmite o catálogo do Spotify. É uma biblioteca local no microSD, com rádio web separado.
 
@@ -77,7 +73,7 @@ O HACK foi limitado a observação e diagnóstico. Funções Bruce/Marauder que 
 
 ## Armazenamento e memória
 
-O cartão microSD é armazenamento persistente, não RAM. O áudio usa um buffer de entrada pré-alocado de 4 KiB, workspace estático para o decoder MP3, buffers de saída limitados e uma área de até 16 KiB para capas. Os buffers do sintetizador foram reduzidos para limitar o uso de RAM. A reprodução não depende de carregar arquivos inteiros na memória. Uma leitura lenta ou um cartão defeituoso ainda pode causar interrupção; use cartão confiável e evite removê-lo durante a reprodução ou gravação.
+O cartão microSD é armazenamento persistente, não RAM. O áudio usa um buffer de entrada pré-alocado de 4 KiB, workspace estático para o decoder MP3 e buffers de saída limitados. Capas e decoders adicionais não são carregados. Os buffers do sintetizador foram reduzidos para limitar o uso de RAM. A reprodução não depende de carregar arquivos inteiros na memória. Uma leitura lenta ou um cartão defeituoso ainda pode causar interrupção; use cartão confiável e evite removê-lo durante a reprodução ou gravação.
 
 O hardware de destino não tem PSRAM. Recursos de áudio, imagem, Wi-Fi e BLE precisam compartilhar a RAM interna. Ao iniciar as ferramentas Wi-Fi/BLE, o JOHNNY interrompe a reprodução ativa para reduzir a competição por recursos.
 
