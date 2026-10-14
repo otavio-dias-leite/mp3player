@@ -776,7 +776,7 @@ const status=document.getElementById('status'),screen=document.getElementById('s
 function refreshScreen(){screen.src='/screen.bmp?t='+Date.now()}
 async function refreshStatus(){try{const r=await fetch('/api/status',{cache:'no-store'}),j=await r.json();
 const rows=[['IP',j.ip],['MAC',j.mac],['WIFI',j.ssid||'OFFLINE'],['SINAL',j.rssi+' dBm'],['GATEWAY',j.gateway],['SUBNET',j.subnet],['DNS',j.dns],['FIRMWARE',j.firmware],['BATERIA',j.battery_percent+'% / '+j.battery_mv+' mV'],['CARGA',j.charging?'SIM':'NÃO'],['MICROSD',j.sd_ready?'MONTADO':'AUSENTE'],['HEAP LIVRE',j.free_heap+' bytes'],['HEAP MÍNIMO',j.min_free_heap+' bytes'],['PSRAM',j.psram_bytes+' bytes'],['UPTIME',j.uptime_seconds+' s']];
-status.innerHTML=rows.map(x=>'<div class="item"><b>'+x[0]+'</b>'+String(x[1])+'</div>').join('');
+status.replaceChildren(...rows.map(x=>{const card=document.createElement('div');card.className='item';const label=document.createElement('b');label.textContent=x[0];const value=document.createElement('span');value.textContent=String(x[1]);card.append(label,value);return card;}));
 }catch(e){status.textContent='Sem conexão com o Cardputer.'}}
 document.getElementById('refresh').onclick=()=>{refreshScreen();refreshStatus()};
 refreshStatus();setInterval(refreshStatus,4000);setInterval(refreshScreen,1200);
