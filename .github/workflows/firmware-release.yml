@@ -19,6 +19,10 @@ jobs:
           python-version: "3.11"
       - name: Install PlatformIO
         run: pip install platformio
+      - name: Read firmware version
+        id: version
+        shell: bash
+        run: echo "value=$(tr -d '\r\n' < VERSION)" >> "$GITHUB_OUTPUT"
       - name: Build Cardputer-Adv firmware
         run: pio run -e cardputer-adv
       - name: Assemble complete flash image and install guide
@@ -82,12 +86,12 @@ jobs:
           EXPECTED="v$(tr -d '\r\n' < VERSION)"
           test "$GITHUB_REF_NAME" = "$EXPECTED"
       - name: Publish versioned firmware release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && github.event_name == 'push' && contains(github.event.head_commit.modified, 'VERSION'))
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: v${{ steps.version.outputs.value }}
           target_commitish: main
-          name: JOHNNY ${{ github.ref_name }}
+          name: JOHNNY v${{ steps.version.outputs.value }}
           files: |
             release/firmware.bin
             release/johnny-cardputer-adv-full.bin
