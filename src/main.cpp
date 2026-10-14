@@ -175,7 +175,7 @@ String currentPath = "/";
 String entries[96];
 bool entryIsDir[96];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
-int pianoOctave=0,pianoEffect=4,pianoVolume=85;
+int pianoOctave=0,pianoEffect=0,pianoVolume=85;
 bool musicNowPlaying=false;
 int radioSelected=0;
 bool radioEditingUrl=false;
@@ -225,8 +225,7 @@ String hackInputValue, hackResultMessage;
 uint8_t hackInputMode=0;
 bool hackInputDone=false;
 uint32_t tunerLastSample=0;
-float tunerFrequency=0.0f, tunerCents=0.0f;
-int tunerMidi=-1;
+float tunerFrequency=0.0f;
 int16_t tunerSamples[3072];
 float tunerFilteredFrequency=0.0f;
 bool tunerHasSignal=false;
@@ -241,7 +240,7 @@ static int16_t synthAudioBuffers[3][SYNTH_SAMPLES];
 static float synthSineTable[1024];
 uint8_t synthAudioBufferIndex=0;
 bool synthSineReady=false;
-const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE","GUITAR"};
+const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
 String selectedFile;
 volatile bool audioStarted = false;
 volatile bool audioPaused = false;
@@ -270,14 +269,11 @@ constexpr int APP_COUNT=4;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
 const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS"};
 const char* gamesMenuItems[]={"CONWAY LIFE"};
-const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","SPAM FX / OFFLINE","NETWORK / RADIO INFO"};
-const char* hackFxItems[]={"RICKROLL (LOCAL FILE)","NEVER FADE AWAY (LOCAL FILE)","VISUAL FX ONLY"};
-int hackFxSelected=0;
-bool hackFxPlaying=false;
+const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL FX"};
+bool hackVisualFx=false;
 bool hackVisualFx=false;
 uint32_t hackFxLastFrame=0;
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=5, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=7, HACK_FX_COUNT=3;
-String placeholderTitle, placeholderMessage;
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=5, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=7;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
 bool micRecording=false;
@@ -287,6 +283,8 @@ int16_t micRecordSamples[3072];
 const char* noteNames[] = {"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"};
 const float guitarHz[] = {82.41f,110.00f,146.83f,196.00f,246.94f,329.63f};
 const char* guitarNames[] = {"E2","A2","D3","G3","B3","E4"};
+const float bassHz[] = {41.20f,55.00f,73.42f,98.00f};
+const char* bassNames[] = {"E1","A1","D2","G2"};
 const float ukeHz[] = {196.00f,261.63f,329.63f,392.00f};
 const char* ukeNames[] = {"G4","C4","E4","A4"};
 
@@ -407,10 +405,7 @@ void runFirmwareUpdate(){
   else updateMessage="UPDATE INSTALLED - REBOOTING";
   drawUpdateInfo();
 }
-void showUnavailable(const char* title,const char* message){
-  screen=ABOUT;header(title);auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
-  d.setCursor(8,52);d.print(message);footer("ESC BACK");
-}
+
 void splash(){
   auto& d=M5Cardputer.Display;d.setBrightness(190);
   for(int frame=0;frame<24;frame++){
@@ -454,20 +449,12 @@ void playNote(char c){
   const float hz=440.0f*powf(2.0f,((float)midi-69.0f)/12.0f);
   const uint32_t phaseStep=(uint32_t)((double)hz*(4294967296.0/22050.0));
   const float gain=(float)pianoVolume*1.27f*256.0f;
-  const float guitarDecay=0.30f+0.34f*(82.0f/max(hz,82.0f));
-  const float guitarDecayStep=expf(-1.0f/(22050.0f*guitarDecay)),pickDecayStep=expf(-1.0f/85.0f);
-  float guitarEnvelope=1.0f,pickEnvelope=1.0f;uint32_t phase=0;
-  const uint8_t slot=synthAudioBufferIndex;int16_t* samples=synthAudioBuffers[slot];
+  const uint8_t slot=synthAudioBufferIndex;int16_t* samples=synthAudioBuffers[slot];uint32_t phase=0;
   for(size_t i=0;i<SYNTH_SAMPLES;i++){
     float value=synthWave(phase);
     if(pianoEffect==1)value=tanhf(value*3.8f)/tanhf(3.8f);
     else if(pianoEffect==2)value=tanhf((value+0.55f*synthWave(phase*2U)+0.28f*synthWave(phase*3U))*5.0f);
     else if(pianoEffect==3)value=(value>=0.0f)?0.72f:-0.72f;
-    else if(pianoEffect==4){
-      const float body=value+0.42f*synthWave(phase*2U)+0.18f*synthWave(phase*3U)+0.07f*synthWave(phase*4U);
-      value=(body*guitarEnvelope+0.22f*pickEnvelope*synthWave(phase*7U))*0.72f;
-      guitarEnvelope*=guitarDecayStep;pickEnvelope*=pickDecayStep;
-    }
     if(i<80)value*=((float)i/80.0f);
     samples[i]=audioEqualizer.processMono((int32_t)lrintf(value*gain),22050);phase+=phaseStep;
   }
@@ -491,68 +478,48 @@ bool captureMic(int16_t* dst, size_t count, uint32_t timeoutMs=260) {
   bool complete=!M5Cardputer.Mic.isRecording();
   if(!complete) stopMicCapture();
   return complete;}
-float detectPitch(const int16_t* samples, size_t count, float* rmsOut=nullptr) {
-  if(count<512) return 0;
-  double mean=0;
-  for(size_t i=0;i<count;i++) mean+=samples[i];
-  mean/=count;
-  double energy=0;
-  for(size_t i=0;i<count;i++) { double v=(double)samples[i]-mean; energy+=v*v; }
-  float rms=sqrtf((float)(energy/count));
-  if(rmsOut)*rmsOut=rms;
-  if(rms<180.0f) return 0;
-  const int minLag=13, maxLag=min(300,(int)count/3);
-  float previous=0;
-  for(int lag=minLag;lag<=maxLag;lag++) {
-    double cross=0,aa=0,bb=0;
-    for(size_t i=0;i<count-(size_t)lag;i++) {
-      double x=(double)samples[i]-mean, y=(double)samples[i+lag]-mean;
-      cross+=x*y; aa+=x*x; bb+=y*y;
-    }
-    float corr=(aa>0 && bb>0)?(float)(cross/sqrt(aa*bb)):0;
-    if(lag>minLag && previous>0.55f && previous>=corr) return 16000.0f/(float)(lag-1);
-    previous=corr;
-  }
-  return 0;
+float detectPitch(const int16_t* samples,size_t count,float* rmsOut=nullptr){
+  if(count<1200)return 0.0f;
+  double mean=0.0;for(size_t i=0;i<count;i++)mean+=(double)samples[i];mean/=(double)count;
+  double energy=0.0;for(size_t i=0;i<count;i++){double v=(double)samples[i]-mean;energy+=v*v;}
+  const float rms=sqrtf((float)(energy/(double)count));if(rmsOut)*rmsOut=rms;if(rms<130.0f)return 0.0f;
+  // YIN difference/CMND estimates the fundamental rather than the loudest harmonic.
+  const int minLag=28,maxLag=min(430,(int)count/2);const size_t overlap=count-(size_t)maxLag;
+  static float yin[432];
+  for(int tau=minLag;tau<=maxLag;tau++){float sum=0.0f;for(size_t i=0;i<overlap;i++){const float x=(float)samples[i]-(float)mean,y=(float)samples[i+(size_t)tau]-(float)mean,delta=x-y;sum+=delta*delta;}yin[tau]=sum;}
+  float running=0.0f;for(int tau=minLag;tau<=maxLag;tau++){running+=yin[tau];yin[tau]=(running>0.0f)?yin[tau]*(float)(tau-minLag+1)/running:1.0f;}
+  int best=-1;
+  for(int tau=minLag;tau<=maxLag;tau++)if(yin[tau]<0.18f){while(tau<maxLag&&yin[tau+1]<yin[tau])tau++;best=tau;break;}
+  if(best<0){float lowest=1.0f;for(int tau=minLag;tau<=maxLag;tau++)if(yin[tau]<lowest){lowest=yin[tau];best=tau;}if(best<0||lowest>0.30f)return 0.0f;}
+  float refined=(float)best;
+  if(best>minLag&&best<maxLag){const float l=yin[best-1],c=yin[best],r=yin[best+1],denom=l-2.0f*c+r;if(fabsf(denom)>0.000001f)refined+=0.5f*(l-r)/denom;}
+  if(refined<=0.0f)return 0.0f;const float frequency=16000.0f/refined;return(frequency>=36.0f&&frequency<=560.0f)?frequency:0.0f;
 }
-int nearestMidi(float hz, float* cents) {
-  if(hz<=0) return -1;
-  float raw=69.0f+12.0f*log2f(hz/440.0f);
-  int midi=(int)lroundf(raw);
-  if(cents)*cents=(raw-(float)midi)*100.0f;
-  return midi;
-}
-void drawTunerReadout() {
-  auto &d=M5Cardputer.Display;
-  d.fillRect(7,55,226,61,BG);
-  if(!tunerHasSignal) {
-    d.setTextColor(UI_LAVENDER,BG); d.setTextSize(2); d.setCursor(8,68); d.print("PLAY A STRING");
-    d.setTextSize(1);
-    return;
+void drawTunerReadout(){
+  auto& d=M5Cardputer.Display;d.fillRect(7,51,226,67,BG);
+  const float* hzTable=(tunerInstrument==1)?bassHz:((tunerInstrument==2)?ukeHz:guitarHz);
+  const char** nameTable=(tunerInstrument==1)?bassNames:((tunerInstrument==2)?ukeNames:guitarNames);
+  const int count=(tunerInstrument==1||tunerInstrument==2)?4:6;
+  int nearest=-1;float cents=0.0f;
+  if(tunerHasSignal&&tunerFrequency>0.0f){float bestDistance=1.0e9f;for(int i=0;i<count;i++){const float delta=1200.0f*log2f(tunerFrequency/hzTable[i]);if(fabsf(delta)<bestDistance){bestDistance=fabsf(delta);cents=delta;nearest=i;}}}
+  const int cellWidth=(tunerInstrument==0)?36:54,gap=(tunerInstrument==0)?1:2;
+  for(int i=0;i<count;i++){const int x=8+i*(cellWidth+gap);const bool active=i==nearest;const uint16_t fill=active?PANEL:BG;d.fillRoundRect(x,52,cellWidth,11,2,fill);if(active)d.drawRoundRect(x,52,cellWidth,11,2,UI_PINK);d.setTextColor(active?WHITE:UI_MUTED,fill);d.setCursor(x+3,54);d.print(nameTable[i]);}
+  d.fillRoundRect(8,67,224,43,4,PANEL);
+  if(nearest<0){d.setTextColor(UI_LAVENDER,PANEL);d.setCursor(17,80);d.setTextSize(2);d.print("PLAY A STRING");d.setTextSize(1);d.setTextColor(UI_MUTED,PANEL);d.setCursor(17,99);d.print("WAITING FOR STABLE PITCH");}
+  else{
+    const uint16_t color=fabsf(cents)<=5.0f?UI_LAVENDER:UI_PINK;
+    d.setTextColor(UI_MUTED,PANEL);d.setCursor(16,72);d.print("NEAREST OPEN STRING");
+    d.setTextSize(3);d.setTextColor(WHITE,PANEL);d.setCursor(16,81);d.print(nameTable[nearest]);d.setTextSize(1);
+    d.setTextColor(UI_LAVENDER,PANEL);d.setCursor(91,84);d.printf("TARGET %.1f",hzTable[nearest]);
+    d.setTextColor(color,PANEL);d.setCursor(91,97);if(fabsf(cents)<=5.0f)d.print("IN TUNE");else d.printf("%+.0f CENT %s",cents,cents<0.0f?"TUNE UP":"TUNE DOWN");
+    d.setTextColor(UI_MUTED,BG);d.setCursor(9,114);d.printf("INPUT %.1f Hz",tunerFrequency);
   }
-  const float* hzTable=(tunerInstrument==2)?ukeHz:guitarHz;
-  const char** nameTable=(tunerInstrument==2)?ukeNames:guitarNames;
-  const int count=(tunerInstrument==2)?4:6;
-  int nearest=0;
-  float cents=1200.0f*log2f(tunerFrequency/hzTable[0]);
-  for(int i=1;i<count;i++) {
-    float candidate=1200.0f*log2f(tunerFrequency/hzTable[i]);
-    if(fabsf(candidate)<fabsf(cents)) { cents=candidate; nearest=i; }
-  }
-  const uint16_t statusColor=(fabsf(cents)<=5.0f)?UI_LAVENDER:UI_PINK;
-  d.fillRoundRect(8,56,224,51,4,PANEL);
-  d.setTextColor(UI_MUTED,PANEL); d.setCursor(16,63); d.printf("STRING %s / %.1f Hz",nameTable[nearest],hzTable[nearest]);
-  d.setTextColor(WHITE,PANEL); d.setTextSize(2); d.setCursor(16,78); d.printf("%+.0f CENT",cents);
-  d.setTextSize(1); d.setTextColor(UI_LAVENDER,PANEL); d.setCursor(156,83); d.printf("%.1f Hz",tunerFrequency);
-  d.drawFastHLine(18,113,204,UI_PURPLE);
-  d.drawFastVLine(120,109,9,UI_LAVENDER);
-  int marker=120+(int)constrain(cents,-50.0f,50.0f)*2;
-  d.fillCircle(marker,113,3,statusColor);
 }
+
 void tunerScreen() {
   header("TUNER");
   auto &d=M5Cardputer.Display;
-  const char* modeNames[]={"GUITAR","VIOLAO","UKULELE"};
+  const char* modeNames[]={"GUITAR","BASS","UKULELE"};
   d.setTextColor(UI_PINK,BG); d.setCursor(8,43); d.print(modeNames[tunerInstrument]);
   d.setTextColor(UI_MUTED,BG); d.setCursor(166,43); d.print("<  >");
   drawTunerReadout();
@@ -688,20 +655,11 @@ void drawHackInfo(){
   d.setTextColor(UI_MUTED,BG);d.setCursor(8,110);d.print("PASSIVE TOOLS / NO RF FLOOD");footer("ESC BACK");
 }
 void drawHackFxScreen(){
-  header("SPAM FX / OFFLINE");auto& d=M5Cardputer.Display;
-  if(hackFxPlaying){
-    d.setTextColor(UI_PINK,BG);d.setCursor(8,43);d.print("LOCAL AUDIO DEMO");
-    String title=audioTrackTitle.length()?audioTrackTitle:audioNowTitle;if(title.length()>30)title=title.substring(0,27)+"...";
-    d.setTextColor(WHITE,BG);d.setCursor(8,61);d.print(title);
-    d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,77);d.print(audioTrackArtist.length()?audioTrackArtist:"LOCAL FILE");
-    d.drawFastHLine(8,96,224,0x5140);d.drawFastHLine(8,96,(int)audioProgressPercent()*224/100,UI_PINK);
-    d.setCursor(8,108);d.print(audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.substring(0,24));
-    footer("ENTER PAUSE  P STOP  ESC BACK");return;
-  }
-  if(hackVisualFx){d.setTextColor(UI_PINK,BG);d.setCursor(8,48);d.print("OFFLINE VISUAL DEMO");d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,68);d.print("NO WI-FI / BLE PACKETS");d.setCursor(8,85);d.print("ARE TRANSMITTED");footer("ESC BACK");return;}
-  d.setTextColor(UI_MUTED,BG);d.setCursor(8,42);d.print("LOCAL MEDIA / NO RF TX");
-  for(int i=0;i<HACK_FX_COUNT;i++){int y=59+i*15;bool active=i==hackFxSelected;uint16_t bg=active?PANEL:BG;d.fillRoundRect(7,y-1,225,12,2,bg);d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);d.print(active?"> ":"  ");d.print(hackFxItems[i]);}
-  footer("ENTER RUN LOCAL DEMO  ESC BACK");
+  header("OFFLINE VISUAL FX");auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_PINK,BG);d.setCursor(8,48);d.print("LOCAL DISPLAY EFFECT");
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,68);d.print("NO WI-FI / BLE TRANSMISSION");
+  d.setCursor(8,84);d.print("NO EXTERNAL DEVICE AFFECTED");
+  footer("ESC BACK");
 }
 
 
@@ -821,7 +779,7 @@ void saveNetworkSetup() {
 void stopAudio();
 bool beginUsbMode();
 void startBleScan();void drawBleScreen();void serviceBleScan();
-void drawHackFxScreen();void drawHackInfo();void runHackAudio(const String& keyword,const String& label);
+void drawHackFxScreen();void drawHackInfo();
 void moveMusicTrack(int direction);void playSelectedTrack();uint8_t audioProgressPercent();
 void drawUsbScreen(bool ok);
 String safeSdPath(String path) {
@@ -1253,21 +1211,6 @@ bool startLocalAudio(const String& path) {
   return true;
 }
 
-bool findAudioKeywordRecursive(const String& directory,const String& keyword,String& found,int depth){
-  if(depth<0)return false;File dir=SD.open(directory);if(!dir||!dir.isDirectory()){if(dir)dir.close();return false;}File entry=dir.openNextFile();
-  while(entry){String raw=String(entry.name());bool isDir=entry.isDirectory();entry.close();String path=raw.startsWith("/")?raw:(directory=="/"?"/"+raw:directory+"/"+raw);
-    if(isDir){if(path!="/System Volume Information"&&path!="/JOHNNY"&&findAudioKeywordRecursive(path,keyword,found,depth-1)){dir.close();return true;}}
-    else{String low=raw;low.toLowerCase();if(isPlayableAudio(low)&&low.indexOf(keyword)>=0){found=path;dir.close();return true;}}
-    entry=dir.openNextFile();
-  }dir.close();return false;
-}
-void runHackAudio(const String& keyword,const String& label){
-  stopAudio();hackFxPlaying=false;hackVisualFx=false;String path;
-  bool found=sdReady&&findAudioKeywordRecursive("/",keyword,path,3);
-  if(!found&&keyword=="rick")found=sdReady&&findAudioKeywordRecursive("/","never gonna give you up",path,3);
-  if(!found){hackMessage=label+" FILE NOT FOUND ON MICROSD";drawHackFxScreen();return;}
-  bool ok=startLocalAudio(path);hackFxPlaying=ok;if(!ok)hackMessage=audioStatusMessage;else hackMessage=label+" PLAYING";drawHackFxScreen();
-}
 
 bool startRadioStream(const String& url, const String& title) {
   stopAudio();
@@ -1470,7 +1413,7 @@ void openLegacyApp();
 void openApp(){
   if(screen==HOME){screen=selected==0?HACKMENU:(selected==1?GAMESMENU:(selected==2?MUSICMENU:SYSTEMMENU));selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
-  if(menu==HACKMENU){if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item>=2&&item<=4){hackInputMode=(uint8_t)(item-2);hackInputValue="";hackResultMessage="";hackInputDone=false;screen=HACKINPUT;drawHackInput();return;}if(item==5){screen=HACKFX;hackFxSelected=0;hackFxPlaying=false;hackVisualFx=false;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
+  if(menu==HACKMENU){if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item>=2&&item<=4){hackInputMode=(uint8_t)(item-2);hackInputValue="";hackResultMessage="";hackInputDone=false;screen=HACKINPUT;drawHackInput();return;}if(item==6){screen=HACKFX;hackVisualFx=true;hackFxLastFrame=0;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
   if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;screen=HOME;
   if(menu==MUSICMENU){if(item==5){screen=MICREC;micRecording=false;micRecordStatus="READY";drawMicRecorder();return;}const int map[]={0,1,2,3,7};selected=map[item];}
   else if(menu==SYSTEMMENU){if(item==3){screen=UPDATEINFO;updateMessage="PRESS ENTER TO INSTALL LATEST";drawUpdateInfo();return;}if(item==4){selected=9;openLegacyApp();return;}const int map[]={4,6,5};selected=map[item];}
@@ -1481,8 +1424,8 @@ void openLegacyApp() {
   switch(selected) {
     case 0: stopMicCapture(); stopAudio(); audioEqualizer.reset(); screen=PIANO; pianoScreen(); break;
     case 1:
-      stopAudio(); stopMicCapture(); screen=TUNER; tunerInstrument=1;
-      tunerMidi=-1; tunerFrequency=0; tunerFilteredFrequency=0; tunerHasSignal=false;
+      stopAudio(); stopMicCapture(); screen=TUNER; tunerInstrument=0;
+      tunerFrequency=0; tunerFilteredFrequency=0; tunerHasSignal=false;
       tunerLastSignalAt=0; tunerLastSample=0; tunerScreen(); break;
     case 2:
       stopAudio();
@@ -1736,18 +1679,17 @@ void loop() {
       drawNetworkScreen();
     } else if(result==WIFI_SCAN_FAILED) { wifiScanPending=false; drawNetworkScreen(); }
   }
-  if(screen==TUNER && !screenSaverActive && millis()-tunerLastSample>420) {
+  if(screen==TUNER && !screenSaverActive && millis()-tunerLastSample>240) {
     tunerLastSample=millis();
     if(captureMic(tunerSamples,3072,420)) {
       float freq=detectPitch(tunerSamples,3072);
-      if(freq>0 && freq<1400) {
-        if(tunerFilteredFrequency<=0.0f || fabsf(freq-tunerFilteredFrequency)>tunerFilteredFrequency*0.22f) tunerFilteredFrequency=freq;
-        else tunerFilteredFrequency=0.62f*tunerFilteredFrequency+0.38f*freq;
+      if(freq>=36.0f && freq<=560.0f) {
+        if(tunerFilteredFrequency<=0.0f || fabsf(freq-tunerFilteredFrequency)>tunerFilteredFrequency*0.30f) tunerFilteredFrequency=freq;
+        else tunerFilteredFrequency=0.72f*tunerFilteredFrequency+0.28f*freq;
         tunerFrequency=tunerFilteredFrequency; tunerHasSignal=true; tunerLastSignalAt=millis();
-        tunerMidi=nearestMidi(tunerFrequency,&tunerCents);
       }
     }
-    if(tunerHasSignal && millis()-tunerLastSignalAt>5000UL) {tunerHasSignal=false;tunerFilteredFrequency=0;tunerFrequency=0;tunerMidi=-1;}
+    if(tunerHasSignal && millis()-tunerLastSignalAt>1100UL) {tunerHasSignal=false;tunerFilteredFrequency=0;tunerFrequency=0;}
     drawTunerReadout();
   }
   
@@ -1811,9 +1753,9 @@ void loop() {
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU){screen=HOME;selected=0;drawHome();}
     else if(screen==BLESCAN){stopBleScan();screen=HACKMENU;selected=1;drawCategoryMenu();}
-    else if(screen==HACKINFO){screen=HACKMENU;selected=6;drawCategoryMenu();}
+    else if(screen==HACKINFO){screen=HACKMENU;selected=5;drawCategoryMenu();}
     else if(screen==HACKINPUT){screen=HACKMENU;selected=hackInputMode+2;drawCategoryMenu();}
-    else if(screen==HACKFX){if(hackFxPlaying)stopAudio();hackFxPlaying=false;hackVisualFx=false;screen=HACKMENU;selected=2;drawCategoryMenu();}
+    else if(screen==HACKFX){hackVisualFx=false;screen=HACKMENU;selected=6;drawCategoryMenu();}
     else if(screen==NETWORK&&wifiScanOnly){wifiScanOnly=false;wifiConfigStage=0;screen=HACKMENU;selected=0;drawCategoryMenu();}
     else if(screen==EQSCREEN){
       screen=eqReturnScreen;
@@ -1863,8 +1805,8 @@ if(usbActive) endUsbMode();
   } else if(screen==PIANO) {
     if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
     else if(c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
-    else if(c==';'){pianoEffect=(pianoEffect+4)%5;pianoScreen();}
-    else if(c=='.'){pianoEffect=(pianoEffect+1)%5;pianoScreen();}
+    else if(c==';'){pianoEffect=(pianoEffect+3)%4;pianoScreen();}
+    else if(c=='.'){pianoEffect=(pianoEffect+1)%4;pianoScreen();}
     else if(c=='-'){pianoVolume=max(0,pianoVolume-10);pianoScreen();}
     else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
     else if(c=='['){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
@@ -1959,8 +1901,7 @@ if(usbActive) endUsbMode();
   } else if(screen==HACKINFO) {
     // ESC returns to the HACK menu.
   } else if(screen==HACKFX) {
-    if(hackFxPlaying){if(k.enter||k.space){toggleAudioPause();drawHackFxScreen();}else if(c=='p'||c=='P'){stopAudio();hackFxPlaying=false;drawHackFxScreen();}}
-    else if(!hackVisualFx){if(c==';')hackFxSelected=max(0,hackFxSelected-1);else if(c=='.')hackFxSelected=min(HACK_FX_COUNT-1,hackFxSelected+1);else if(k.enter){if(hackFxSelected==0)runHackAudio("rick","RICKROLL");else if(hackFxSelected==1)runHackAudio("never fade away","NEVER FADE AWAY");else{hackVisualFx=true;hackFxLastFrame=0;drawHackFxScreen();}}if(!hackVisualFx)drawHackFxScreen();}
+    // Visual-only demo; ESC returns to the HACK menu.
   } else if(screen==NETWORK) {
     if(wifiConfigStage==0) {
       if(k.enter) startNetworkSetup();
