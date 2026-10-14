@@ -230,8 +230,8 @@ const char* apps[] = {"MUSIC","SYSTEM","GAMES"};
 constexpr int APP_COUNT=3;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
 const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","BLUETOOTH","UPDATE FIRMWARE","INSTALL APPS"};
-const char* gamesMenuItems[]={"CONWAY LIFE","GB / GBC CORE","GBA CORE","DOOM ENGINE"};
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=4;
+const char* gamesMenuItems[]={"CONWAY LIFE","PRBOOM"};
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=2;
 String placeholderTitle, placeholderMessage;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
@@ -344,10 +344,20 @@ void splash() {
   auto &d=M5Cardputer.Display;
   d.fillScreen(BG);
   d.setTextSize(3);
-  d.setTextColor(WHITE,BG);
+  d.setTextColor(UI_PURPLE,BG);
   d.setCursor(38,48); d.print("JOHNNY");
-  d.setTextSize(1);
-  delay(500);
+  delay(350);
+  for(int i=0;i<10;i++) {
+    int y=random(43,87), x=random(12,45), w=random(70,205);
+    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_PURPLE);
+    d.setTextColor(i%2?UI_PINK:UI_PURPLE,BG);
+    d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
+    delay(32);
+  }
+  d.fillScreen(BG);
+  d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
+  d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
+  delay(1100);
 }
 void pianoScreen() {
   header("POCKET SYNTH");
@@ -1104,7 +1114,7 @@ void openApp(){
     if(item==5){showUnavailable("APP CATALOG","GitHub app installer is not integrated.");return;}
     const int map[]={4,6,5};selected=map[item];
   }else{
-    if(item>0){showUnavailable(item==1?"GAME BOY / COLOR":(item==2?"GAME BOY ADVANCE":"DOOM ENGINE"),"EMULATOR CORE NOT INSTALLED");return;}
+    if(item==1){showUnavailable("PRBOOM","ENGINE NOT INSTALLED");return;}
     selected=8;
   }
   openLegacyApp();
