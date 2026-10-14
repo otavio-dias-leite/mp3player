@@ -214,8 +214,6 @@ int wifiNetworkChannel[20]={};
 String wifiNetworkBssid[20];
 WebServer johnnyWeb(80);
 bool johnnyWebStarted=false,johnnyMdnsStarted=false;
-static uint16_t webCaptureLine[240];
-static uint8_t webBmpLine[720];
 BLEScan* bleScanner=nullptr;
 bool bleInitialized=false;
 volatile bool bleScanDone=false;
@@ -411,21 +409,34 @@ void runFirmwareUpdate(){
 }
 
 void splash(){
-  auto& d=M5Cardputer.Display;d.setBrightness(190);
-  for(int frame=0;frame<24;frame++){
-    d.fillScreen(BG);const int jitter=(frame%3==0)?(int)random(-5,6):0;d.setTextSize(3);
-    d.setTextColor(UI_PURPLE,BG);d.setCursor(38+jitter+3,49);d.print("JOHNNY");
-    d.setTextColor(UI_PINK,BG);d.setCursor(38+jitter-3,49);d.print("JOHNNY");
-    d.setTextColor(WHITE,BG);d.setCursor(38+jitter,49);d.print("JOHNNY");
-    d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(52,83);d.print("wake fuck up samurai");
-    if(frame%2==0){const int y=random(37,101),x=random(5,155),w=random(35,115);d.fillRect(x,y,w,1,UI_PINK);if(frame%4==0)d.fillRect(x+random(-5,8),y+2,w-random(0,12),1,UI_PURPLE);}
-    if(frame%5==1)d.fillRect(0,random(30,104),240,2,0x5140);
-    d.drawFastHLine(18,109,204,0x5140);d.fillRect(18,109,((frame+1)*204)/24,2,UI_PINK);delay(22);
+  auto& d=M5Cardputer.Display;
+  d.setBrightness(190);
+  const uint32_t started=millis();
+  uint32_t frame=0;
+  while((uint32_t)(millis()-started)<5200UL){
+    d.fillScreen(BG);
+    const bool glitch=(frame%7U==0U)||(frame%11U==0U);
+    const int x=38+(glitch?(int)random(-4,5):0);
+    const int y=48+(glitch?(int)random(-2,3):0);
+    d.setTextSize(3);
+    if(glitch){
+      d.setTextColor(UI_PURPLE,BG);d.setCursor(x+3,y);d.print("JOHNNY");
+      d.setTextColor(UI_PINK,BG);d.setCursor(x-3,y);d.print("JOHNNY");
+    }
+    d.setTextColor(WHITE,BG);d.setCursor(x,y);d.print("JOHNNY");
+    d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);
+    d.setCursor(68,83);d.print("wake up samurai");
+    if(glitch)d.fillRect(random(24,190),random(42,91),random(18,62),1,UI_PINK);
+    frame++;
+    delay(65);
   }
-  d.fillScreen(BG);d.setTextSize(3);d.setTextColor(WHITE,BG);d.setCursor(38,49);d.print("JOHNNY");
-  d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(52,83);d.print("wake fuck up samurai");
-  d.drawFastHLine(18,109,204,UI_PURPLE);delay(260);
+  d.fillScreen(BG);d.setTextSize(3);d.setTextColor(WHITE,BG);
+  d.setCursor(38,48);d.print("JOHNNY");
+  d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);
+  d.setCursor(68,83);d.print("wake up samurai");
+  delay(180);
 }
+
 void pianoScreen() {
   header("POCKET SYNTH");
   auto &d=M5Cardputer.Display;
@@ -702,53 +713,31 @@ void sendWebStatus(){
   johnnyWeb.sendHeader("Cache-Control","no-store");
   johnnyWeb.send(200,"application/json; charset=utf-8",json);
 }
-void sendWebScreenBmp(){
-  static constexpr uint32_t total=54U+240U*135U*3U;
-  uint8_t h[54]={};
-  auto put16=[&](int p,uint16_t v){h[p]=(uint8_t)v;h[p+1]=(uint8_t)(v>>8);};
-  auto put32=[&](int p,uint32_t v){h[p]=(uint8_t)v;h[p+1]=(uint8_t)(v>>8);h[p+2]=(uint8_t)(v>>16);h[p+3]=(uint8_t)(v>>24);};
-  h[0]='B';h[1]='M';put32(2,total);put32(10,54);put32(14,40);put32(18,240);put32(22,135);put16(26,1);put16(28,24);put32(34,240U*135U*3U);
-  johnnyWeb.sendHeader("Cache-Control","no-store");
-  johnnyWeb.setContentLength(total);johnnyWeb.send(200,"image/bmp","");
-  johnnyWeb.sendContent((const char*)h,sizeof(h));
-  for(int y=134;y>=0;y--){
-    if(!johnnyWeb.client().connected())break;
-    M5Cardputer.Display.readRect(0,y,240,1,webCaptureLine);
-    for(int x=0;x<240;x++){uint16_t p=webCaptureLine[x];webBmpLine[x*3]=(uint8_t)((p&31)<<3);webBmpLine[x*3+1]=(uint8_t)(((p>>5)&63)<<2);webBmpLine[x*3+2]=(uint8_t)(((p>>11)&31)<<3);}
-    johnnyWeb.sendContent((const char*)webBmpLine,sizeof(webBmpLine));
-  }
-}
 static const char JOHNNY_WEB_HOME[] PROGMEM=R"JOHNNYWEB(
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JOHNNY // Cardputer Remote</title>
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JOHNNY // Status</title>
 <style>
-:root{color-scheme:dark;--bg:#10081f;--panel:#20132f;--line:#6c3c91;--pink:#f19fff;--text:#eee7f6;--muted:#b5b4c8}*{box-sizing:border-box}
-body{margin:0;background:radial-gradient(circle at 50% 0,#2e1747,var(--bg) 55%);color:var(--text);font:15px system-ui,sans-serif}
-main{max-width:960px;margin:0 auto;padding:24px}header{display:flex;justify-content:space-between;gap:12px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:14px}
-h1{font-size:22px;letter-spacing:.15em;margin:0}.state{color:var(--pink);font-size:12px;letter-spacing:.12em}
-.panel{background:#1b1029;border:1px solid #49305f;border-radius:14px;padding:16px;margin-top:16px}
-.screen{width:100%;max-width:720px;display:block;margin:auto;background:#05030a;border:1px solid var(--line);border-radius:9px;image-rendering:pixelated}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}.item{padding:10px;background:var(--panel);border-radius:8px}.item b{display:block;color:var(--pink);font-size:11px;letter-spacing:.1em;margin-bottom:5px}
-a{color:var(--pink)}button{background:#39204f;color:white;border:1px solid var(--line);border-radius:7px;padding:9px 13px}footer{margin:20px 0;color:var(--muted);font-size:12px}
-</style></head><body><main><header><h1>JOHNNY</h1><span class="state">CARDPUTER ADV // LIVE VIEW</span></header>
-<section class="panel"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px"><b>DISPLAY MIRROR</b><button id="refresh">ATUALIZAR AGORA</button></div>
-<img id="screen" class="screen" src="/screen.bmp" alt="Tela do Cardputer"><small>A tela física continua controlando o dispositivo.</small></section>
-<section class="panel"><b>DEVICE STATUS</b><div id="status" class="grid" style="margin-top:12px">Carregando informações…</div></section>
-<footer>JOHNNY // rede local · <a href="/api/status">JSON API</a></footer></main>
+:root{color-scheme:dark;--bg:#10081f;--panel:#20132f;--line:#6c3c91;--pink:#f19fff;--text:#eee7f6;--muted:#b5b4c8}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}
+main{max-width:620px;margin:auto;padding:18px}header{border-bottom:1px solid var(--line);padding:8px 0 14px;display:flex;justify-content:space-between;gap:10px}
+h1{font-size:20px;letter-spacing:.15em;margin:0}.state{color:var(--pink);font-size:11px}
+#status{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:14px}
+.item{background:var(--panel);border:1px solid #49305f;border-radius:8px;padding:10px;min-width:0;overflow-wrap:anywhere}
+.item b{display:block;color:var(--pink);font-size:10px;letter-spacing:.1em;margin-bottom:4px}
+footer{margin-top:16px;color:var(--muted);font-size:11px}
+</style></head><body><main><header><h1>JOHNNY</h1><span class="state">DEVICE STATUS</span></header>
+<div id="status">Connecting…</div><footer>Atualização automática a cada 15 segundos. A tela e os controles permanecem no Cardputer.</footer></main>
 <script>
-const status=document.getElementById('status'),screen=document.getElementById('screen');
-function refreshScreen(){screen.src='/screen.bmp?t='+Date.now()}
-async function refreshStatus(){try{const r=await fetch('/api/status',{cache:'no-store'}),j=await r.json();
-const rows=[['IP',j.ip],['MAC',j.mac],['WIFI',j.ssid||'OFFLINE'],['SINAL',j.rssi+' dBm'],['GATEWAY',j.gateway],['SUBNET',j.subnet],['DNS',j.dns],['FIRMWARE',j.firmware],['BATERIA',j.battery_percent+'% / '+j.battery_mv+' mV'],['CARGA',j.charging?'SIM':'NÃO'],['MICROSD',j.sd_ready?'MONTADO':'AUSENTE'],['HEAP LIVRE',j.free_heap+' bytes'],['HEAP MÍNIMO',j.min_free_heap+' bytes'],['PSRAM',j.psram_bytes+' bytes'],['UPTIME',j.uptime_seconds+' s']];
-status.replaceChildren(...rows.map(x=>{const card=document.createElement('div');card.className='item';const label=document.createElement('b');label.textContent=x[0];const value=document.createElement('span');value.textContent=String(x[1]);card.append(label,value);return card;}));
+const status=document.getElementById('status');
+async function refresh(){try{const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error();const j=await r.json();
+const rows=[['FIRMWARE',j.firmware],['CONEXÃO',j.connected?'ONLINE':'OFFLINE'],['IP',j.ip],['WI-FI',j.ssid||'OFFLINE'],['SINAL',j.rssi+' dBm'],['BATERIA',j.battery_percent+'% / '+j.battery_mv+' mV'],['CARGA',j.charging?'SIM':'NÃO'],['MICROSD',j.sd_ready?'MONTADO':'AUSENTE'],['RAM LIVRE',j.free_heap+' bytes'],['UPTIME',j.uptime_seconds+' s']];
+status.replaceChildren(...rows.map(([k,v])=>{const el=document.createElement('div');el.className='item';const b=document.createElement('b');b.textContent=k;const span=document.createElement('span');span.textContent=String(v);el.append(b,span);return el;}));
 }catch(e){status.textContent='Sem conexão com o Cardputer.'}}
-document.getElementById('refresh').onclick=()=>{refreshScreen();refreshStatus()};
-refreshStatus();setInterval(refreshStatus,4000);setInterval(refreshScreen,1200);
+refresh();setInterval(refresh,15000);
 </script></body></html>
 )JOHNNYWEB";
 void beginJohnnyWeb(){
   johnnyWeb.on("/",HTTP_GET,[]{johnnyWeb.send_P(200,"text/html; charset=utf-8",JOHNNY_WEB_HOME);});
   johnnyWeb.on("/api/status",HTTP_GET,sendWebStatus);
-  johnnyWeb.on("/screen.bmp",HTTP_GET,sendWebScreenBmp);
   johnnyWeb.onNotFound([]{johnnyWeb.send(404,"text/plain","JOHNNY: endpoint not found");});
   johnnyWeb.begin();johnnyWebStarted=true;
 }
