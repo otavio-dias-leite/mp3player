@@ -58,12 +58,12 @@ O rádio web usa HTTP/ICY MP3. URLs personalizadas devem começar por http://; H
 
 - Setas ou , . / ;: navegação conforme a tela.
 - Enter: selecionar, iniciar ou pausar.
-- Esc ou apóstrofo: voltar.
+- Esc: voltar.
 - **TAB:** ligar/desligar o screen saver; a reprodução continua em segundo plano.
 - **SYNTH:** QWERTYU toca notas; setas ajustam oitava/timbre; - e + ajustam volume; [ e ] ajustam oitava.
 - **MUSIC:** na biblioteca, cima/baixo selecionam; no player, esquerda/direita ou cima/baixo trocam faixa; Enter/espaço pausa; P para; -/+ ajustam volume.
-- **RADIO:** cima/baixo seleciona estação; Enter conecta; espaço pausa; P para; opção Custom permite informar uma URL HTTP; R inicia/finaliza gravação WAV no cartão SD; E abre o equalizador.
-- **EQUALIZER:** E abre a tela no SYNTH, MUSIC ou RADIO. Cima/baixo escolhe a banda; esquerda/direita altera o ganho em passos de 0,5 dB; P percorre os perfis; 0 seleciona Flat.
+- **RADIO:** cima/baixo seleciona estação; Enter conecta; espaço pausa; P para; opção Custom permite informar uma URL HTTP; R inicia/finaliza gravação WAV no cartão SD; o equalizador é acessado exclusivamente pelo menu MUSIC → EQUALIZER.
+- **EQUALIZER:** acessível exclusivamente pelo menu MUSIC → EQUALIZER. Cima/baixo escolhe a banda; esquerda/direita altera o ganho em passos de 0,5 dB; P percorre os perfis; 0 seleciona Flat.
 - **CONWAY LIFE:** no launcher, selecione LIFE. Espaço executa/pausa; N avança uma geração; R gera uma população aleatória; C limpa; Enter alterna a célula sob o cursor; setas movem; +/- ajustam a velocidade.
 - **TUNER:** esquerda/direita alterna guitarra, violão e ukulele. Toque uma corda e mantenha a nota por um instante. A leitura fica visível por até 5 segundos após o sinal desaparecer. “GRAVE DEMAIS / APERTE” indica corda frouxa; “AGUDA DEMAIS / AFROUXE” indica corda apertada. “AFINADA” aparece dentro da tolerância de ±5 cents.
 
@@ -105,6 +105,6 @@ A versão pública é controlada exclusivamente pelo arquivo `VERSION` (SemVer).
 
 ## Jogos
 
-A página [Games](games.html) reúne o Game of Life e DOOM 1993 no navegador. O autômato de Conway também permanece no firmware como aplicativo LIFE. A versão web de DOOM usa o projeto externo [doom.wasm](https://github.com/jacobenget/doom.wasm) e seu runtime hospedado pelo autor; ela não é incorporada ao binário do JOHNNY.
+O autômato de Conway permanece no firmware como aplicativo LIFE. DOOM 1993 ainda não está integrado ao binário do JOHNNY.
 
 **DOOM nativo no Cardputer-Adv ainda não está integrado.** O port existente para Cardputer que encontrei usa uma árvore ESP-IDF própria, driver de teclado matricial antigo e estratégias de paginação/mapeamento de memória específicas. O ADV usa o teclado I²C gerenciado pela biblioteca M5Cardputer e este firmware é Arduino/PlatformIO. Copiar esse port diretamente não é compatível nem seguro sem uma adaptação e validação próprias. O processador do ADV também trabalha sem PSRAM, o que exige manter o consumo de RAM sob controle.
