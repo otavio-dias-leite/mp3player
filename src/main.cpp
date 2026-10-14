@@ -5,6 +5,7 @@
 #include <math.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <HTTPClient.h>
 #include <ESPmDNS.h>
 #include <BLEDevice.h>
 #include <BLEScan.h>
@@ -578,9 +579,9 @@ void drawNetworkScreen() {
       uint16_t bg=active?PANEL:BG;
       d.fillRect(7,y-1,225,11,bg);
       d.setTextColor(active?WHITE:UI_MUTED,bg); d.setCursor(10,y);
-      String name=wifiNetworks[i]; if(name.length()>22)name=name.substring(0,19)+"...";
-      d.printf("%c %s %ddBm",active?'>':' ',name.c_str(),wifiNetworkRSSI[i]);
-      if(wifiNetworkAuth[i]==WIFI_AUTH_OPEN) { d.setTextColor(UI_LAVENDER,bg); d.setCursor(211,y); d.print("O"); }
+      String name=wifiNetworks[i];if(name.length()>12)name=name.substring(0,10)+"..";
+      d.printf("%c %-12s %ddB C%02d",active?'>':' ',name.c_str(),wifiNetworkRSSI[i],wifiNetworkChannel[i]);
+      d.setTextColor(wifiNetworkAuth[i]==WIFI_AUTH_OPEN?UI_LAVENDER:UI_MUTED,bg);d.setCursor(213,y);d.print(wifiNetworkAuth[i]==WIFI_AUTH_OPEN?"O":"L");
     }
     footer("UP/DN SELECT  ENTER JOIN  R SCAN");
     return;
