@@ -22,7 +22,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build static website
+      - name: Build static website and bundle firmware locally
         shell: bash
         run: |
           set -euo pipefail
@@ -30,6 +30,17 @@ jobs:
           mkdir -p _site/firmware
           cp index.html style.css transfer.html _site/
           cp firmware/manifest.json _site/firmware/manifest.json
+          ASSET_URL="https://github.com/otavio-dias-leite/johnny/releases/download/v${VERSION}/johnny-cardputer-adv-full.bin"
+          echo "Fetching firmware asset: ${ASSET_URL}"
+          for attempt in $(seq 1 30); do
+            if curl --fail --location --silent --show-error "${ASSET_URL}" -o _site/firmware/johnny-cardputer-adv-full.bin; then
+              break
+            fi
+            rm -f _site/firmware/johnny-cardputer-adv-full.bin
+            echo "Firmware release not ready (attempt ${attempt}/30); retrying..."
+            sleep 10
+          done
+          test -s _site/firmware/johnny-cardputer-adv-full.bin
           python - <<'PY'
           import json
           from pathlib import Path
@@ -39,12 +50,12 @@ jobs:
               page.write_text(page.read_text().replace("@JOHNNY_VERSION@", version))
           manifest = Path("_site/firmware/manifest.json")
           data = json.loads(manifest.read_text())
-          base = f"https://github.com/otavio-dias-leite/johnny/releases/download/v{version}/"
-          for part in data["builds"][0]["parts"]:
-              filename = part["path"].split("/")[-1].split("?")[0]
-              part["path"] = base + filename
           data["version"] = version
-          manifest.write_text(json.dumps(data, indent=2) + "\n")
+          data["builds"][0]["parts"] = [{
+              "path": "johnny-cardputer-adv-full.bin",
+              "offset": 0
+          }]
+          manifest.write_text(json.dumps(data, indent=2) + "\\n")
           PY
           touch _site/.nojekyll
       - uses: actions/configure-pages@v5
