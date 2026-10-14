@@ -114,7 +114,7 @@ public:
   void flush() override {
     if(!speaker_||bufferIndex_==0)return;
     uint32_t started=millis();
-    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<80UL) delay(1);
     if(speaker_->isPlaying()) speaker_->stop();
     speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,true);
     bufferSlot_=(bufferSlot_+1)%3;bufferIndex_=0;
@@ -125,7 +125,7 @@ public:
     flush();
     if(speaker_) {
       uint32_t started=millis();
-      while(speaker_->isPlaying() && (uint32_t)(millis()-started)<1000UL) delay(1);
+      while(speaker_->isPlaying() && (uint32_t)(millis()-started)<80UL) delay(1);
       if(speaker_->isPlaying()) speaker_->stop();
     }
     return true;
@@ -181,6 +181,9 @@ String audioStatusMessage="STOPPED";
 String audioNowTitle;
 String audioTrackPath, audioTrackExtension, audioTrackArtist, audioTrackAlbum, audioTrackTitle;
 static uint8_t audioCoverData[40U*1024U];
+alignas(4) static uint8_t audioDecodeBuffer[8192];
+uint32_t musicProgressLastDraw=0;
+uint8_t musicProgressLastValue=255;
 uint32_t audioCoverSize=0;
 bool audioCoverPng=false;
 bool audioShuffle=false;
@@ -895,7 +898,7 @@ bool startAudioSource(AudioFileSource* source, const String& title, const String
   }  xSemaphoreTake(audioMutex,portMAX_DELAY);
   stopAudioLocked();
   audioRawSource=source;
-  audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,8192);
+  audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));
   if(!audioInputBuffer) {
     audioStatusMessage="NO BUFFER MEMORY";
     stopAudioLocked();
@@ -1019,7 +1022,9 @@ bool findAudioKeywordRecursive(const String& directory,const String& keyword,Str
 }
 void runHackAudio(const String& keyword,const String& label){
   stopAudio();hackFxPlaying=false;hackVisualFx=false;String path;
-  if(!sdReady||!findAudioKeywordRecursive("/",keyword,path,3)){hackMessage=label+" FILE NOT FOUND ON MICROSD";drawHackFxScreen();return;}
+  bool found=sdReady&&findAudioKeywordRecursive("/",keyword,path,3);
+  if(!found&&keyword=="rick")found=sdReady&&findAudioKeywordRecursive("/","never gonna give you up",path,3);
+  if(!found){hackMessage=label+" FILE NOT FOUND ON MICROSD";drawHackFxScreen();return;}
   bool ok=startLocalAudio(path);hackFxPlaying=ok;if(!ok)hackMessage=audioStatusMessage;else hackMessage=label+" PLAYING";drawHackFxScreen();
 }
 
@@ -1054,13 +1059,20 @@ bool seekAudioStep(int direction){
   uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos(),buffered=audioInputBuffer->getFillLevel();pos=pos>buffered?pos-buffered:0;
   if(size<4096){xSemaphoreGive(audioMutex);return false;}
   int64_t target=(int64_t)pos+(int64_t)direction*(int64_t)max((uint32_t)4096,size/20U);if(target<0)target=0;if(target>(int64_t)size-1)target=(int64_t)size-1;
+  if(audioTrackExtension!="mp3"&&audioTrackExtension!="aac"){audioStatusMessage="SEEK NOT SUPPORTED";xSemaphoreGive(audioMutex);return false;}
   bool paused=audioPaused;audioDecoder->stop();delete audioDecoder;audioDecoder=nullptr;delete audioInputBuffer;audioInputBuffer=nullptr;
   if(!audioRawSource->seek((int32_t)target,SEEK_SET))audioRawSource->seek(0,SEEK_SET);
-  audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,8192);audioDecoder=createAudioDecoder(audioTrackExtension);
+  audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));audioDecoder=createAudioDecoder(audioTrackExtension);
   bool ok=audioInputBuffer&&audioDecoder&&audioDecoder->begin(audioInputBuffer,audioOutput);
   if(ok){audioStarted=true;audioPaused=paused;audioTaskEnded=false;audioStatusMessage=paused?"PAUSED":"PLAYING";audioEqualizer.reset();}
   else{if(audioDecoder){delete audioDecoder;audioDecoder=nullptr;}if(audioInputBuffer){delete audioInputBuffer;audioInputBuffer=nullptr;}audioStarted=false;audioPaused=true;audioStatusMessage="SEEK FAILED";}
   xSemaphoreGive(audioMutex);return ok;
+}
+void serviceMusicProgress(){
+  if(screen!=MUSIC||!musicNowPlaying||!audioStarted||screenSaverActive)return;
+  if((uint32_t)(millis()-musicProgressLastDraw)<500UL)return;
+  musicProgressLastDraw=millis();uint8_t pct=audioProgressPercent();if(pct==musicProgressLastValue)return;musicProgressLastValue=pct;
+  auto& d=M5Cardputer.Display;d.drawFastHLine(78,96,151,BG);d.drawFastHLine(78,96,(int)pct*151/100,UI_PINK);d.fillCircle(78+(int)pct*151/100,96,3,UI_LAVENDER);d.fillRect(78,101,34,12,BG);d.setTextColor(UI_MUTED,BG);d.setCursor(78,103);d.printf("%3u%%",pct);
 }
 void serviceAudio() {
   bool ended=false;
@@ -1465,6 +1477,7 @@ void loop() {
     if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC BACK"); } }
   }
   serviceAudio();
+  serviceMusicProgress();
   if(screen==MICREC&&micRecording)serviceMicRecorder();
   if(!screenSaverActive&&screen==LIFE&&lifeRunning&&millis()-lifeLastStep>=lifeIntervalMs){stepLife();drawLife();}
   static uint8_t lastRecorderDisplayState=255;
