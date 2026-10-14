@@ -2,7 +2,7 @@ name: Build and deploy JOHNNY
 
 on:
   push:
-    branches: [main]
+    branches: [main, johnny/alpha11-main-sync]
   workflow_dispatch:
 
 permissions:
