@@ -9,7 +9,7 @@ A tela inicial tem quatro áreas:
 - **MUSIC:** SYNTH, TUNER, MUSIC PLAYER, WEB RADIO, EQUALIZER e MIC RECORDER.
 - **SYSTEM:** FILES, USB TRANSFER, WI-FI, UPDATE FIRMWARE e DEVICE STATUS.
 - **GAMES:** CONWAY LIFE.
-- **HACK:** WI-FI RECON, BLE SCANNER, SPAM FX (OFFLINE) e DEVICE / RF INFO.
+- **HACK:** WI-FI RECON, BLE SCANNER, TCP CONNECT TEST, DNS LOOKUP, HTTP STATUS CHECK, NETWORK / RADIO INFO, OFFLINE VISUAL FX, HTTP SECURITY AUDIT e DEVICE SECURITY AUDIT.
 
 O jogo disponível nesta compilação é Conway's Game of Life.
 
@@ -68,6 +68,8 @@ O player não é um cliente Spotify e não transmite o catálogo do Spotify. É 
 - **TCP CONNECT TEST:** testa uma única combinação de IP e porta digitada pelo operador (por exemplo, `192.168.1.1:80`). Não faz varredura de faixas ou listas de portas.
 - **DNS LOOKUP:** resolve um hostname digitado e mostra o endereço retornado.
 - **HTTP STATUS CHECK:** envia uma requisição HEAD para uma URL `http://` digitada e mostra o código HTTP.
+- **HTTP SECURITY AUDIT:** consulta cabeçalhos HTTP de segurança (HSTS, CSP, X-Frame-Options, X-Content-Type-Options e Referrer-Policy) usando HEAD. Aceita somente HTTP nesta implementação; não valida TLS nem substitui um scanner de segurança completo.
+- **DEVICE SECURITY AUDIT:** mostra heap livre/mínimo, flash, CPU, PSRAM, estado do microSD e Wi-Fi sem tráfego de rede.
 - **SPAM FX / OFFLINE:** procura no microSD os arquivos de áudio para Rickroll ou Never Fade Away; a terceira opção é apenas um efeito visual local. Nenhum áudio protegido é incluído no firmware.
 - **NETWORK / RADIO INFO:** IP, MAC, canal, RSSI e gateway da conexão atual.
 
