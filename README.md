@@ -11,7 +11,7 @@ A tela inicial tem quatro áreas:
 - **GAMES:** CONWAY LIFE.
 - **HACK:** WI-FI RECON, BLE SCANNER, SPAM FX (OFFLINE) e DEVICE / RF INFO.
 
-DOOM e os itens de emuladores que ainda não tinham núcleo funcional foram removidos do menu. O jogo disponível nesta compilação é Conway's Game of Life.
+O jogo disponível nesta compilação é Conway's Game of Life.
 
 ## MUSIC PLAYER
 
@@ -95,7 +95,7 @@ pio run -e cardputer-adv -t upload
 pio device monitor
 ```
 
-O workflow de firmware compila o ambiente `cardputer-adv` e monta também uma imagem completa para gravação USB. Pushes para `main` geram artefatos de teste; uma GitHub Release versionada só é publicada por uma tag `v<VERSION>) depois de a compilação passar.
+O workflow de firmware compila o ambiente `cardputer-adv` e monta também uma imagem completa para gravação USB. Pushes para `main` geram artefatos de teste; uma GitHub Release versionada só é publicada por uma tag `v<VERSION>` depois de a compilação passar.
 
 ## Hardware e validação
 
