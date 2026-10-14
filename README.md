@@ -63,7 +63,7 @@ O player não é um cliente Spotify e não transmite o catálogo do Spotify. É 
 
 ## HACK — diagnósticos sem hardware adicional
 
-- **WI-FI RECON:** varredura passiva de redes próximas, com SSID, intensidade do sinal, canal e indicação de rede aberta/segura. Não tenta autenticar, desautenticar ou interromper redes.
+- **WI-FI RECON:** varredura passiva de redes próximas, com SSID, RSSI, canal e indicação de rede aberta/segura. Ao selecionar uma rede, mostra também BSSID e detalhes. Não tenta autenticar, desautenticar ou interromper redes.
 - **BLE SCANNER:** descoberta passiva de anúncios Bluetooth LE, com nome, sufixo do endereço e RSSI.
 - **TCP CONNECT TEST:** testa uma única combinação de IP e porta digitada pelo operador (por exemplo, `192.168.1.1:80`). Não faz varredura de faixas ou listas de portas.
 - **DNS LOOKUP:** resolve um hostname digitado e mostra o endereço retornado.
