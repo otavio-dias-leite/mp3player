@@ -486,8 +486,8 @@ float detectPitch(const int16_t* samples,size_t count,float* rmsOut=nullptr){
   // YIN difference/CMND estimates the fundamental rather than the loudest harmonic.
   const int minLag=28,maxLag=min(430,(int)count/2);const size_t overlap=count-(size_t)maxLag;
   static float yin[432];
-  for(int tau=minLag;tau<=maxLag;tau++){float sum=0.0f;for(size_t i=0;i<overlap;i++){const float x=(float)samples[i]-(float)mean,y=(float)samples[i+(size_t)tau]-(float)mean,delta=x-y;sum+=delta*delta;}yin[tau]=sum;}
-  float running=0.0f;for(int tau=minLag;tau<=maxLag;tau++){running+=yin[tau];yin[tau]=(running>0.0f)?yin[tau]*(float)(tau-minLag+1)/running:1.0f;}
+  for(int tau=1;tau<=maxLag;tau++){float sum=0.0f;for(size_t i=0;i<overlap;i++){const float x=(float)samples[i]-(float)mean,y=(float)samples[i+(size_t)tau]-(float)mean,delta=x-y;sum+=delta*delta;}yin[tau]=sum;}
+  float running=0.0f;for(int tau=1;tau<=maxLag;tau++){running+=yin[tau];yin[tau]=(running>0.0f)?yin[tau]*(float)tau/running:1.0f;}
   int best=-1;
   for(int tau=minLag;tau<=maxLag;tau++)if(yin[tau]<0.18f){while(tau<maxLag&&yin[tau+1]<yin[tau])tau++;best=tau;break;}
   if(best<0){float lowest=1.0f;for(int tau=minLag;tau<=maxLag;tau++)if(yin[tau]<lowest){lowest=yin[tau];best=tau;}if(best<0||lowest>0.30f)return 0.0f;}
