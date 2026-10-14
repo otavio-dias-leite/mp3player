@@ -410,33 +410,24 @@ void runFirmwareUpdate(){
 }
 
 void splash(){
-  auto& d=M5Cardputer.Display;
+  auto &d=M5Cardputer.Display;
   d.setBrightness(190);
-  // Draw the boot screen once: no repeated full-screen clears or visible flicker.
   d.fillScreen(BG);
   d.setTextSize(3);
-  d.setTextColor(WHITE,BG);
-  d.setCursor(38,48);
-  d.print("JOHNNY");
-  d.setTextSize(1);
-  d.setTextColor(UI_LAVENDER,BG);
-  d.setCursor(48,83);
-  d.print("wake fuck up samurai");
-  const uint32_t started=millis();
-  uint32_t frame=0;
-  while((uint32_t)(millis()-started)<2600UL){
-    if((frame%5U)==0U){
-      const int y=random(45,91);
-      const int x=random(24,190);
-      const int width=random(12,52);
-      d.fillRect(x,y,width,1,UI_PINK);
-      d.drawFastHLine(x+random(2,8),y+1,max(4,width-8),UI_PURPLE);
-    }
-    frame++;
-    delay(90);
+  d.setTextColor(UI_PURPLE,BG);
+  d.setCursor(38,48); d.print("JOHNNY");
+  delay(350);
+  for(int i=0;i<10;i++) {
+    int y=random(43,87), x=random(12,45), w=random(70,205);
+    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_PURPLE);
+    d.setTextColor(i%2?UI_PINK:UI_PURPLE,BG);
+    d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
+    delay(32);
   }
-  d.setTextColor(WHITE,BG);
-  d.setTextSize(1);
+  d.fillScreen(BG);
+  d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
+  d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
+  delay(1100);
 }
 
 void pianoScreen() {
