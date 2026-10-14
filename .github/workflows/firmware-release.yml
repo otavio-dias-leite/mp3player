@@ -3,6 +3,8 @@ name: Build and publish JOHNNY firmware
 on:
   push:
     branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -19,8 +21,6 @@ jobs:
         run: pip install platformio
       - name: Build Cardputer-Adv firmware
         run: pio run -e cardputer-adv
-      - name: Build minimal recovery firmware
-        run: pio run -e cardputer-recovery
       - name: Assemble complete flash image and install guide
         shell: bash
         run: |
@@ -37,15 +37,6 @@ jobs:
           test -n "$BOOT_APP0"
           test -n "$ESPTOOL"
           cp "$BUILD/firmware.bin" "$OUT/firmware.bin"
-          RECOVERY=".pio/build/cardputer-recovery"
-          test -s "$RECOVERY/firmware.bin"
-          python "$ESPTOOL" --chip esp32s3 merge_bin \\
-            -o "$OUT/johnny-recovery-cardputer-adv-full.bin" \\
-            --flash_mode dio --flash_freq 80m --flash_size 8MB \\
-            0x0 "$RECOVERY/bootloader.bin" \\
-            0x8000 "$RECOVERY/partitions.bin" \\
-            0xe000 "$OUT/boot_app0.bin" \\
-            0x10000 "$RECOVERY/firmware.bin"
           cp "$BUILD/bootloader.bin" "$OUT/bootloader.bin"
           cp "$BUILD/partitions.bin" "$OUT/partitions.bin"
           cp "$BOOT_APP0" "$OUT/boot_app0.bin"
@@ -59,8 +50,8 @@ jobs:
           cat > "$OUT/LEIA-PRIMEIRO.txt" <<EOF
           JOHNNY v${VERSION} — M5STACK CARDPUTER ADV (ESP32-S3)
 
-          O arquivo firmware.bin sozinho é destinado a atualização OTA.
-          Para instalação completa, use johnny-cardputer-adv-full.bin.
+          firmware.bin: atualização OTA.
+          johnny-cardputer-adv-full.bin: instalação completa por USB.
 
           MÉTODO RECOMENDADO:
           1. Abra https://otavio-dias-leite.github.io/johnny/ no Chrome ou Edge.
@@ -76,22 +67,33 @@ jobs:
              esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0x0 johnny-cardputer-adv-full.bin
 
           Se houver erro de permissão na porta serial, adicione seu usuário ao grupo uucp
-          e entre novamente na sessão. Não abra o .bin com um editor ou como programa.
+          e entre novamente na sessão. Não remova o cartão durante operações.
           EOF
-      - name: Read firmware version
-        id: version
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: johnny-cardputer-adv-${{ github.sha }}
+          path: release/*
+          if-no-files-found: error
+      - name: Validate release tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
-        run: echo "value=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+        run: |
+          EXPECTED="v$(tr -d '\r\n' < VERSION)"
+          test "$GITHUB_REF_NAME" = "$EXPECTED"
       - name: Publish versioned firmware release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.value }}
+          tag_name: ${{ github.ref_name }}
           target_commitish: main
-          name: JOHNNY v${{ steps.version.outputs.value }}
+          name: JOHNNY ${{ github.ref_name }}
           files: |
             release/firmware.bin
             release/johnny-cardputer-adv-full.bin
-            release/johnny-recovery-cardputer-adv-full.bin
             release/LEIA-PRIMEIRO.txt
+            release/bootloader.bin
+            release/partitions.bin
+            release/boot_app0.bin
           generate_release_notes: true
           fail_on_unmatched_files: true
