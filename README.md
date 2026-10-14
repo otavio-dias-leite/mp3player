@@ -61,14 +61,17 @@ O player não é um cliente Spotify e não transmite o catálogo do Spotify. É 
 - **DEVICE STATUS:** cartão SD, Wi-Fi, BLE e bateria.
 - **CONWAY LIFE:** simulação interativa com pausa, passo, edição de células e save em `/JOHNNY/life.sav`.
 
-## HACK — ferramentas sem fio e FX
+## HACK — diagnósticos sem hardware adicional
 
-- **WI-FI RECON:** lista redes encontradas e força do sinal. É uma ferramenta de observação; não tenta autenticar nem interromper redes.
-- **BLE SCANNER:** descoberta passiva de dispositivos Bluetooth LE próximos, com nome, endereço abreviado e RSSI.
-- **SPAM FX (OFFLINE):** demos locais. Rickroll procura no microSD um arquivo de áudio cujo nome contenha `rick` ou `never gonna give you up`; Never Fade Away procura `never fade away`. O firmware não inclui faixas protegidas por direitos autorais. A opção visual é um efeito local e não transmite pacotes.
-- **DEVICE / RF INFO:** informações e limites das ferramentas.
+- **WI-FI RECON:** varredura passiva de redes próximas, com SSID, intensidade do sinal, canal e indicação de rede aberta/segura. Não tenta autenticar, desautenticar ou interromper redes.
+- **BLE SCANNER:** descoberta passiva de anúncios Bluetooth LE, com nome, sufixo do endereço e RSSI.
+- **TCP CONNECT TEST:** testa uma única combinação de IP e porta digitada pelo operador (por exemplo, `192.168.1.1:80`). Não faz varredura de faixas ou listas de portas.
+- **DNS LOOKUP:** resolve um hostname digitado e mostra o endereço retornado.
+- **HTTP STATUS CHECK:** envia uma requisição HEAD para uma URL `http://` digitada e mostra o código HTTP.
+- **SPAM FX / OFFLINE:** procura no microSD os arquivos de áudio para Rickroll ou Never Fade Away; a terceira opção é apenas um efeito visual local. Nenhum áudio protegido é incluído no firmware.
+- **NETWORK / RADIO INFO:** IP, MAC, canal, RSSI e gateway da conexão atual.
 
-O firmware não executa inundação de Wi-Fi/Bluetooth e não cria ponto de acesso enganoso com o nome “Free Wi-Fi”. As opções HACK são leitura passiva e demonstrações locais.
+O HACK foi limitado a observação e diagnóstico. Funções Bruce/Marauder que exigem CC1101, NRF24, PN532, antena adicional ou outro módulo não fazem parte desta compilação. Também não incluí desautenticação, flooding de beacon, captive portal/evil portal, spoofing de pontos de acesso ou injeção de pacotes.
 
 ## Armazenamento e memória
 
@@ -76,12 +79,24 @@ O cartão microSD é armazenamento persistente, não RAM. O áudio usa um buffer
 
 O hardware de destino não tem PSRAM. Recursos de áudio, imagem, Wi-Fi e BLE precisam compartilhar a RAM interna. Ao iniciar as ferramentas Wi-Fi/BLE, o JOHNNY interrompe a reprodução ativa para reduzir a competição por recursos.
 
-## Teclas gerais
+## Visualização web e estado do dispositivo
 
-- Setas e teclas equivalentes: navegação conforme a tela.
+Depois de conectar o Cardputer à rede Wi-Fi em **SYSTEM → WI-FI**, abra no navegador de outro dispositivo conectado à mesma rede o endereço IP mostrado em **SYSTEM → DEVICE STATUS** (por exemplo, `http://192.168.1.50`). O hostname mDNS `http://johnny.local` também é anunciado quando a rede o permite.
+
+A página local mostra uma captura da tela física em intervalos aproximados de 1,2 segundo e atualiza o estado do dispositivo. A rota `/api/status` entrega JSON com IP, MAC, SSID, RSSI, gateway, subnet, DNS, versão, bateria, estado do microSD, heap livre, PSRAM e uptime. A visualização é somente leitura: teclado e controles continuam no Cardputer. Não é vídeo contínuo nem streaming remoto de baixa latência. O servidor deve ser usado apenas em uma rede local confiável.
+
+## Interface e teclas
+
+A tela inicial usa um cartão grande com ícone. Navegue horizontalmente na ordem **HACK → GAMES → MUSIC → SYSTEM**; os indicadores mostram a categoria atual. A abertura mantém menus próprios para cada área.
+
+- `,` / `/`: categoria anterior/próxima na tela inicial.
+- `;` / `.`: navegar pelos itens dos menus e listas.
 - `ENTER`: selecionar / confirmar.
 - `ESC`, crase (`\``) ou til (`~`): voltar.
 - `TAB`: ativar/desativar o protetor de tela; não fecha o aplicativo.
+- **SYNTH:** QWERTYU toca as notas; `-` / `+` ajusta volume; `[` / `]` ajusta oitava; esquerda/direita troca oitava; cima/baixo troca timbre.
+
+Na guitarra, o sintetizador usa buffers alternados e canal de áudio independente para evitar que cada nota interrompa a reprodução do alto-falante principal. A compilação não substitui a validação da resposta sonora no aparelho físico.
 
 ## Atualização e compilação
 
