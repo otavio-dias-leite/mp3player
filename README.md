@@ -21,11 +21,11 @@ A tela inicial organiza os aplicativos em três camadas:
 
 - **MUSIC:** SYNTH, TUNER, MUSIC PLAYER, WEB RADIO, EQUALIZER e MIC RECORDER.
 - **SYSTEM:** FILES, USB TRANSFER, WI-FI, BLUETOOTH, UPDATE FIRMWARE e INSTALL APPS.
-- **GAMES:** CONWAY LIFE, GB/GBC, GBA e DOOM ENGINE.
+- **GAMES:** CONWAY LIFE e PRBOOM.
 
 Os módulos existentes (sintetizador, afinador, player, rádio, equalizador, arquivos, USB, Wi-Fi e Conway Life) são acessados pelos novos menus. O save do Conway Life é gravado em `/JOHNNY/life.sav` no microSD ao sair do jogo. O gravador de microfone salva WAV PCM mono de 16 kHz em `/RECORDINGS/MICxxxx.WAV`.
 
-**Núcleos de jogos:** as entradas GB/GBC, GBA e DOOM ENGINE estão preparadas na interface, mas os emuladores ainda não foram integrados. Elas exibem aviso de núcleo ausente e não executam ROMs/WADs. Bluetooth e catálogo/instalador de aplicativos também permanecem não implementados.
+**PRBOOM:** a entrada do menu está preparada, mas o motor ainda não foi integrado ao firmware Johnny e não executa WADs nesta versão. O port `868meshbot/prboom-tdeck` é uma referência para ESP32-S3, mas foi desenvolvido para T-Deck Plus (tela 320×240, teclado e drivers próprios, PSRAM OPI); não pode ser copiado diretamente para o Cardputer ADV. É necessário adaptar a camada de vídeo para 240×135, os controles M5Cardputer, áudio e memória antes de habilitar a execução. Não incluí WAD proprietário. Bluetooth e catálogo/instalador de aplicativos também permanecem não implementados.
 
 ## Atualização OTA
 
