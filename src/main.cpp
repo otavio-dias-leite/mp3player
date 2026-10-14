@@ -288,10 +288,9 @@ void header(const char* title) {
   d.setTextSize(2); d.setTextColor(WHITE,BG); d.setCursor(8,25); d.print(title);
   d.setTextSize(1);
 }
-void footer(const char* s="ESC  BACK") {
-  auto &d=M5Cardputer.Display;
-  d.drawFastHLine(7,117,226,0x5140);
-  d.setTextColor(UI_MUTED,BG); d.setCursor(8,124); d.print(s);
+void footer(const char* s="") {
+  (void)s;
+  M5Cardputer.Display.drawFastHLine(7,117,226,0x5140);
 }
 void drawHome() {
   header("JOHNNY");
