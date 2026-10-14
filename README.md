@@ -32,7 +32,7 @@ O contêiner .ogg pode carregar codecs diferentes. Ogg/Opus é suportado; Ogg/Vo
 - MP3 e AAC com tags ID3v2.3/v2.4: título, artista, álbum e imagem APIC.
 - FLAC: comentários Vorbis (TITLE, ARTIST, ALBUM) e bloco de imagem PICTURE.
 - Para qualquer formato compatível, o player procura capas laterais no diretório da música: `cover.jpg`, `Cover.jpg`, `folder.jpg`, `nome-da-faixa.jpg` ou `nome-da-faixa.png`. Também procura `/COVERS/nome-da-faixa.jpg`.
-- Capas embutidas ou laterais são limitadas a 40 KiB de dados para manter o uso de RAM previsível. Uma imagem maior ou inválida é ignorada e o player mostra a arte padrão.
+- Capas embutidas ou laterais são limitadas a 16 KiB de dados para manter o uso de RAM previsível. Uma imagem maior ou inválida é ignorada e o player mostra a arte padrão.
 
 ### Controles do player
 
@@ -75,7 +75,7 @@ O HACK foi limitado a observação e diagnóstico. Funções Bruce/Marauder que 
 
 ## Armazenamento e memória
 
-O cartão microSD é armazenamento persistente, não RAM. O áudio usa um buffer de entrada pré-alocado de 8 KiB, buffers de saída limitados e uma área limitada para capas. A reprodução não depende de carregar arquivos inteiros na memória. Uma leitura lenta ou um cartão defeituoso ainda pode causar interrupção; use cartão confiável e evite removê-lo durante a reprodução ou gravação.
+O cartão microSD é armazenamento persistente, não RAM. O áudio usa um buffer de entrada pré-alocado de 4 KiB, workspace estático para o decoder MP3, buffers de saída limitados e uma área de até 16 KiB para capas. Os buffers do sintetizador foram reduzidos para limitar o uso de RAM. A reprodução não depende de carregar arquivos inteiros na memória. Uma leitura lenta ou um cartão defeituoso ainda pode causar interrupção; use cartão confiável e evite removê-lo durante a reprodução ou gravação.
 
 O hardware de destino não tem PSRAM. Recursos de áudio, imagem, Wi-Fi e BLE precisam compartilhar a RAM interna. Ao iniciar as ferramentas Wi-Fi/BLE, o JOHNNY interrompe a reprodução ativa para reduzir a competição por recursos.
 
@@ -100,7 +100,7 @@ Na guitarra, o sintetizador usa buffers alternados e canal de áudio independent
 
 ## Atualização e compilação
 
-A opção SYSTEM → UPDATE FIRMWARE baixa `firmware.bin` da última GitHub Release. É necessária uma conexão Wi-Fi funcional. A atualização usa HTTPS e o mecanismo OTA do ESP32.
+A opção SYSTEM → UPDATE FIRMWARE baixa `firmware.bin` da GitHub Release marcada como latest. O workflow publica automaticamente uma Release OTA após um push em `main` que compile com sucesso; builds de pull request geram apenas artefatos de validação. É necessária uma conexão Wi-Fi funcional. A atualização usa HTTPS e o mecanismo OTA do ESP32.
 
 Para compilar e gravar com PlatformIO:
 
@@ -118,7 +118,7 @@ O workflow de firmware compila o ambiente `cardputer-adv` e monta também uma im
 - Flash: 8 MB; PSRAM: não disponível.
 - O áudio usa o alto-falante/codec integrado gerenciado pelo M5Cardputer. Não inicialize outro driver I2S em paralelo.
 - O afinador depende do microfone integrado e de ambiente relativamente silencioso.
-- A compilação bem-sucedida verifica a construção do binário, mas não substitui teste físico de boot, som, microfone, SD, Wi-Fi e BLE no aparelho.
+- A compilação bem-sucedida verifica a construção do binário, mas não substitui teste físico de boot, som, microfone, SD, Wi-Fi e BLE no aparelho. O splash inicial desenha a tela uma única vez e aplica pequenos glitches locais, evitando limpar o display inteiro repetidamente.
 
 ## Licença e dependências
 

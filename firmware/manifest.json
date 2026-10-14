@@ -1,14 +1,14 @@
 {
   "name": "JOHNNY — Cardputer-Adv",
-  "version": "0.0.0-alpha.8",
+  "version": "0.0.0-alpha.13",
   "new_install_prompt_erase": true,
   "builds": [{
     "chipFamily": "ESP32-S3",
     "parts": [
-      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/bootloader.bin?v=0.0.0-alpha.8", "offset": 0},
-      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/partitions.bin?v=0.0.0-alpha.8", "offset": 32768},
-      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/boot_app0.bin?v=0.0.0-alpha.8", "offset": 57344},
-      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/firmware.bin?v=0.0.0-alpha.8", "offset": 65536}
+      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/bootloader.bin?v=0.0.0-alpha.13", "offset": 0},
+      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/partitions.bin?v=0.0.0-alpha.13", "offset": 32768},
+      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/boot_app0.bin?v=0.0.0-alpha.13", "offset": 57344},
+      {"path": "https://otavio-dias-leite.github.io/johnny/firmware/firmware.bin?v=0.0.0-alpha.13", "offset": 65536}
     ]
   }]
 }
