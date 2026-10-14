@@ -335,8 +335,9 @@ void header(const char* title) {
   d.setTextSize(1);
 }
 void footer(const char* s="") {
-  (void)s;
-  M5Cardputer.Display.drawFastHLine(7,117,226,0x5140);
+  auto& d=M5Cardputer.Display;
+  d.drawFastHLine(7,117,226,0x5140);
+  d.setTextSize(1);d.setTextColor(UI_MUTED,BG);d.setCursor(8,123);d.print(s);
 }
 void drawAppIcon(uint8_t app,int x,int y,uint16_t color){
   auto& d=M5Cardputer.Display;
@@ -365,6 +366,13 @@ void drawHome(){
   d.drawFastHLine(7,119,226,0x5140);d.setTextColor(UI_MUTED,BG);
   d.setCursor(10,126);d.print("ARROWS SELECT   ENTER OPEN   TAB SLEEP");
 }
+void drawModuleIcon(uint8_t type,int x,int y,uint16_t color){
+  auto& d=M5Cardputer.Display;
+  if(type==0){d.drawRoundRect(x+2,y+4,7,6,1,color);d.drawCircle(x+5,y+4,2,color);}
+  else if(type==1){d.drawRoundRect(x,y+3,11,6,3,color);d.drawFastHLine(x+2,y+6,4,color);d.drawFastVLine(x+4,y+4,4,color);d.drawCircle(x+8,y+5,1,color);}
+  else if(type==2){d.drawFastVLine(x+7,y,8,color);d.drawFastHLine(x+7,y,4,color);d.fillCircle(x+4,y+8,2,color);}
+  else {d.drawRect(x+1,y+1,9,8,color);d.drawFastHLine(x+3,y+4,5,color);d.drawFastHLine(x+3,y+6,5,color);}
+}
 void drawCategoryMenu(){
   bool music=screen==MUSICMENU,system=screen==SYSTEMMENU,games=screen==GAMESMENU;
   const char* title=music?"MUSIC":(system?"SYSTEM":(games?"GAMES":"HACK"));
@@ -380,10 +388,11 @@ void drawCategoryMenu(){
     int i=categoryScroll+row;if(i>=count)break;
     int y=51+row*13;bool active=i==selected;uint16_t bg=active?PANEL:BG;
     d.fillRoundRect(7,y,225,11,3,bg);if(active)d.drawRoundRect(7,y,225,11,3,UI_PURPLE);
-    d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(13,y+2);d.printf("%c  %02d  %s",active?'>':' ',i+1,items[i]);
+    drawModuleIcon(music?2:(system?3:(games?1:0)),10,y+1,active?UI_PINK:UI_MUTED);
+    d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(25,y+2);d.printf("%c %02d  %s",active?'>':' ',i+1,items[i]);
     d.setTextColor(active?UI_LAVENDER:UI_MUTED,bg);d.setCursor(216,y+2);d.print(active?">":" ");
   }
-  d.setTextColor(UI_MUTED,BG);d.setCursor(9,119);d.print("UP/DOWN SELECT   ENTER LAUNCH");footer("");
+  footer("; / . SELECT   ENTER LAUNCH   ESC BACK");
 }
 void drawDeviceStatus(){
   header("DEVICE STATUS");auto& d=M5Cardputer.Display;bool connected=WiFi.status()==WL_CONNECTED;
@@ -1010,7 +1019,7 @@ void scanDirectory(bool musicMode=false) {
     shown++;
   }
   if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
-  footer(musicMode?"UP/DN SELECT  ENTER PLAY  ESC BACK":"UP/DN SELECT  ENTER OPEN  ESC BACK");
+  footer(musicMode?"; / . SELECT  ENTER PLAY  ESC BACK":"; / . SELECT  ENTER OPEN  ESC BACK");
 }
 
 void drawMusicInfo(const String &name);
@@ -1358,7 +1367,7 @@ void drawMusicInfo(const String &name){
   d.drawFastHLine(78,96,151,0x5140);uint8_t pct=audioProgressPercent();d.drawFastHLine(78,96,(int)pct*151/100,UI_PINK);d.fillCircle(78+(int)pct*151/100,96,3,UI_LAVENDER);
   d.setCursor(78,103);d.printf("%3u%%",pct);d.setCursor(125,103);d.printf("%s REP:%s",audioShuffle?"SHUF":"ORDER",audioRepeatMode==0?"OFF":(audioRepeatMode==1?"ALL":"ONE"));
   d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);d.setCursor(8,115);d.printf("%s VOL %02d",audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.c_str(),audioVolume);
-  footer("< > TRACK  UP/DN SEEK  ENTER PAUSE");
+  footer(", / TRACK  ; . SEEK  - / = VOL  ENTER PAUSE  P STOP");
 }
 void drawRadioScreen() {
   header("WEB RADIO");
