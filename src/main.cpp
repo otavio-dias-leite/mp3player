@@ -168,8 +168,8 @@ Screen screen = HOME;
 SPIClass sdBus(FSPI);
 bool sdReady = false;
 String currentPath = "/";
-String entries[48];
-bool entryIsDir[48];
+String entries[96];
+bool entryIsDir[96];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
 int pianoOctave=0,pianoEffect=4,pianoVolume=85;
 bool musicNowPlaying=false;
@@ -550,8 +550,11 @@ void drawNetworkScreen() {
 
 uint8_t audioProgressPercent();
 void drawBleScreen();
+void stopAudio();
+void stopBleScan();
 void onBleScanComplete(BLEScanResults results){(void)results;bleScanDone=true;}
 void startBleScan(){
+  stopAudio();
   bleCount=0;bleScanDone=false;bleScanning=false;hackMessage="STARTING PASSIVE SCAN";
   if(!bleInitialized){BLEDevice::init("");bleInitialized=true;}
   if(!bleScanner)bleScanner=BLEDevice::getScan();
@@ -574,6 +577,11 @@ void serviceBleScan(){
   }
   hackMessage=bleCount?String(bleCount)+" DEVICES FOUND":"NO BLE DEVICES FOUND";
   bleScanner->clearResults();if(screen==BLESCAN&&!screenSaverActive)drawBleScreen();
+}
+void stopBleScan(){
+  if(bleScanner){bleScanner->stop();bleScanner->clearResults();}
+  bleScanner=nullptr;bleScanning=false;bleScanDone=false;
+  if(bleInitialized){BLEDevice::deinit(true);bleInitialized=false;}
 }
 void drawBleScreen(){
   header("BLE SCANNER");auto& d=M5Cardputer.Display;
@@ -606,12 +614,14 @@ void drawHackFxScreen(){
 }
 
 void startNetworkSetup() {
+  stopAudio();wifiScanOnly=false;
   WiFi.mode(WIFI_STA); WiFi.disconnect(false,false);
   wifiNetworkCount=0; wifiSelected=0; wifiScroll=0; wifiScanPending=true;
   wifiConfigStage=1; WiFi.scanDelete(); WiFi.scanNetworks(true,false);
   drawNetworkScreen();
 }
 void startWifiSurvey() {
+  stopAudio();
   WiFi.mode(WIFI_STA);wifiNetworkCount=0;wifiSelected=0;wifiScroll=0;wifiScanPending=true;
   wifiConfigStage=1;wifiScanOnly=true;WiFi.scanDelete();WiFi.scanNetworks(true,false);drawNetworkScreen();
 }
@@ -791,7 +801,7 @@ void scanDirectory(bool musicMode=false) {
   File dir=SD.open(currentPath);
   if(!dir || !dir.isDirectory()) { if(dir)dir.close(); return; }
   File f=dir.openNextFile();
-  while(f && entryCount<48) {
+  while(f && entryCount<96) {
     String name=String(f.name());
     int slash=name.lastIndexOf('/');
     if(slash>=0) name=name.substring(slash+1);
@@ -1624,7 +1634,7 @@ void loop() {
     if(screen==MICREC){stopMicRecording();screen=HOME;drawHome();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=4;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU){screen=HOME;selected=0;drawHome();}
-    else if(screen==BLESCAN){if(bleScanning&&bleScanner)bleScanner->stop();bleScanning=false;bleScanDone=false;screen=HACKMENU;selected=1;drawCategoryMenu();}
+    else if(screen==BLESCAN){stopBleScan();screen=HACKMENU;selected=1;drawCategoryMenu();}
     else if(screen==HACKINFO){screen=HACKMENU;selected=3;drawCategoryMenu();}
     else if(screen==HACKFX){if(hackFxPlaying)stopAudio();hackFxPlaying=false;hackVisualFx=false;screen=HACKMENU;selected=2;drawCategoryMenu();}
     else if(screen==NETWORK&&wifiScanOnly){wifiScanOnly=false;wifiConfigStage=0;screen=HACKMENU;selected=0;drawCategoryMenu();}
