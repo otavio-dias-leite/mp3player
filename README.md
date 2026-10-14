@@ -21,11 +21,11 @@ A tela inicial organiza os aplicativos em três camadas:
 
 - **MUSIC:** SYNTH, TUNER, MUSIC PLAYER, WEB RADIO, EQUALIZER e MIC RECORDER.
 - **SYSTEM:** FILES, USB TRANSFER, WI-FI, BLUETOOTH, UPDATE FIRMWARE e INSTALL APPS.
-- **GAMES:** CONWAY LIFE e DOOM 1993.
+- **GAMES:** CONWAY LIFE, GB/GBC, GBA e DOOM ENGINE.
 
 Os módulos existentes (sintetizador, afinador, player, rádio, equalizador, arquivos, USB, Wi-Fi e Conway Life) são acessados pelos novos menus. O save do Conway Life é gravado em `/JOHNNY/life.sav` no microSD ao sair do jogo. O gravador de microfone salva WAV PCM mono de 16 kHz em `/RECORDINGS/MICxxxx.WAV`.
 
-**Itens ainda não implementados:** pareamento/gerenciamento Bluetooth, catálogo e instalador de aplicativos e port nativo de DOOM 1993. Eles aparecem no menu como entradas identificadas, mas ainda não executam essas funções.
+**Núcleos de jogos:** as entradas GB/GBC, GBA e DOOM ENGINE estão preparadas na interface, mas os emuladores ainda não foram integrados. Elas exibem aviso de núcleo ausente e não executam ROMs/WADs. Bluetooth e catálogo/instalador de aplicativos também permanecem não implementados.
 
 ## Atualização OTA
 
@@ -64,7 +64,7 @@ O rádio web usa HTTP/ICY MP3. URLs personalizadas devem começar por http://; H
 - **MUSIC:** na biblioteca, cima/baixo selecionam; no player, esquerda/direita ou cima/baixo trocam faixa; Enter/espaço pausa; P para; -/+ ajustam volume.
 - **RADIO:** cima/baixo seleciona estação; Enter conecta; espaço pausa; P para; opção Custom permite informar uma URL HTTP; R inicia/finaliza gravação WAV no cartão SD; o equalizador é acessado exclusivamente pelo menu MUSIC → EQUALIZER.
 - **EQUALIZER:** acessível exclusivamente pelo menu MUSIC → EQUALIZER. Cima/baixo escolhe a banda; esquerda/direita altera o ganho em passos de 0,5 dB; P percorre os perfis; 0 seleciona Flat.
-- **CONWAY LIFE:** no launcher, selecione LIFE. Espaço executa/pausa; N avança uma geração; R gera uma população aleatória; C limpa; Enter alterna a célula sob o cursor; setas movem; +/- ajustam a velocidade.
+- **CONWAY LIFE:** no menu GAMES, selecione LIFE. Espaço executa/pausa; N avança uma geração; R gera uma população aleatória; C limpa; Enter alterna a célula sob o cursor; setas movem; +/- ajustam a velocidade.
 - **TUNER:** esquerda/direita alterna guitarra, violão e ukulele. Toque uma corda e mantenha a nota por um instante. A leitura fica visível por até 5 segundos após o sinal desaparecer. “GRAVE DEMAIS / APERTE” indica corda frouxa; “AGUDA DEMAIS / AFROUXE” indica corda apertada. “AFINADA” aparece dentro da tolerância de ±5 cents.
 
 ## Compilar e instalar
@@ -107,4 +107,4 @@ A versão pública é controlada exclusivamente pelo arquivo `VERSION` (SemVer).
 
 O autômato de Conway permanece no firmware como aplicativo LIFE. DOOM 1993 ainda não está integrado ao binário do JOHNNY.
 
-**DOOM nativo no Cardputer-Adv ainda não está integrado.** O port existente para Cardputer que encontrei usa uma árvore ESP-IDF própria, driver de teclado matricial antigo e estratégias de paginação/mapeamento de memória específicas. O ADV usa o teclado I²C gerenciado pela biblioteca M5Cardputer e este firmware é Arduino/PlatformIO. Copiar esse port diretamente não é compatível nem seguro sem uma adaptação e validação próprias. O processador do ADV também trabalha sem PSRAM, o que exige manter o consumo de RAM sob controle.
+**Os núcleos de GB/GBC, GBA e DOOM ainda não estão integrados.** O port existente para Cardputer que encontrei usa uma árvore ESP-IDF própria, driver de teclado matricial antigo e estratégias de paginação/mapeamento de memória específicas. O ADV usa o teclado I²C gerenciado pela biblioteca M5Cardputer e este firmware é Arduino/PlatformIO. Copiar esse port diretamente não é compatível nem seguro sem uma adaptação e validação próprias. O processador do ADV também trabalha sem PSRAM, o que exige manter o consumo de RAM sob controle.
