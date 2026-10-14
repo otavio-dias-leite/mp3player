@@ -208,6 +208,7 @@ int wifiNetworkAuth[20];
 int wifiNetworkCount=0, wifiSelected=0, wifiScroll=0;
 bool wifiScanPending=false;
 bool wifiScanOnly=false;
+bool wifiSurveyDetails=false;
 int wifiNetworkChannel[20]={};
 String wifiNetworkBssid[20];
 WebServer johnnyWeb(80);
@@ -570,6 +571,15 @@ void drawNetworkScreen() {
   header("WI-FI");
   auto &d=M5Cardputer.Display;
   if(wifiConfigStage==1) {
+    if(wifiScanOnly&&wifiSurveyDetails&&wifiSelected>=0&&wifiSelected<wifiNetworkCount){
+      d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,43);d.print("NETWORK DETAILS");
+      String name=wifiNetworks[wifiSelected];if(name.length()>26)name=name.substring(0,23)+"...";
+      d.setTextColor(WHITE,BG);d.setCursor(8,59);d.printf("SSID: %s",name.c_str());
+      d.setCursor(8,73);d.printf("BSSID: %.17s",wifiNetworkBssid[wifiSelected].c_str());
+      d.setCursor(8,87);d.printf("RSSI: %d dBm  CHANNEL: %d",wifiNetworkRSSI[wifiSelected],wifiNetworkChannel[wifiSelected]);
+      d.setCursor(8,101);d.printf("SECURITY: %s",wifiNetworkAuth[wifiSelected]==WIFI_AUTH_OPEN?"OPEN":"PROTECTED");
+      footer("ESC BACK TO SCAN  R RESCAN");return;
+    }
     d.setTextColor(UI_LAVENDER,BG); d.setCursor(8,43);
     d.print(wifiScanPending?"SCANNING NETWORKS...":(wifiScanOnly?"WI-FI SURVEY":"SELECT A NETWORK"));
     if(!wifiScanPending && wifiNetworkCount==0) {
@@ -798,14 +808,14 @@ void serviceWebServer(){
 }
 
 void startNetworkSetup() {
-  stopAudio();wifiScanOnly=false;
+  stopAudio();wifiScanOnly=false;wifiSurveyDetails=false;
   WiFi.mode(WIFI_STA); WiFi.disconnect(false,false);
   wifiNetworkCount=0; wifiSelected=0; wifiScroll=0; wifiScanPending=true;
   wifiConfigStage=1; WiFi.scanDelete(); WiFi.scanNetworks(true,false);
   drawNetworkScreen();
 }
 void startWifiSurvey() {
-  stopAudio();
+  stopAudio();wifiSurveyDetails=false;
   WiFi.mode(WIFI_STA);wifiNetworkCount=0;wifiSelected=0;wifiScroll=0;wifiScanPending=true;
   wifiConfigStage=1;wifiScanOnly=true;WiFi.scanDelete();WiFi.scanNetworks(true,false);drawNetworkScreen();
 }
@@ -1826,7 +1836,7 @@ void loop() {
     else if(screen==HACKINFO){screen=HACKMENU;selected=6;drawCategoryMenu();}
     else if(screen==HACKINPUT){screen=HACKMENU;selected=hackInputMode+2;drawCategoryMenu();}
     else if(screen==HACKFX){if(hackFxPlaying)stopAudio();hackFxPlaying=false;hackVisualFx=false;screen=HACKMENU;selected=5;drawCategoryMenu();}
-    else if(screen==NETWORK&&wifiScanOnly){wifiScanOnly=false;wifiConfigStage=0;screen=HACKMENU;selected=0;drawCategoryMenu();}
+    else if(screen==NETWORK&&wifiScanOnly){if(wifiSurveyDetails){wifiSurveyDetails=false;drawNetworkScreen();}else{wifiScanOnly=false;wifiConfigStage=0;screen=HACKMENU;selected=0;drawCategoryMenu();}}
     else if(screen==EQSCREEN){
       screen=eqReturnScreen;
       if(screen==HOME)drawHome();
@@ -1979,7 +1989,7 @@ if(usbActive) endUsbMode();
       if(c=='r'||c=='R') {if(wifiScanOnly)startWifiSurvey();else startNetworkSetup();}
       else if(c==';') {if(wifiSelected>0)wifiSelected--;if(wifiSelected<wifiScroll)wifiScroll=wifiSelected;drawNetworkScreen();}
       else if(c=='.') {if(wifiSelected<wifiNetworkCount-1)wifiSelected++;if(wifiSelected>=wifiScroll+5)wifiScroll=wifiSelected-4;drawNetworkScreen();}
-      else if(k.enter && !wifiScanPending) {if(wifiScanOnly){hackMessage=wifiNetworks[wifiSelected]+" "+String(wifiNetworkRSSI[wifiSelected])+" dBm";drawNetworkScreen();}else chooseNetwork(wifiSelected);}
+      else if(k.enter && !wifiScanPending) {if(wifiScanOnly){wifiSurveyDetails=true;drawNetworkScreen();}else chooseNetwork(wifiSelected);}
     } else if(wifiConfigStage==2) {
       if(k.enter) saveNetworkSetup();
       else if(c && isprint((unsigned char)c) && wifiEntry.length()<63) {wifiEntry+=c;drawNetworkScreen();}
