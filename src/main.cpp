@@ -175,6 +175,7 @@ SPIClass sdBus(FSPI);
 bool sdReady = false;
 String currentPath = "/";
 String entries[96];
+String entryPaths[96];
 bool entryIsDir[96];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
 int pianoOctave=0,pianoEffect=0,pianoVolume=85;
@@ -924,28 +925,56 @@ bool isPlayableAudio(String name) {
   return name.endsWith(".mp3") || name.endsWith(".wav") || name.endsWith(".flac") ||
          name.endsWith(".aac") || name.endsWith(".ogg") || name.endsWith(".opus") || name.endsWith(".oga");
 }
-void scanDirectory(bool musicMode=false) {
-  entryCount=0; selected=0; scroll=0;
-  if(!sdReady)return;
-  File dir=SD.open(currentPath);
-  if(!dir || !dir.isDirectory()) { if(dir)dir.close(); return; }
+void scanMusicRecursive(const String& folder,uint8_t depth) {
+  if(depth>5 || entryCount>=96) return;
+  File dir=SD.open(folder,FILE_READ);
+  if(!dir || !dir.isDirectory()){if(dir)dir.close();return;}
   File f=dir.openNextFile();
   while(f && entryCount<96) {
-    String name=String(f.name());
-    int slash=name.lastIndexOf('/');
-    if(slash>=0) name=name.substring(slash+1);
-    if(name.length() && name!="System Volume Information" &&
-       (!musicMode || f.isDirectory() || isPlayableAudio(name))) {
-      entries[entryCount]=name;
-      entryIsDir[entryCount]=f.isDirectory();
-      entryCount++;
+    String raw=String(f.name());
+    bool isDir=f.isDirectory();
+    String name=raw;int slash=name.lastIndexOf('/');if(slash>=0)name=name.substring(slash+1);
+    String full=folder=="/"?(String("/") + name):(folder + "/" + name);
+    f.close();
+    if(name.length() && name[0]!='.' && name!="System Volume Information" && name!="LOST.DIR") {
+      if(isDir) scanMusicRecursive(full,depth+1);
+      else if(isPlayableAudio(name)) {
+        entries[entryCount]=name;entryPaths[entryCount]=full;entryIsDir[entryCount]=false;entryCount++;
+      }
     }
-    f.close(); f=dir.openNextFile();
+    f=dir.openNextFile();
   }
   dir.close();
-  for(int i=0;i<entryCount-1;i++) for(int j=i+1;j<entryCount;j++)    if((!entryIsDir[i] && entryIsDir[j]) || (entryIsDir[i]==entryIsDir[j] && entries[j].compareTo(entries[i])<0)) {
-      String t=entries[i]; entries[i]=entries[j]; entries[j]=t;
-      bool b=entryIsDir[i]; entryIsDir[i]=entryIsDir[j]; entryIsDir[j]=b;
+}
+void scanDirectory(bool musicMode=false) {
+  entryCount=0;selected=0;scroll=0;
+  if(!sdReady)return;
+  if(musicMode) {
+    scanMusicRecursive("/",0);
+    for(int i=0;i<entryCount-1;i++)for(int j=i+1;j<entryCount;j++)if(entries[j].compareTo(entries[i])<0){
+      String t=entries[i];entries[i]=entries[j];entries[j]=t;
+      t=entryPaths[i];entryPaths[i]=entryPaths[j];entryPaths[j]=t;
+    }
+    return;
+  }
+  File dir=SD.open(currentPath,FILE_READ);
+  if(!dir || !dir.isDirectory()){if(dir)dir.close();return;}
+  File f=dir.openNextFile();
+  while(f && entryCount<96) {
+    String name=String(f.name());int slash=name.lastIndexOf('/');if(slash>=0)name=name.substring(slash+1);
+    if(name.length()&&name!="System Volume Information"){
+      entries[entryCount]=name;
+      entryPaths[entryCount]=currentPath=="/"?(String("/") + name):(currentPath + "/" + name);
+      entryIsDir[entryCount]=f.isDirectory();entryCount++;
+    }
+    f.close();f=dir.openNextFile();
+  }
+  dir.close();
+  for(int i=0;i<entryCount-1;i++)for(int j=i+1;j<entryCount;j++)
+    if((!entryIsDir[i]&&entryIsDir[j])||(entryIsDir[i]==entryIsDir[j]&&entries[j].compareTo(entries[i])<0)){
+      String t=entries[i];entries[i]=entries[j];entries[j]=t;
+      t=entryPaths[i];entryPaths[i]=entryPaths[j];entryPaths[j]=t;
+      bool b=entryIsDir[i];entryIsDir[i]=entryIsDir[j];entryIsDir[j]=b;
     }
 }void drawFiles(bool musicMode=false) {
   header(musicMode?"MUSIC LIBRARY":"SD EXPLORER");
@@ -974,7 +1003,7 @@ void scanDirectory(bool musicMode=false) {
     shown++;
   }
   if(entryCount==0){d.setTextColor(UI_MUTED,BG);d.setCursor(10,68);d.print("EMPTY DIRECTORY");}
-  footer(",./; MOVE  ENTER OPEN  ESC BACK");
+  footer(musicMode?"UP/DN SELECT  ENTER PLAY  ESC BACK":"UP/DN SELECT  ENTER OPEN  ESC BACK");
 }
 
 void drawMusicInfo(const String &name);
@@ -1273,7 +1302,13 @@ void serviceAudio() {
   }
   if(!ended) return;
   stopAudio();audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";if(wasRadio)radioMessage=audioStatusMessage;
-  else if(screen==MUSIC&&musicNowPlaying&&entryCount>0){if(audioRepeatMode==2)playSelectedTrack();else if(audioShuffle)moveMusicTrack(1);else if(selected<entryCount-1)moveMusicTrack(1);else if(audioRepeatMode==1){selected=0;while(selected<entryCount&&entryIsDir[selected])selected++;if(selected<entryCount)playSelectedTrack();}}
+  else if(screen==MUSIC&&musicNowPlaying&&entryCount>0){
+    if(audioRepeatMode==2)playSelectedTrack();
+    else if(audioShuffle)moveMusicTrack(1);
+    else if(selected<entryCount-1)moveMusicTrack(1);
+    else if(audioRepeatMode==1){selected=0;playSelectedTrack();}
+    else {musicNowPlaying=false;audioStatusMessage="PLAYBACK COMPLETE";drawFiles(true);}
+  }
   if(!screenSaverActive){if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);else if(screen==RADIO)drawRadioScreen();}
 }
 void audioTask(void* parameter) {
@@ -1358,18 +1393,15 @@ void drawRadioScreen() {
 }
 void playSelectedTrack() {
   if(selected<0 || selected>=entryCount || entryIsDir[selected]) return;
-  String path=currentPath;
-  if(path!="/") path+="/";
-  path+=entries[selected];
+  String path=entryPaths[selected];
+  if(path.length()==0)path=currentPath=="/"?(String("/") + entries[selected]):(currentPath + "/" + entries[selected]);
   audioStatusMessage="LOADING";
-  const bool ok=startLocalAudio(path);
-  musicNowPlaying=true;
-  drawMusicInfo(entries[selected]);
-  if(!ok) {
-    M5Cardputer.Display.setTextColor(UI_PINK,BG);
-    M5Cardputer.Display.setCursor(8,88);
-    M5Cardputer.Display.print(audioStatusMessage.substring(0,28));
+  if(!startLocalAudio(path)){
+    musicNowPlaying=false;drawFiles(true);
+    M5Cardputer.Display.setTextColor(UI_PINK,BG);M5Cardputer.Display.setCursor(8,108);
+    M5Cardputer.Display.print(audioStatusMessage.substring(0,28));return;
   }
+  musicNowPlaying=true;musicProgressLastValue=255;drawMusicInfo(entries[selected]);
 }
 void moveMusicTrack(int direction) {
   if(entryCount<=0)return;
@@ -1386,8 +1418,8 @@ void moveMusicTrack(int direction) {
 }
 void openFile(bool musicMode) {
   if(!sdReady || selected<0 || selected>=entryCount) return;
-  String full=currentPath;
-  if(full!="/") full+="/";  full+=entries[selected];
+  String full=entryPaths[selected];
+  if(full.length()==0){full=currentPath;if(full!="/")full+="/";full+=entries[selected];}
   if(entryIsDir[selected]) {
     musicNowPlaying=false; currentPath=full; scanDirectory(musicMode); drawFiles(musicMode); return;
   }
@@ -1752,7 +1784,7 @@ void loop() {
     return;
   }
 
-  bool back=(c==0x1B || c=='`' || c=='~');
+  bool back=(k.esc || c==0x1B || c=='`' || c=='~');
   if(back) {
     if(screen==MICREC){stopMicRecording();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=3;drawCategoryMenu();}
@@ -1772,7 +1804,7 @@ void loop() {
     }else if(screen==LIFE){saveLife();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
-      if(music && musicNowPlaying) {musicNowPlaying=false;drawFiles(true);}
+      if(music && musicNowPlaying) {stopAudio();musicNowPlaying=false;audioStatusMessage="STOPPED";drawFiles(true);}
       else if(currentPath!="/") {currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
       else {screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     } else if(screen==RADIO) {
@@ -1824,7 +1856,7 @@ if(usbActive) endUsbMode();
       if(c==',')moveMusicTrack(-1);
       else if(c=='/') moveMusicTrack(1);
       else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicInfo(audioNowTitle);}
-      else if(c=='p'||c=='P') {stopAudio();audioStatusMessage="STOPPED";drawMusicInfo(audioNowTitle);}
+      else if(c=='p'||c=='P') {stopAudio();musicNowPlaying=false;audioStatusMessage="STOPPED";drawFiles(true);}
       else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
       else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
       else if(c==';') {seekAudioStep(-1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
