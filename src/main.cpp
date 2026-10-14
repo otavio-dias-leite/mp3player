@@ -134,7 +134,7 @@ public:
     return true;
   }
 private:
-  static constexpr size_t kBufferSamples=1536;
+  static constexpr size_t kBufferSamples=1024;
   m5::Speaker_Class* speaker_=nullptr;
   int16_t buffers_[3][kBufferSamples]{};
   size_t bufferIndex_=0;
@@ -187,7 +187,7 @@ String radioMessage="SELECT A STATION";
 String audioStatusMessage="STOPPED";
 String audioNowTitle;
 String audioTrackPath, audioTrackExtension, audioTrackArtist, audioTrackAlbum, audioTrackTitle;
-static uint8_t audioCoverData[16U*1024U];
+static uint8_t audioCoverData[2U*1024U];
 alignas(4) static uint8_t audioDecodeBuffer[4096];
 alignas(8) static uint8_t mp3DecoderWorkspace[AudioGeneratorMP3::preAllocSize()];
 uint32_t musicProgressLastDraw=0;
@@ -1253,14 +1253,49 @@ bool loadFlacMetadata(const String& path){
 }
 
 void loadTrackMetadata(const String& path){
-  audioTrackPath=path;audioTrackExtension=audioExtension(path);audioTrackArtist="";audioTrackAlbum="";audioTrackTitle=path.substring(path.lastIndexOf('/')+1);int dot=audioTrackTitle.lastIndexOf('.');if(dot>0)audioTrackTitle.remove(dot);audioCoverSize=0;audioCoverPng=false;
-  File file=SD.open(path,FILE_READ);if(file){uint8_t h[10]={0};if(file.read(h,sizeof(h))==sizeof(h)&&memcmp(h,"ID3",3)==0&&h[3]>=3&&h[3]<=4){uint32_t tagSize=id3Synchsafe32(h+6),tagEnd=min((uint32_t)file.size(),10U+tagSize);uint8_t fh[10];while((uint32_t)file.position()+10U<=tagEnd){if(file.read(fh,sizeof(fh))!=sizeof(fh)||fh[0]==0)break;char id[5]={(char)fh[0],(char)fh[1],(char)fh[2],(char)fh[3],0};uint32_t frameSize=h[3]==4?id3Synchsafe32(fh+4):id3BigEndian32(fh+4);if(frameSize==0)continue;uint32_t frameEnd=(uint32_t)file.position()+frameSize;if(frameEnd>tagEnd||frameEnd>(uint32_t)file.size())break;
-      if((strcmp(id,"TIT2")==0||strcmp(id,"TPE1")==0||strcmp(id,"TALB")==0)&&frameSize<=512){uint8_t txt[512];if(file.read(txt,frameSize)==frameSize){String v=decodeId3Text(txt,frameSize);if(strcmp(id,"TIT2")==0&&v.length())audioTrackTitle=v;else if(strcmp(id,"TPE1")==0)audioTrackArtist=v;else if(strcmp(id,"TALB")==0)audioTrackAlbum=v;}}
-      else if(strcmp(id,"APIC")==0&&frameSize<=sizeof(audioCoverData)){if(file.read(audioCoverData,frameSize)==frameSize)extractApicImage(frameSize);}
-      file.seek(frameEnd);
-    }}file.close();}
-  if(audioTrackExtension=="flac")loadFlacMetadata(path);
-  if(audioCoverSize==0)loadSidecarCover(path);
+  // Keep track opening bounded: never scan artwork or walk an unbounded ID3 tag.
+  audioTrackPath=path;
+  audioTrackExtension=audioExtension(path);
+  audioTrackArtist="";
+  audioTrackAlbum="";
+  audioTrackTitle=path.substring(path.lastIndexOf('/')+1);
+  int dot=audioTrackTitle.lastIndexOf('.');
+  if(dot>0)audioTrackTitle.remove(dot);
+  audioCoverSize=0;
+  audioCoverPng=false;
+  if(audioTrackExtension!="mp3")return;
+
+  File file=SD.open(path,FILE_READ);
+  if(!file)return;
+  uint8_t h[10]={0};
+  if(file.read(h,sizeof(h))==sizeof(h) && memcmp(h,"ID3",3)==0 && h[3]>=3 && h[3]<=4){
+    uint32_t tagSize=id3Synchsafe32(h+6);
+    // Metadata is optional. Ignore oversized tags to avoid long blocking reads.
+    if(tagSize<=8192U){
+      uint32_t tagEnd=min((uint32_t)file.size(),10U+tagSize);
+      uint8_t fh[10];
+      for(uint8_t frames=0;frames<32 && (uint32_t)file.position()+10U<=tagEnd;frames++){
+        if(file.read(fh,sizeof(fh))!=sizeof(fh) || fh[0]==0)break;
+        char id[5]={(char)fh[0],(char)fh[1],(char)fh[2],(char)fh[3],0};
+        uint32_t frameSize=h[3]==4?id3Synchsafe32(fh+4):id3BigEndian32(fh+4);
+        uint32_t frameStart=(uint32_t)file.position();
+        uint32_t frameEnd=frameStart+frameSize;
+        // A zero-sized frame must terminate parsing; continuing here used to hang forever.
+        if(frameSize==0 || frameEnd<frameStart || frameEnd>tagEnd || frameEnd>(uint32_t)file.size())break;
+        if((strcmp(id,"TIT2")==0 || strcmp(id,"TPE1")==0 || strcmp(id,"TALB")==0) && frameSize<=256U){
+          uint8_t txt[256];
+          if(file.read(txt,frameSize)==frameSize){
+            String value=decodeId3Text(txt,frameSize);
+            if(strcmp(id,"TIT2")==0 && value.length())audioTrackTitle=value;
+            else if(strcmp(id,"TPE1")==0)audioTrackArtist=value;
+            else if(strcmp(id,"TALB")==0)audioTrackAlbum=value;
+          }
+        }
+        if(!file.seek(frameEnd))break;
+      }
+    }
+  }
+  file.close();
 }
 
 bool startLocalAudio(const String& path) {
@@ -1715,9 +1750,9 @@ void setup() {
   savedSsid=preferences.getString("ssid","");
   savedPassword=preferences.getString("pass","");
   radioEntry=preferences.getString("radio_url","");
-  eqPreset=preferences.getInt("eqpreset",1);if(eqPreset<0||eqPreset>3)eqPreset=-1;
+  eqPreset=preferences.getInt("eqpreset",0);if(eqPreset<0||eqPreset>3)eqPreset=-1;
   for(int i=0;i<(int)JOHNNY_EQ_BANDS;i++){
-    float fallback=eqPreset>=0?eqPresets[eqPreset][i]:eqPresets[1][i];
+    float fallback=eqPreset>=0?eqPresets[eqPreset][i]:eqPresets[0][i];
     audioEqGainDb[i]=preferences.getFloat((String("eq")+String(i)).c_str(),fallback);
   }
   audioEqualizer.setAll(audioEqGainDb);
