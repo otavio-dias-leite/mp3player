@@ -273,10 +273,10 @@ constexpr int APP_COUNT=4;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
 const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS","BLUETOOTH DEVICES"};
 const char* gamesMenuItems[]={"CONWAY LIFE"};
-const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL FX"};
+const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL FX","HTTP SECURITY AUDIT","DEVICE SECURITY AUDIT"};
 bool hackVisualFx=false;
 uint32_t hackFxLastFrame=0;
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=7;
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=9;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
 bool micRecording=false;
@@ -648,9 +648,9 @@ void drawBleScreen(){
 }
 
 void drawHackInput(){
-  header(hackInputMode==0?"TCP CONNECT TEST":(hackInputMode==1?"DNS LOOKUP":"HTTP STATUS CHECK"));
+  header(hackInputMode==0?"TCP CONNECT TEST":(hackInputMode==1?"DNS LOOKUP":(hackInputMode==2?"HTTP STATUS CHECK":"HTTP SECURITY AUDIT")));
   auto& d=M5Cardputer.Display;
-  const char* hint=hackInputMode==0?"IP:PORT (e.g. 192.168.1.1:80)":(hackInputMode==1?"HOSTNAME (e.g. router.local)":"HTTP URL (http://192.168.1.1)");
+  const char* hint=hackInputMode==0?"IP:PORT (e.g. 192.168.1.1:80)":(hackInputMode==1?"HOSTNAME (e.g. router.local)":(hackInputMode==2?"HTTP URL (http://192.168.1.1)":"HTTP URL (http://example.local)"));
   d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,44);d.print(hint);
   d.fillRoundRect(7,62,225,21,4,PANEL);d.setTextColor(WHITE,PANEL);d.setCursor(12,69);
   String value=hackInputValue;if(value.length()>30)value="..."+value.substring(value.length()-27);d.print(value);
@@ -669,16 +669,44 @@ void runHackInput(){
     hackResultMessage=ok?"TCP OPEN / REACHABLE":"CLOSED / NO RESPONSE";
   }else if(hackInputMode==1){
     IPAddress address;hackResultMessage=WiFi.hostByName(hackInputValue.c_str(),address)?("DNS "+address.toString()):"DNS LOOKUP FAILED";
-  }else{
+  }else if(hackInputMode==2){
     if(!hackInputValue.startsWith("http://")){hackResultMessage="USE HTTP:// URL";hackInputDone=true;drawHackInput();return;}
     HTTPClient http;http.setTimeout(2500);
     if(!http.begin(hackInputValue))hackResultMessage="INVALID HTTP URL";
     else{int code=http.sendRequest("HEAD");hackResultMessage=code>0?("HTTP STATUS "+String(code)):"HTTP REQUEST FAILED";http.end();}
+  }else{
+    if(!hackInputValue.startsWith("http://")){hackResultMessage="USE HTTP:// URL";hackInputDone=true;drawHackInput();return;}
+    const char* keys[]={"Strict-Transport-Security","Content-Security-Policy","X-Frame-Options","X-Content-Type-Options","Referrer-Policy"};
+    HTTPClient http;http.setTimeout(3000);http.collectHeaders(keys,5);
+    if(!http.begin(hackInputValue))hackResultMessage="INVALID HTTP URL";
+    else{
+      int code=http.sendRequest("HEAD");
+      if(code>0){
+        String report="HTTP "+String(code)+" ";int present=0;
+        if(http.header(keys[0]).length()){report+="HSTS ";present++;}
+        if(http.header(keys[1]).length()){report+="CSP ";present++;}
+        if(http.header(keys[2]).length()){report+="XFO ";present++;}
+        if(http.header(keys[3]).length()){report+="NOSNIFF ";present++;}
+        if(http.header(keys[4]).length()){report+="REF ";present++;}
+        if(!present)report+="NO SECURITY HEADERS";
+        hackResultMessage=report;
+      }else hackResultMessage="HTTP REQUEST FAILED";
+      http.end();
+    }
   }
   hackInputDone=true;drawHackInput();
 }
 
 void drawHackInfo(){
+  if(selected==8){
+    header("DEVICE SECURITY AUDIT");auto& d=M5Cardputer.Display;
+    d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,43);d.printf("FREE HEAP %lu",(unsigned long)ESP.getFreeHeap());
+    d.setTextColor(WHITE,BG);d.setCursor(8,57);d.printf("MIN HEAP %lu",(unsigned long)ESP.getMinFreeHeap());
+    d.setCursor(8,70);d.printf("FLASH %lu KB",(unsigned long)(ESP.getFlashChipSize()/1024UL));
+    d.setCursor(8,83);d.printf("CPU %u MHz  PSRAM %lu",ESP.getCpuFreqMHz(),(unsigned long)ESP.getPsramSize());
+    d.setCursor(8,96);d.printf("SD %s  WIFI %s",sdReady?"READY":"MISSING",WiFi.status()==WL_CONNECTED?"ON":"OFF");
+    d.setTextColor(UI_MUTED,BG);d.setCursor(8,110);d.print("LOCAL INVENTORY / NO NETWORK TEST");footer("ESC BACK");return;
+  }
   header("NETWORK / RADIO INFO");auto& d=M5Cardputer.Display;
   bool connected=WiFi.status()==WL_CONNECTED;
   d.setTextColor(connected?UI_LAVENDER:UI_PINK,BG);d.setCursor(8,43);d.print(connected?"STA CONNECTED":"STA OFFLINE");
@@ -1463,7 +1491,7 @@ void openLegacyApp();
 void openApp(){
   if(screen==HOME){screen=selected==0?HACKMENU:(selected==1?GAMESMENU:(selected==2?MUSICMENU:SYSTEMMENU));selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
-  if(menu==HACKMENU){appReturnMenu=HACKMENU;appReturnSelected=item;if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if(item>=2&&item<=4){hackInputMode=(uint8_t)(item-2);hackInputValue="";hackResultMessage="";hackInputDone=false;screen=HACKINPUT;drawHackInput();return;}if(item==6){screen=HACKFX;hackVisualFx=true;hackFxLastFrame=0;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
+  if(menu==HACKMENU){appReturnMenu=HACKMENU;appReturnSelected=item;if(item==0){screen=NETWORK;startWifiSurvey();return;}if(item==1){screen=BLESCAN;startBleScan();drawBleScreen();return;}if((item>=2&&item<=4)||item==7){hackInputMode=(uint8_t)(item==7?3:item-2);hackInputValue="";hackResultMessage="";hackInputDone=false;screen=HACKINPUT;drawHackInput();return;}if(item==6){screen=HACKFX;hackVisualFx=true;hackFxLastFrame=0;drawHackFxScreen();return;}screen=HACKINFO;drawHackInfo();return;}
   if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
   appReturnMenu=menu;appReturnSelected=item;
   if(menu==SYSTEMMENU&&item==5){screen=BLESCAN;startBleScan();drawBleScreen();return;}
@@ -1808,8 +1836,8 @@ void loop() {
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=3;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU){screen=HOME;selected=0;drawHome();}
     else if(screen==BLESCAN){stopBleScan();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
-    else if(screen==HACKINFO){screen=HACKMENU;selected=5;drawCategoryMenu();}
-    else if(screen==HACKINPUT){screen=HACKMENU;selected=hackInputMode+2;drawCategoryMenu();}
+    else if(screen==HACKINFO){screen=HACKMENU;selected=appReturnSelected;drawCategoryMenu();}
+    else if(screen==HACKINPUT){screen=HACKMENU;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==HACKFX){hackVisualFx=false;screen=HACKMENU;selected=6;drawCategoryMenu();}
     else if(screen==NETWORK&&wifiScanOnly){if(wifiSurveyDetails){wifiSurveyDetails=false;drawNetworkScreen();}else{wifiScanOnly=false;wifiConfigStage=0;screen=HACKMENU;selected=0;drawCategoryMenu();}}
     else if(screen==EQSCREEN){
