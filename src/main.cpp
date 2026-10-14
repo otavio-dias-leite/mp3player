@@ -4,6 +4,8 @@
 #include <SD.h>
 #include <math.h>
 #include <WiFi.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
 #include <BLEDevice.h>
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
@@ -205,6 +207,10 @@ bool wifiScanPending=false;
 bool wifiScanOnly=false;
 int wifiNetworkChannel[20]={};
 String wifiNetworkBssid[20];
+WebServer johnnyWeb(80);
+bool johnnyWebStarted=false,johnnyMdnsStarted=false;
+static uint16_t webCaptureLine[240];
+static uint8_t webBmpLine[720];
 BLEScan* bleScanner=nullptr;
 bool bleInitialized=false;
 volatile bool bleScanDone=false;
@@ -374,6 +380,20 @@ void drawCategoryMenu(){
   }
   footer("");
 }
+void drawDeviceStatus(){
+  header("DEVICE STATUS");auto& d=M5Cardputer.Display;bool connected=WiFi.status()==WL_CONNECTED;
+  String ip=connected?WiFi.localIP().toString():String("NO IP");
+  String gateway=connected?WiFi.gatewayIP().toString():String("N/A");
+  String ssid=connected?WiFi.SSID():String("OFFLINE");if(ssid.length()>12)ssid=ssid.substring(0,12)+"..";
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,43);d.printf("IP: %s",ip.c_str());
+  d.setTextColor(WHITE,BG);d.setCursor(8,56);d.printf("MAC: %.17s",WiFi.macAddress().c_str());
+  d.setCursor(8,69);d.printf("GW: %s",gateway.c_str());
+  d.setCursor(8,82);d.printf("WIFI: %s %ddBm",ssid.c_str(),connected?WiFi.RSSI():0);
+  d.setCursor(8,95);d.printf("SD:%s BAT:%d%% %s",sdReady?"OK":"NO",batteryPercent(),batteryCharging()?"CHG":"");
+  d.setTextColor(UI_PINK,BG);d.setCursor(8,109);d.print(connected?(String("WEB: http://")+ip):String("WEB: CONNECT WI-FI"));
+  footer("ESC BACK");
+}
+
 void drawUpdateInfo(){
   header("FIRMWARE UPDATE");auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
   d.setCursor(8,47);d.print("SOURCE: GITHUB RELEASES");d.setTextColor(UI_MUTED,BG);
@@ -651,6 +671,91 @@ void drawHackFxScreen(){
   d.setTextColor(UI_MUTED,BG);d.setCursor(8,42);d.print("LOCAL MEDIA / NO RF TX");
   for(int i=0;i<HACK_FX_COUNT;i++){int y=59+i*15;bool active=i==hackFxSelected;uint16_t bg=active?PANEL:BG;d.fillRoundRect(7,y-1,225,12,2,bg);d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(12,y);d.print(active?"> ":"  ");d.print(hackFxItems[i]);}
   footer("ENTER RUN LOCAL DEMO  ESC BACK");
+}
+
+
+String jsonEscape(const String& in){String out;out.reserve(in.length()+8);for(size_t i=0;i<in.length();i++){char c=in[i];if(c=='"'||c=='\\'){out+='\\';out+=c;}else if((uint8_t)c>=32)out+=c;}return out;}
+void sendWebStatus(){
+  bool connected=WiFi.status()==WL_CONNECTED;
+  String json="{";
+  json+="\"firmware\":\""+String(JOHNNY_VERSION)+"\",";
+  json+="\"hostname\":\"johnny.local\",";
+  json+="\"connected\":"+String(connected?"true":"false")+",";
+  json+="\"ip\":\""+(connected?WiFi.localIP().toString():String("0.0.0.0"))+"\",";
+  json+="\"mac\":\""+WiFi.macAddress()+"\",";
+  json+="\"ssid\":\""+jsonEscape(connected?WiFi.SSID():String(""))+"\",";
+  json+="\"rssi\":"+String(connected?WiFi.RSSI():0)+",";
+  json+="\"gateway\":\""+(connected?WiFi.gatewayIP().toString():String("0.0.0.0"))+"\",";
+  json+="\"subnet\":\""+(connected?WiFi.subnetMask().toString():String("0.0.0.0"))+"\",";
+  json+="\"dns\":\""+(connected?WiFi.dnsIP().toString():String("0.0.0.0"))+"\",";
+  json+="\"sd_ready\":"+String(sdReady?"true":"false")+",";
+  json+="\"battery_percent\":"+String(batteryPercent())+",";
+  json+="\"battery_mv\":"+String(batteryMillivolts())+",";
+  json+="\"charging\":"+String(batteryCharging()?"true":"false")+",";
+  json+="\"free_heap\":"+String(ESP.getFreeHeap())+",";
+  json+="\"min_free_heap\":"+String(ESP.getMinFreeHeap())+",";
+  json+="\"psram_bytes\":"+String(ESP.getPsramSize())+",";
+  json+="\"cpu_mhz\":"+String(ESP.getCpuFreqMHz())+",";
+  json+="\"uptime_seconds\":"+String(millis()/1000UL)+"}";
+  johnnyWeb.sendHeader("Cache-Control","no-store");
+  johnnyWeb.send(200,"application/json; charset=utf-8",json);
+}
+void sendWebScreenBmp(){
+  static constexpr uint32_t total=54U+240U*135U*3U;
+  uint8_t h[54]={};
+  auto put16=[&](int p,uint16_t v){h[p]=(uint8_t)v;h[p+1]=(uint8_t)(v>>8);};
+  auto put32=[&](int p,uint32_t v){h[p]=(uint8_t)v;h[p+1]=(uint8_t)(v>>8);h[p+2]=(uint8_t)(v>>16);h[p+3]=(uint8_t)(v>>24);};
+  h[0]='B';h[1]='M';put32(2,total);put32(10,54);put32(14,40);put32(18,240);put32(22,135);put16(26,1);put16(28,24);put32(34,240U*135U*3U);
+  johnnyWeb.sendHeader("Cache-Control","no-store");
+  johnnyWeb.setContentLength(total);johnnyWeb.send(200,"image/bmp","");
+  johnnyWeb.sendContent((const char*)h,sizeof(h));
+  for(int y=134;y>=0;y--){
+    if(!johnnyWeb.client().connected())break;
+    M5Cardputer.Display.readRect(0,y,240,1,webCaptureLine);
+    for(int x=0;x<240;x++){uint16_t p=webCaptureLine[x];webBmpLine[x*3]=(uint8_t)((p&31)<<3);webBmpLine[x*3+1]=(uint8_t)(((p>>5)&63)<<2);webBmpLine[x*3+2]=(uint8_t)(((p>>11)&31)<<3);}
+    johnnyWeb.sendContent((const char*)webBmpLine,sizeof(webBmpLine));
+  }
+}
+static const char JOHNNY_WEB_HOME[] PROGMEM=R"JOHNNYWEB(
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>JOHNNY // Cardputer Remote</title>
+<style>
+:root{color-scheme:dark;--bg:#10081f;--panel:#20132f;--line:#6c3c91;--pink:#f19fff;--text:#eee7f6;--muted:#b5b4c8}*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at 50% 0,#2e1747,var(--bg) 55%);color:var(--text);font:15px system-ui,sans-serif}
+main{max-width:960px;margin:0 auto;padding:24px}header{display:flex;justify-content:space-between;gap:12px;align-items:center;border-bottom:1px solid var(--line);padding-bottom:14px}
+h1{font-size:22px;letter-spacing:.15em;margin:0}.state{color:var(--pink);font-size:12px;letter-spacing:.12em}
+.panel{background:#1b1029;border:1px solid #49305f;border-radius:14px;padding:16px;margin-top:16px}
+.screen{width:100%;max-width:720px;display:block;margin:auto;background:#05030a;border:1px solid var(--line);border-radius:9px;image-rendering:pixelated}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}.item{padding:10px;background:var(--panel);border-radius:8px}.item b{display:block;color:var(--pink);font-size:11px;letter-spacing:.1em;margin-bottom:5px}
+a{color:var(--pink)}button{background:#39204f;color:white;border:1px solid var(--line);border-radius:7px;padding:9px 13px}footer{margin:20px 0;color:var(--muted);font-size:12px}
+</style></head><body><main><header><h1>JOHNNY</h1><span class="state">CARDPUTER ADV // LIVE VIEW</span></header>
+<section class="panel"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px"><b>DISPLAY MIRROR</b><button id="refresh">ATUALIZAR AGORA</button></div>
+<img id="screen" class="screen" src="/screen.bmp" alt="Tela do Cardputer"><small>A tela física continua controlando o dispositivo.</small></section>
+<section class="panel"><b>DEVICE STATUS</b><div id="status" class="grid" style="margin-top:12px">Carregando informações…</div></section>
+<footer>JOHNNY // rede local · <a href="/api/status">JSON API</a></footer></main>
+<script>
+const status=document.getElementById('status'),screen=document.getElementById('screen');
+function refreshScreen(){screen.src='/screen.bmp?t='+Date.now()}
+async function refreshStatus(){try{const r=await fetch('/api/status',{cache:'no-store'}),j=await r.json();
+const rows=[['IP',j.ip],['MAC',j.mac],['WIFI',j.ssid||'OFFLINE'],['SINAL',j.rssi+' dBm'],['GATEWAY',j.gateway],['SUBNET',j.subnet],['DNS',j.dns],['FIRMWARE',j.firmware],['BATERIA',j.battery_percent+'% / '+j.battery_mv+' mV'],['CARGA',j.charging?'SIM':'NÃO'],['MICROSD',j.sd_ready?'MONTADO':'AUSENTE'],['HEAP LIVRE',j.free_heap+' bytes'],['HEAP MÍNIMO',j.min_free_heap+' bytes'],['PSRAM',j.psram_bytes+' bytes'],['UPTIME',j.uptime_seconds+' s']];
+status.innerHTML=rows.map(x=>'<div class="item"><b>'+x[0]+'</b>'+String(x[1])+'</div>').join('');
+}catch(e){status.textContent='Sem conexão com o Cardputer.'}}
+document.getElementById('refresh').onclick=()=>{refreshScreen();refreshStatus()};
+refreshStatus();setInterval(refreshStatus,4000);setInterval(refreshScreen,1200);
+</script></body></html>
+)JOHNNYWEB";
+void beginJohnnyWeb(){
+  johnnyWeb.on("/",HTTP_GET,[]{johnnyWeb.send_P(200,"text/html; charset=utf-8",JOHNNY_WEB_HOME);});
+  johnnyWeb.on("/api/status",HTTP_GET,sendWebStatus);
+  johnnyWeb.on("/screen.bmp",HTTP_GET,sendWebScreenBmp);
+  johnnyWeb.onNotFound([]{johnnyWeb.send(404,"text/plain","JOHNNY: endpoint not found");});
+  johnnyWeb.begin();johnnyWebStarted=true;
+}
+void serviceWebServer(){
+  bool connected=WiFi.status()==WL_CONNECTED;
+  if(connected&&!johnnyWebStarted)beginJohnnyWeb();
+  if(connected&&johnnyWebStarted)johnnyWeb.handleClient();
+  if(connected&&!johnnyMdnsStarted){johnnyMdnsStarted=MDNS.begin("johnny");if(johnnyMdnsStarted)MDNS.addService("http","tcp",80);}
+  if(!connected&&johnnyMdnsStarted){MDNS.end();johnnyMdnsStarted=false;}
 }
 
 void startNetworkSetup() {
@@ -1364,7 +1469,7 @@ void openLegacyApp() {
     case 6: screen=USBMODE;drawUsbScreen(beginUsbMode());break;
     case 7: eqReturnScreen=MUSICMENU;screen=EQSCREEN;selected=4;drawEqScreen();break;
     case 8: screen=LIFE;if(!loadLife())seedLife();drawLife();break;
-    case 9: screen=ABOUT;header("DEVICE STATUS");M5Cardputer.Display.setTextColor(WHITE,BG);M5Cardputer.Display.setCursor(8,49);M5Cardputer.Display.print("JOHNNY / CARDPUTER ADV");M5Cardputer.Display.setTextColor(UI_LAVENDER,BG);M5Cardputer.Display.setCursor(8,67);M5Cardputer.Display.printf("SD: %s",sdReady?"READY":"NOT FOUND");M5Cardputer.Display.setCursor(8,81);M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"CONNECTED":"OFFLINE");M5Cardputer.Display.setCursor(8,95);M5Cardputer.Display.printf("BLE: %s",bleInitialized?"READY":"IDLE");M5Cardputer.Display.setCursor(8,109);M5Cardputer.Display.printf("BATTERY: %d%%",batteryPercent());footer("ESC BACK");break;
+    case 9: screen=ABOUT;drawDeviceStatus();break;
     default:
       screen=ABOUT; header("SYSTEM");
       M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV");
@@ -1581,7 +1686,7 @@ void loop() {
   if(millis()-batteryLastSample>=30000UL) {
     batteryLastDraw=millis();
     refreshBatteryCache(true);
-    if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT) { header("SYSTEM"); M5Cardputer.Display.setTextColor(WHITE,BG); M5Cardputer.Display.setCursor(8,53); M5Cardputer.Display.print("JOHNNY / CARDPUTER-ADV"); M5Cardputer.Display.setCursor(8,69); M5Cardputer.Display.print("ESP32-S3  |  8 MB FLASH"); M5Cardputer.Display.setCursor(8,85); M5Cardputer.Display.printf("SD: %s",sdReady?"MOUNTED":"NOT FOUND"); M5Cardputer.Display.setCursor(8,91); M5Cardputer.Display.printf("WI-FI: %s",WiFi.status()==WL_CONNECTED?"ONLINE":"OFFLINE"); int battery=batteryPercent(); int16_t mv=batteryMillivolts(); M5Cardputer.Display.setCursor(8,103); if(battery>=0 && mv>0) M5Cardputer.Display.printf("BATTERY: %d%%  %.2fV",constrain(battery,0,100),mv/1000.0f); else if(battery>=0) M5Cardputer.Display.printf("BATTERY: %d%%  VOLT N/A",constrain(battery,0,100)); else M5Cardputer.Display.print("BATTERY: SENSOR UNAVAILABLE"); M5Cardputer.Display.setCursor(8,115); M5Cardputer.Display.setTextColor(batteryCharging()?UI_PINK:UI_MUTED,BG); M5Cardputer.Display.print(batteryCharging()?"CHARGING  [USB POWER]":(battery>=0 && battery<=15?"LOW BATTERY":"ON BATTERY")); footer("ESC BACK"); } }
+    if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT)drawDeviceStatus(); }
   }
   serviceAudio();
   serviceMusicProgress();
@@ -1619,6 +1724,7 @@ void loop() {
   }
   
   if(Serial.available()>0) serialTransferTask();
+  serviceWebServer();
   serviceBleScan();
   if(!screenSaverActive&&screen==HACKFX&&hackVisualFx&&millis()-hackFxLastFrame>=120){hackFxLastFrame=millis();M5Cardputer.Display.fillScreen((random(8)==0)?UI_PURPLE:BG);M5Cardputer.Display.setTextColor(UI_PINK,BG);M5Cardputer.Display.setCursor(random(8,160),random(35,110));M5Cardputer.Display.print("NO RF TX // OFFLINE");}
 
