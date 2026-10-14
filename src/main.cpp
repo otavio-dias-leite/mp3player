@@ -186,7 +186,7 @@ String radioMessage="SELECT A STATION";
 String audioStatusMessage="STOPPED";
 String audioNowTitle;
 String audioTrackPath, audioTrackExtension, audioTrackArtist, audioTrackAlbum, audioTrackTitle;
-static uint8_t audioCoverData[40U*1024U];
+static uint8_t audioCoverData[16U*1024U];
 alignas(4) static uint8_t audioDecodeBuffer[4096];
 alignas(8) static uint8_t mp3DecoderWorkspace[AudioGeneratorMP3::preAllocSize()];
 uint32_t musicProgressLastDraw=0;
@@ -237,7 +237,7 @@ bool usbActive=false;
 String usbCommandLine;
 bool micStarted=false;
 uint32_t micWarmupUntil=0;
-constexpr size_t SYNTH_SAMPLES=8192;
+constexpr size_t SYNTH_SAMPLES=4096;
 constexpr uint8_t SYNTH_AUDIO_CHANNEL=2;
 static int16_t synthAudioBuffers[3][SYNTH_SAMPLES];
 static float synthSineTable[1024];
@@ -412,30 +412,31 @@ void runFirmwareUpdate(){
 void splash(){
   auto& d=M5Cardputer.Display;
   d.setBrightness(190);
+  // Draw the boot screen once: no repeated full-screen clears or visible flicker.
+  d.fillScreen(BG);
+  d.setTextSize(3);
+  d.setTextColor(WHITE,BG);
+  d.setCursor(38,48);
+  d.print("JOHNNY");
+  d.setTextSize(1);
+  d.setTextColor(UI_LAVENDER,BG);
+  d.setCursor(48,83);
+  d.print("wake fuck up samurai");
   const uint32_t started=millis();
   uint32_t frame=0;
-  while((uint32_t)(millis()-started)<5200UL){
-    d.fillScreen(BG);
-    const bool glitch=(frame%7U==0U)||(frame%11U==0U);
-    const int x=38+(glitch?(int)random(-4,5):0);
-    const int y=48+(glitch?(int)random(-2,3):0);
-    d.setTextSize(3);
-    if(glitch){
-      d.setTextColor(UI_PURPLE,BG);d.setCursor(x+3,y);d.print("JOHNNY");
-      d.setTextColor(UI_PINK,BG);d.setCursor(x-3,y);d.print("JOHNNY");
+  while((uint32_t)(millis()-started)<2600UL){
+    if((frame%5U)==0U){
+      const int y=random(45,91);
+      const int x=random(24,190);
+      const int width=random(12,52);
+      d.fillRect(x,y,width,1,UI_PINK);
+      d.drawFastHLine(x+random(2,8),y+1,max(4,width-8),UI_PURPLE);
     }
-    d.setTextColor(WHITE,BG);d.setCursor(x,y);d.print("JOHNNY");
-    d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);
-    d.setCursor(68,83);d.print("wake up samurai");
-    if(glitch)d.fillRect(random(24,190),random(42,91),random(18,62),1,UI_PINK);
     frame++;
-    delay(65);
+    delay(90);
   }
-  d.fillScreen(BG);d.setTextSize(3);d.setTextColor(WHITE,BG);
-  d.setCursor(38,48);d.print("JOHNNY");
-  d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);
-  d.setCursor(68,83);d.print("wake up samurai");
-  delay(180);
+  d.setTextColor(WHITE,BG);
+  d.setTextSize(1);
 }
 
 void pianoScreen() {
