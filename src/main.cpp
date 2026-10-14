@@ -1157,7 +1157,7 @@ void openLegacyApp() {
       screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
     case 5: screen=NETWORK; wifiConfigStage=0; lastWiFiStatus=-1; drawNetworkScreen(); break;
     case 6: screen=USBMODE;drawUsbScreen(beginUsbMode());break;
-    case 7: eqReturnScreen=HOME;screen=EQSCREEN;drawEqScreen();break;
+    case 7: eqReturnScreen=MUSICMENU;screen=EQSCREEN;selected=4;drawEqScreen();break;
     case 8: screen=LIFE;if(!loadLife())seedLife();drawLife();break;
     default:
       screen=ABOUT; header("SYSTEM");
@@ -1462,6 +1462,7 @@ void loop() {
     else if(screen==EQSCREEN){
       screen=eqReturnScreen;
       if(screen==HOME)drawHome();
+      else if(screen==MUSICMENU)drawCategoryMenu();
       else if(screen==PIANO)pianoScreen();
       else if(screen==MUSIC)musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
       else if(screen==RADIO)drawRadioScreen();
