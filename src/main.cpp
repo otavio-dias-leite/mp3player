@@ -246,6 +246,7 @@ constexpr size_t SYNTH_SAMPLES=4096;
 constexpr uint8_t SYNTH_AUDIO_CHANNEL=2;
 constexpr size_t BOOT_JINGLE_SAMPLES=8192;
 static int16_t bootJingleBuffer[BOOT_JINGLE_SAMPLES];
+static int16_t alarmToneSamples[512];
 static int16_t synthPadSamples[8192];
 volatile int8_t synthPadRequest=-1;
 uint8_t synthPadSelected=0;
