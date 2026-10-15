@@ -198,7 +198,7 @@ bool audioCoverPng=false;
 bool audioShuffle=false;
 uint8_t audioRepeatMode=0;
 int audioVolume=18;
-enum AudioCommandType:uint8_t{AUDIO_CMD_START,AUDIO_CMD_STOP,AUDIO_CMD_PAUSE,AUDIO_CMD_RESUME,AUDIO_CMD_SEEK,AUDIO_CMD_VOLUME};
+enum AudioCommandType:uint8_t{AUDIO_CMD_START,AUDIO_CMD_STOP,AUDIO_CMD_TOGGLE,AUDIO_CMD_PAUSE,AUDIO_CMD_RESUME,AUDIO_CMD_SEEK,AUDIO_CMD_VOLUME};
 struct AudioCommand{AudioCommandType type;AudioFileSource* source=nullptr;char title[96]{};char extension[8]{};int16_t value=0;bool radio=false;};
 QueueHandle_t audioCommandQueue=nullptr;
 volatile uint8_t audioProgressCached=0;
@@ -1325,7 +1325,7 @@ void audioTask(void* parameter){
         if(ok){audioNowTitle=String(cmd.title);audioIsRadio=cmd.radio;audioPaused=false;audioStarted=true;audioStatusMessage=cmd.radio?"LIVE RADIO":"PLAYING";M5Cardputer.Speaker.setVolume(190);}
         else{stopAudioLocked();audioStatusMessage="MP3 OPEN FAILED";}
       }
-      else if(cmd.type==AUDIO_CMD_PAUSE){if(audioStarted){audioPaused=true;audioStatusMessage="PAUSED";}}
+      else if(cmd.type==AUDIO_CMD_TOGGLE){if(audioStarted){audioPaused=!audioPaused;audioStatusMessage=audioPaused?"PAUSED":"PLAYING";}}\n      else if(cmd.type==AUDIO_CMD_PAUSE){if(audioStarted){audioPaused=true;audioStatusMessage="PAUSED";}}
       else if(cmd.type==AUDIO_CMD_RESUME){if(audioStarted){audioPaused=false;audioStatusMessage="PLAYING";}}
       else if(cmd.type==AUDIO_CMD_VOLUME){audioVolume=constrain((int)cmd.value,0,21);if(audioOutput)audioOutput->SetGain((float)audioVolume/21.0f);}
       else if(cmd.type==AUDIO_CMD_SEEK&&audioStarted&&!audioIsRadio&&audioRawSource&&audioInputBuffer&&audioDecoder){
@@ -1343,7 +1343,7 @@ void audioTask(void* parameter){
     else taskYIELD();
   }
 }
-void toggleAudioPause(){if(!audioCommandQueue||!audioStarted)return;AudioCommand cmd{};cmd.type=audioPaused?AUDIO_CMD_RESUME:AUDIO_CMD_PAUSE;if(xQueueSend(audioCommandQueue,&cmd,0)==pdTRUE&&johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
+void toggleAudioPause(){if(!audioCommandQueue||!audioStarted)return;AudioCommand cmd{};cmd.type=AUDIO_CMD_TOGGLE;if(xQueueSend(audioCommandQueue,&cmd,pdMS_TO_TICKS(20))==pdTRUE&&johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
 void setAudioVolume(int value){audioVolume=constrain(value,0,21);if(audioCommandQueue){AudioCommand cmd{};cmd.type=AUDIO_CMD_VOLUME;cmd.value=(int16_t)audioVolume;xQueueSend(audioCommandQueue,&cmd,0);if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}}
 void drawMusicInfo(const String &name){
   header("MP3");
