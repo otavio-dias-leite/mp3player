@@ -152,6 +152,7 @@ private:
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
+constexpr uint16_t UI_GRID=0x180B, UI_EDGE=0x4933, UI_PANEL_HI=0x3414, UI_CYAN=0x5DDF;
 enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
 Screen eqReturnScreen=HOME;
 Screen appReturnMenu=MUSICMENU;
@@ -321,15 +322,22 @@ void drawBatteryIndicator() {
   if(WiFi.status()==WL_CONNECTED) { d.drawArc(184,10,5,5,205,335,UI_LAVENDER); d.drawArc(184,10,3,3,205,335,UI_LAVENDER); d.fillCircle(184,13,1,UI_LAVENDER); }
   else { d.drawLine(180,5,188,13,UI_MUTED); d.drawLine(188,5,180,13,UI_MUTED); }
 }
+void drawUiGrid(int top=20,int bottom=117){
+  auto& d=M5Cardputer.Display;
+  for(int x=15;x<240;x+=24)d.drawFastVLine(x,top,bottom-top,UI_GRID);
+  for(int y=top+18;y<bottom;y+=20)d.drawFastHLine(7,y,226,UI_GRID);
+  d.drawFastHLine(7,top,226,UI_EDGE);
+}
 void header(const char* title) {
   auto &d=M5Cardputer.Display;
-  d.fillRect(0,18,240,117,BG);
-  d.setTextSize(1);
-  d.setTextColor(UI_PINK,BG); d.setCursor(7,5); d.print("JOHNNY");
-  drawBatteryIndicator();
-  d.drawFastHLine(7,18,226,UI_PURPLE);
-  d.setTextSize(2); d.setTextColor(WHITE,BG); d.setCursor(8,25); d.print(title);
-  d.setTextSize(1);
+  d.fillScreen(BG);d.fillRect(0,0,240,19,0x1808);drawUiGrid(20,117);
+  d.fillRoundRect(6,3,11,11,3,0x3815);d.drawRoundRect(6,3,11,11,3,UI_PURPLE);
+  d.drawFastVLine(11,5,7,UI_LAVENDER);d.drawFastHLine(8,8,7,UI_PINK);
+  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(21,5);d.print("JOHNNY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(66,5);d.print("CARDPUTER ADV");drawBatteryIndicator();
+  d.fillRoundRect(7,23,226,24,5,0x1C0D);d.drawRoundRect(7,23,226,24,5,UI_EDGE);
+  d.fillRoundRect(7,23,3,24,1,UI_PINK);
+  d.setTextSize(2);d.setTextColor(WHITE,0x1C0D);d.setCursor(15,28);d.print(title);d.setTextSize(1);
 }
 void footer(const char* s="") {
   auto& d=M5Cardputer.Display;
@@ -338,85 +346,115 @@ void footer(const char* s="") {
 }
 void drawAppIcon(uint8_t app,int x,int y,uint16_t color){
   auto& d=M5Cardputer.Display;
-  if(app==0){d.drawRoundRect(x+4,y+8,12,9,2,color);d.drawCircle(x+10,y+8,4,color);d.drawFastVLine(x+10,y+11,3,color);}
-  else if(app==1){d.drawRoundRect(x+1,y+5,19,11,5,color);d.drawFastHLine(x+4,y+10,6,color);d.drawFastVLine(x+7,y+7,7,color);d.drawCircle(x+15,y+9,1,color);d.drawCircle(x+18,y+12,1,color);}
-  else if(app==2){d.drawFastVLine(x+13,y+2,12,color);d.drawFastHLine(x+13,y+2,6,color);d.drawCircle(x+8,y+14,3,color);d.drawCircle(x+17,y+12,3,color);}
-  else {d.drawCircle(x+10,y+10,7,color);d.drawCircle(x+10,y+10,2,color);d.drawFastHLine(x+1,y+10,4,color);d.drawFastHLine(x+15,y+10,4,color);d.drawFastVLine(x+10,y+1,4,color);d.drawFastVLine(x+10,y+15,4,color);}
+  if(app==0){d.drawCircle(x+9,y+8,6,color);d.drawCircle(x+9,y+8,2,color);d.drawLine(x+13,y+12,x+18,y+17,color);d.drawFastHLine(x+3,y+8,3,color);}
+  else if(app==1){d.drawRoundRect(x+1,y+4,18,12,4,color);d.drawFastHLine(x+4,y+10,6,color);d.drawFastVLine(x+7,y+7,6,color);d.fillCircle(x+14,y+8,1,color);d.fillCircle(x+17,y+12,1,color);}
+  else if(app==2){d.fillCircle(x+5,y+14,3,color);d.fillCircle(x+15,y+11,3,color);d.drawFastVLine(x+8,y+2,12,color);d.drawFastVLine(x+18,y+1,10,color);d.drawFastHLine(x+8,y+2,10,color);}
+  else{d.drawCircle(x+10,y+10,6,color);d.drawCircle(x+10,y+10,2,color);d.drawFastHLine(x,y+10,3,color);d.drawFastHLine(x+17,y+10,3,color);d.drawFastVLine(x+10,y,3,color);d.drawFastVLine(x+10,y+17,3,color);}
 }
 void drawHome(){
-  auto& d=M5Cardputer.Display;
-  d.fillScreen(BG);
-  d.setTextSize(1);
-  d.setTextColor(UI_PINK,BG);d.setCursor(8,5);d.print("JOHNNY");
-  d.setTextColor(UI_MUTED,BG);d.setCursor(62,5);d.print("CARDPUTER ADV");
-  drawBatteryIndicator();
-  d.drawFastHLine(7,18,226,UI_PURPLE);
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(9,25);d.print("MAIN MENU / SELECT MODULE");
+  auto& d=M5Cardputer.Display;d.fillScreen(BG);d.fillRect(0,0,240,19,0x1808);drawUiGrid(20,117);
+  d.fillRoundRect(6,3,11,11,3,0x3815);d.drawRoundRect(6,3,11,11,3,UI_PURPLE);
+  d.drawFastVLine(11,5,7,UI_LAVENDER);d.drawFastHLine(8,8,7,UI_PINK);
+  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(21,5);d.print("JOHNNY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(66,5);d.print("CARDPUTER ADV");drawBatteryIndicator();
+  d.fillRoundRect(7,22,226,12,4,0x2010);
+  d.setTextColor(UI_LAVENDER,0x2010);d.setCursor(13,25);d.print("SELECT A MODULE");
+  d.setTextColor(UI_MUTED,0x2010);d.setCursor(184,25);d.print("01 / 04");
   const char* labels[APP_COUNT]={"HACK","GAMES","MUSIC","SYSTEM"};
-  const char* hints[APP_COUNT]={"WIRELESS & SECURITY","ARCADE & CLASSICS","MP3 & AUDIO TOOLS","DEVICE & CONNECTIVITY"};
+  const char* hints[APP_COUNT]={"NETWORK / SEC.","ARCADE / CLASSICS","PLAYER / STUDIO","DEVICE / SETTINGS"};
   for(int i=0;i<APP_COUNT;i++){
-    const int x=8+(i%2)*114,y=35+(i/2)*39;
-    const bool active=(i==selected);
-    const uint16_t fill=active?PANEL:BG;
-    d.fillRoundRect(x,y,108,34,5,fill);
-    d.drawRoundRect(x,y,108,34,5,active?UI_PINK:0x5140);
-    drawAppIcon((uint8_t)i,x+5,y+7,active?UI_LAVENDER:UI_MUTED);
-    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+29,y+7);d.print(labels[i]);
-    d.setTextColor(active?UI_LAVENDER:UI_MUTED,fill);d.setCursor(x+29,y+20);
-    String hint=hints[i];if(hint.length()>13)hint=hint.substring(0,13);
-    d.print(hint);
-    if(active)d.fillCircle(x+99,y+8,2,UI_PINK);
+    const int x=8+(i%2)*114,y=39+(i/2)*37;const bool active=(i==selected);
+    const uint16_t fill=active?UI_PANEL_HI:0x1C0D;
+    d.fillRoundRect(x,y,108,33,5,fill);d.drawRoundRect(x,y,108,33,5,active?UI_PINK:UI_EDGE);
+    if(active)d.fillRoundRect(x,y+4,2,25,1,UI_PINK);
+    d.fillRoundRect(x+6,y+6,22,22,5,active?0x5020:0x2815);
+    drawAppIcon((uint8_t)i,x+7,y+7,active?UI_LAVENDER:UI_MUTED);
+    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+34,y+7);d.print(labels[i]);
+    d.setTextColor(active?UI_CYAN:UI_MUTED,fill);d.setCursor(x+34,y+20);d.print(hints[i]);
+    if(active){d.drawFastHLine(x+93,y+16,8,UI_PINK);d.fillCircle(x+101,y+16,2,UI_PINK);}
   }
-  d.drawFastHLine(7,117,226,0x5140);
-  d.setTextColor(UI_MUTED,BG);d.setCursor(9,123);
-  d.print(", / LEFT RIGHT  ; . UP DOWN  ENTER OPEN");
+  d.fillRoundRect(7,115,226,15,4,0x1808);d.drawFastHLine(7,115,226,UI_EDGE);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(11,120);d.print(", / SELECT   ; . MOVE   ENTER OPEN");
 }
-
-void drawModuleIcon(uint8_t type,int x,int y,uint16_t color){
+void drawModuleIcon(uint8_t category,uint8_t item,int x,int y,uint16_t color){
   auto& d=M5Cardputer.Display;
-  if(type==0){d.drawRoundRect(x+2,y+4,7,6,1,color);d.drawCircle(x+5,y+4,2,color);}
-  else if(type==1){d.drawRoundRect(x,y+3,11,6,3,color);d.drawFastHLine(x+2,y+6,4,color);d.drawFastVLine(x+4,y+4,4,color);d.drawCircle(x+8,y+5,1,color);}
-  else if(type==2){d.drawFastVLine(x+7,y,8,color);d.drawFastHLine(x+7,y,4,color);d.fillCircle(x+4,y+8,2,color);}
-  else {d.drawRect(x+1,y+1,9,8,color);d.drawFastHLine(x+3,y+4,5,color);d.drawFastHLine(x+3,y+6,5,color);}
+  if(category==2){
+    switch(item){
+      case 0:d.drawFastVLine(x+3,y+3,8,color);d.drawFastVLine(x+7,y+1,10,color);d.drawFastVLine(x+11,y+5,6,color);d.drawFastHLine(x+2,y+10,11,color);break;
+      case 1:d.drawFastVLine(x+7,y+1,10,color);d.drawLine(x+7,y+2,x+3,y+7,color);d.drawLine(x+7,y+2,x+11,y+7,color);d.drawFastHLine(x+3,y+7,8,color);d.fillCircle(x+7,y+11,2,color);break;
+      case 2:d.fillTriangle(x+3,y+1,x+3,y+12,x+12,y+6,color);break;
+      case 3:d.drawFastVLine(x+7,y+6,6,color);d.drawFastHLine(x+4,y+12,7,color);d.drawArc(x+7,y+6,5,5,205,335,color);d.drawArc(x+7,y+6,9,9,205,335,color);break;
+      case 4:d.drawFastVLine(x+2,y+7,5,color);d.drawFastVLine(x+5,y+3,9,color);d.drawFastVLine(x+8,y+1,11,color);d.drawFastVLine(x+11,y+5,7,color);break;
+      default:d.drawRoundRect(x+3,y+1,8,10,3,color);d.drawFastVLine(x+7,y+11,3,color);d.drawFastHLine(x+4,y+14,7,color);break;
+    }
+  }else if(category==3){
+    switch(item){
+      case 0:d.drawRoundRect(x+1,y+4,13,9,2,color);d.drawLine(x+1,y+4,x+5,y+1,color);d.drawFastHLine(x+5,y+1,7,color);break;
+      case 1:d.drawFastVLine(x+7,y+1,12,color);d.drawFastHLine(x+3,y+4,8,color);d.drawLine(x+3,y+4,x+5,y+2,color);d.drawLine(x+3,y+4,x+5,y+6,color);d.drawLine(x+11,y+9,x+9,y+7,color);d.drawLine(x+11,y+9,x+9,y+11,color);break;
+      case 2:d.drawArc(x+7,y+9,5,5,205,335,color);d.drawArc(x+7,y+9,9,9,205,335,color);d.fillCircle(x+7,y+12,1,color);break;
+      case 3:d.drawArc(x+7,y+7,6,6,40,320,color);d.drawLine(x+11,y+2,x+13,y+5,color);d.drawLine(x+11,y+2,x+8,y+3,color);break;
+      case 4:d.drawRoundRect(x+2,y+1,11,12,2,color);d.drawFastHLine(x+4,y+4,7,color);d.drawFastHLine(x+4,y+7,7,color);d.drawFastHLine(x+4,y+10,4,color);break;
+      default:d.drawLine(x+7,y+1,x+3,y+4,color);d.drawLine(x+7,y+1,x+11,y+4,color);d.drawLine(x+3,y+4,x+11,y+10,color);d.drawLine(x+11,y+4,x+3,y+10,color);d.drawLine(x+3,y+10,x+7,y+13,color);d.drawLine(x+11,y+10,x+7,y+13,color);break;
+    }
+  }else if(category==1){
+    d.drawRoundRect(x+1,y+1,12,12,2,color);d.drawFastVLine(x+5,y+2,10,color);d.drawFastVLine(x+9,y+2,10,color);d.drawFastHLine(x+2,y+5,10,color);d.drawFastHLine(x+2,y+9,10,color);
+  }else{
+    switch(item){
+      case 0:d.drawArc(x+7,y+7,5,5,205,335,color);d.drawArc(x+7,y+7,9,9,205,335,color);d.fillCircle(x+7,y+10,1,color);break;
+      case 1:d.drawLine(x+7,y+1,x+3,y+4,color);d.drawLine(x+7,y+1,x+11,y+4,color);d.drawLine(x+3,y+4,x+11,y+10,color);d.drawLine(x+11,y+4,x+3,y+10,color);d.drawLine(x+3,y+10,x+7,y+13,color);d.drawLine(x+11,y+10,x+7,y+13,color);break;
+      case 2:d.fillCircle(x+3,y+3,2,color);d.fillCircle(x+11,y+3,2,color);d.drawLine(x+3,y+3,x+7,y+7,color);d.drawLine(x+11,y+3,x+7,y+7,color);d.fillCircle(x+7,y+7,2,color);break;
+      case 3:d.drawCircle(x+7,y+7,6,color);d.drawFastVLine(x+7,y+1,12,color);d.drawArc(x+7,y+7,4,6,90,270,color);d.drawArc(x+7,y+7,4,6,270,90,color);break;
+      case 4:d.drawRoundRect(x+1,y+2,12,10,2,color);d.drawFastHLine(x+4,y+5,6,color);d.drawFastHLine(x+4,y+8,4,color);break;
+      case 5:d.fillCircle(x+3,y+3,2,color);d.fillCircle(x+11,y+3,2,color);d.fillCircle(x+7,y+11,2,color);d.drawLine(x+4,y+4,x+6,y+9,color);d.drawLine(x+10,y+4,x+8,y+9,color);break;
+      case 6:d.drawLine(x+7,y+1,x+9,y+5,color);d.drawLine(x+9,y+5,x+13,y+7,color);d.drawLine(x+13,y+7,x+8,y+8,color);d.drawLine(x+8,y+8,x+6,y+13,color);d.drawLine(x+6,y+13,x+5,y+8,color);d.drawLine(x+5,y+8,x+1,y+6,color);break;
+      case 7:d.drawLine(x+7,y+1,x+12,y+3,color);d.drawLine(x+12,y+3,x+11,y+9,color);d.drawLine(x+11,y+9,x+7,y+13,color);d.drawLine(x+7,y+13,x+3,y+9,color);d.drawLine(x+3,y+9,x+2,y+3,color);d.drawLine(x+2,y+3,x+7,y+1,color);d.drawFastHLine(x+4,y+7,6,color);break;
+      default:d.drawRoundRect(x+1,y+1,12,12,2,color);d.drawFastHLine(x+4,y+4,6,color);d.drawFastHLine(x+4,y+7,6,color);d.drawFastHLine(x+4,y+10,6,color);break;
+    }
+  }
 }
 void drawCategoryMenu(){
-  bool music=screen==MUSICMENU,system=screen==SYSTEMMENU,games=screen==GAMESMENU;
+  const bool music=screen==MUSICMENU,system=screen==SYSTEMMENU,games=screen==GAMESMENU;
   const char* title=music?"MUSIC":(system?"SYSTEM":(games?"GAMES":"HACK"));
   const char** items=music?musicMenuItems:(system?systemMenuItems:(games?gamesMenuItems:hackMenuItems));
-  int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
+  const int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
+  const uint8_t category=music?2:(system?3:(games?1:0));
   const int visible=6;
   if(selected<0)selected=0;if(selected>=count)selected=count-1;
   if(selected<categoryScroll || selected>=categoryScroll+visible)categoryScroll=(selected/visible)*visible;
   header(title);auto& d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG);d.setCursor(9,39);d.printf("%02d MODULES",count);
+  d.fillRoundRect(8,51,224,12,3,0x2010);
+  d.setTextColor(UI_MUTED,0x2010);d.setCursor(13,54);d.printf("%02d AVAILABLE MODULES",count);
+  d.setTextColor(UI_CYAN,0x2010);d.setCursor(193,54);d.printf("%02d/%02d",selected+1,count);
   for(int cell=0;cell<visible;cell++){
-    int i=categoryScroll+cell;if(i>=count)break;
-    int x=8+(cell%2)*114,y=50+(cell/2)*22;
-    bool active=i==selected;uint16_t bg=active?PANEL:BG;
-    d.fillRoundRect(x,y,108,19,4,bg);
-    d.drawRoundRect(x,y,108,19,4,active?UI_PINK:0x5140);
-    drawModuleIcon(music?2:(system?3:(games?1:0)),x+4,y+5,active?UI_LAVENDER:UI_MUTED);
-    d.setTextColor(active?WHITE:UI_MUTED,bg);d.setCursor(x+19,y+6);
-    String label=String(items[i]);if(label.length()>13)label=label.substring(0,12)+"~";
-    d.print(label);
-    if(active)d.fillCircle(x+101,y+5,2,UI_PINK);
+    const int i=categoryScroll+cell;if(i>=count)break;
+    const int x=8+(cell%2)*114,y=64+(cell/2)*17;
+    const bool active=i==selected;const uint16_t fill=active?UI_PANEL_HI:0x1C0D;
+    d.fillRoundRect(x,y,108,15,4,fill);d.drawRoundRect(x,y,108,15,4,active?UI_PINK:UI_EDGE);
+    d.fillRoundRect(x+4,y+1,14,13,3,active?0x5020:0x2815);
+    drawModuleIcon(category,(uint8_t)i,x+4,y+1,active?UI_LAVENDER:UI_MUTED);
+    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+22,y+4);
+    String label=String(items[i]);if(label.length()>12)label=label.substring(0,11)+"~";
+    d.print(label);if(active)d.fillCircle(x+101,y+7,2,UI_PINK);
   }
   footer(", / LEFT RIGHT  ; . UP DOWN  ENTER LAUNCH");
 }
 void drawDeviceStatus(){
-  header("DEVICE STATUS");auto& d=M5Cardputer.Display;bool connected=WiFi.status()==WL_CONNECTED;
-  String ip=connected?WiFi.localIP().toString():String("NO IP");
-  String gateway=connected?WiFi.gatewayIP().toString():String("N/A");
-  String ssid=connected?WiFi.SSID():String("OFFLINE");if(ssid.length()>12)ssid=ssid.substring(0,12)+"..";
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,43);d.printf("IP: %s",ip.c_str());
-  d.setTextColor(WHITE,BG);d.setCursor(8,56);d.printf("MAC: %.17s",WiFi.macAddress().c_str());
-  d.setCursor(8,69);d.printf("GW: %s",gateway.c_str());
-  d.setCursor(8,82);d.printf("WIFI: %s %ddBm",ssid.c_str(),connected?WiFi.RSSI():0);
-  d.setCursor(8,95);d.printf("SD:%s BAT:%d%% %s",sdReady?"OK":"NO",batteryPercent(),batteryCharging()?"CHG":"");
-  d.setTextColor(UI_PINK,BG);d.setCursor(8,109);d.print(connected?(String("WEB: http://")+ip):String("WEB: CONNECT WI-FI"));
+  header("DEVICE STATUS");auto& d=M5Cardputer.Display;
+  const bool connected=WiFi.status()==WL_CONNECTED;
+  const String ip=connected?WiFi.localIP().toString():String("NO IP");
+  String ssid=connected?WiFi.SSID():String("OFFLINE");if(ssid.length()>20)ssid=ssid.substring(0,18)+"..";
+  d.fillRoundRect(8,52,224,29,5,0x2412);d.drawRoundRect(8,52,224,29,5,connected?UI_CYAN:UI_EDGE);
+  d.fillCircle(19,65,3,connected?UI_CYAN:UI_PINK);
+  d.setTextColor(connected?UI_CYAN:UI_PINK,0x2412);d.setCursor(29,57);d.print(connected?"NETWORK ONLINE":"NETWORK OFFLINE");
+  d.setTextColor(WHITE,0x2412);d.setCursor(29,68);d.printf("%s / %s",ssid.c_str(),ip.c_str());
+  d.fillRoundRect(8,86,108,26,4,0x2010);d.drawRoundRect(8,86,108,26,4,UI_EDGE);
+  d.setTextColor(UI_MUTED,0x2010);d.setCursor(14,90);d.print("BATTERY");
+  d.setTextColor(WHITE,0x2010);d.setCursor(14,101);d.printf("%d%% %s",batteryPercent(),batteryCharging()?"CHARGING":"");
+  d.fillRoundRect(124,86,108,26,4,0x2010);d.drawRoundRect(124,86,108,26,4,UI_EDGE);
+  d.setTextColor(UI_MUTED,0x2010);d.setCursor(130,90);d.print("HARDWARE");
+  d.setTextColor(WHITE,0x2010);d.setCursor(130,101);d.printf("SD %s %uMHz",sdReady?"OK":"--",ESP.getCpuFreqMHz());
   footer("ESC BACK");
 }
-
 void drawUpdateInfo(){
   header("FIRMWARE UPDATE");auto& d=M5Cardputer.Display;d.setTextColor(UI_LAVENDER,BG);
   d.setCursor(8,47);d.print("SOURCE: GITHUB RELEASES");d.setTextColor(UI_MUTED,BG);
@@ -437,25 +475,18 @@ void runFirmwareUpdate(){
 
 void splash(){
   auto &d=M5Cardputer.Display;
-  d.setBrightness(190);
-  d.fillScreen(BG);
-  d.setTextSize(3);
-  d.setTextColor(UI_PURPLE,BG);
-  d.setCursor(38,48); d.print("JOHNNY");
-  delay(350);
-  for(int i=0;i<10;i++) {
-    int y=random(43,87), x=random(12,45), w=random(70,205);
-    d.fillRect(x,y,w,2,i%2?UI_PINK:UI_PURPLE);
-    d.setTextColor(i%2?UI_PINK:UI_PURPLE,BG);
-    d.setCursor(37+random(-4,5),48+random(-2,3)); d.print("JOHNNY");
-    delay(32);
-  }
-  d.fillScreen(BG);
-  d.setTextColor(WHITE,BG); d.setCursor(38,43); d.print("JOHNNY");
-  d.setTextSize(1); d.setTextColor(UI_PINK,BG); d.setCursor(52,72); d.print("wake fuck up samurai");
-  delay(1100);
+  d.setBrightness(190);d.fillScreen(BG);
+  d.drawRoundRect(5,5,230,125,9,UI_EDGE);d.drawRoundRect(8,8,224,119,7,0x2815);
+  for(int x=16;x<232;x+=18)d.drawFastVLine(x,14,105,UI_GRID);
+  d.drawCircle(120,50,43,0x3014);d.drawCircle(120,50,37,0x4018);
+  d.drawFastHLine(22,91,196,UI_PURPLE);d.drawFastHLine(34,94,172,UI_GRID);
+  d.setTextSize(3);d.setTextColor(UI_PURPLE,BG);d.setCursor(65,37);d.print("JOHNNY");
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(63,36);d.print("JOHNNY");
+  d.drawFastHLine(57,67,126,UI_PINK);d.drawFastHLine(81,70,78,UI_CYAN);
+  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(72,82);d.print("WAKE FUCK UP SAMURAI");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(91,105);d.print("SYSTEM ONLINE");
+  delay(1150);
 }
-
 void pianoScreen() {
   header("POCKET SYNTH");
   auto &d=M5Cardputer.Display;
