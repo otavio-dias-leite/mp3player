@@ -898,7 +898,7 @@ void stopAudio();
 bool beginUsbMode();
 void startBleScan();void drawBleScreen();void serviceBleScan();
 void drawHackFxScreen();void drawHackInfo();
-void moveMusicTrack(int direction);void playSelectedTrack();uint8_t audioProgressPercent();
+void moveMusicTrack(int direction);void playSelectedTrack();uint8_t audioProgressPercent();void drawMusicDynamic();
 void drawUsbScreen(bool ok);
 String safeSdPath(String path) {
   path.trim();
