@@ -1085,8 +1085,8 @@ void stopAudioLocked() {
 bool stopAudio(){
   if(!audioCommandQueue||!audioTaskReady)return false;
   AudioCommand cmd{};cmd.type=AUDIO_CMD_STOP;
-  if(xQueueSendToFront(audioCommandQueue,&cmd,pdMS_TO_TICKS(150))!=pdTRUE)return false;
   audioStopRequested=true;
+  if(xQueueSendToFront(audioCommandQueue,&cmd,pdMS_TO_TICKS(150))!=pdTRUE){audioStopRequested=false;return false;}
   if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);
   return true;
 }
@@ -1100,8 +1100,9 @@ bool startAudioSource(AudioFileSource* source,const String& title,const String& 
   if(!audioTaskReady||!audioCommandQueue){source->close();delete source;audioStatusMessage="AUDIO TASK UNAVAILABLE";return false;}
   AudioCommand cmd{};cmd.type=AUDIO_CMD_START;cmd.source=source;cmd.radio=radio;
   strlcpy(cmd.title,title.c_str(),sizeof(cmd.title));strlcpy(cmd.extension,extension.c_str(),sizeof(cmd.extension));
-  if(xQueueSend(audioCommandQueue,&cmd,pdMS_TO_TICKS(100))!=pdTRUE){source->close();delete source;audioStatusMessage="PLAYER BUSY";return false;}
-  audioNowTitle=title;audioPaused=false;audioStarting=true;audioStarted=false;audioStopRequested=false;audioStatusMessage="LOADING";
+  audioStarting=true;audioStarted=false;audioPaused=false;
+  if(xQueueSend(audioCommandQueue,&cmd,pdMS_TO_TICKS(100))!=pdTRUE){audioStarting=false;source->close();delete source;audioStatusMessage="PLAYER BUSY";return false;}
+  audioNowTitle=title;audioStopRequested=false;audioStatusMessage="LOADING";
   if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);return true;
 }
 String audioExtension(const String& path) {
