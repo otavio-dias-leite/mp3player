@@ -1628,13 +1628,17 @@ void drawLife();
 bool loadLife();
 void openLegacyApp();
 void stopRadioRecording();
-void stopModuleTasks(){
+bool stopModuleTasks(){
   if(bleScanner||bleScanning||bleInitialized)stopBleScan();
   if(micRecording)stopMicRecording();else stopMicCapture();
-  if(!stopAudioAndWait(1400))return;
+  if(!stopAudioAndWait(1400))return false;
   if(radioRecordState==1||radioRecordState==2)stopRadioRecording();
+  const uint32_t started=millis();
+  while(radioRecordState==3&&(uint32_t)(millis()-started)<1800UL)vTaskDelay(pdMS_TO_TICKS(5));
+  if(radioRecordState==3)return false;
   if(wifiScanPending){WiFi.scanDelete();wifiScanPending=false;}
   hackVisualFx=false;
+  return true;
 }
 void openApp(){
   if(screen==HOME){screen=selected==0?HACKMENU:(selected==1?GAMESMENU:(selected==2?MUSICMENU:SYSTEMMENU));selected=0;drawCategoryMenu();return;}
@@ -1654,7 +1658,7 @@ void openApp(){
   openLegacyApp();
 }
 void openLegacyApp() {
-  stopModuleTasks();
+  if(!stopModuleTasks()){drawCategoryMenu();return;}
   if(audioStarted||audioStopRequested){screen=MUSIC;musicNowPlaying=true;drawMusicInfo(audioNowTitle);return;}
   switch(selected) {
     case 0: if(!stopAudioAndWait(650)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}stopMicCapture();audioEqualizer.reset();screen=PIANO;pianoScreen();break;
