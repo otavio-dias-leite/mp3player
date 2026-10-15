@@ -1,8 +1,6 @@
 name: Deploy JOHNNY website
 
 on:
-  push:
-    branches: [main]
   workflow_run:
     workflows: ["Firmware build"]
     types: [completed]
@@ -32,11 +30,12 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          API="https://api.github.com/repos/otavio-dias-leite/johnny/releases/latest"
+          EXPECTED_SHA="$(git rev-parse HEAD)"
+          TAG="johnny-$(printf '%.12s' "$EXPECTED_SHA")"
+          API="https://api.github.com/repos/otavio-dias-leite/johnny/releases/tags/$TAG"
           for attempt in $(seq 1 36); do
             curl --fail --silent --show-error \
               -H "Accept: application/vnd.github+json" \
