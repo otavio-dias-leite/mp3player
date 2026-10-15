@@ -114,7 +114,9 @@ public:
     if(!speaker_||bufferIndex_==0)return;
     // Bound output back-pressure so MP3 decoding cannot monopolize the audio mutex.
     uint32_t started=millis();
-    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<24UL) vTaskDelay(1);
+    uint32_t waitMs=(uint32_t)(kBufferSamples*1000UL/(hertz?hertz:22050U))+2UL;
+    if(waitMs>48UL)waitMs=48UL;
+    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<waitMs) vTaskDelay(1);
     if(speaker_->isPlaying()) speaker_->stop();
     speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,false);
     bufferSlot_=(bufferSlot_+1)%3;bufferIndex_=0;
@@ -1097,7 +1099,7 @@ void stopAudioLocked() {
 void stopAudio() {
   // Never wait indefinitely for the decoder task from the UI thread.
   audioStopRequested=true;
-  if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(35))==pdTRUE) {
+  if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(55))==pdTRUE) {
     stopAudioLocked();
     audioTaskEnded=false;
     xSemaphoreGive(audioMutex);
