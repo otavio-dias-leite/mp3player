@@ -191,7 +191,7 @@ uint32_t audioCoverSize=0;
 bool audioCoverPng=false;
 bool audioShuffle=false;
 uint8_t audioRepeatMode=0;
-int audioVolume=14;
+int audioVolume=21;
 AudioFileSource* audioRawSource=nullptr;
 AudioFileSourceBuffer* audioInputBuffer=nullptr;
 AudioGenerator* audioDecoder=nullptr;
@@ -244,7 +244,7 @@ bool micStarted=false;
 uint32_t micWarmupUntil=0;
 constexpr size_t SYNTH_SAMPLES=4096;
 constexpr uint8_t SYNTH_AUDIO_CHANNEL=2;
-constexpr size_t BOOT_JINGLE_SAMPLES=8192;
+constexpr size_t BOOT_JINGLE_SAMPLES=16384;
 static int16_t bootJingleBuffer[BOOT_JINGLE_SAMPLES];
 static int16_t alarmToneSamples[512];
 static int16_t synthPadSamples[8192];
@@ -489,31 +489,46 @@ void splash(){
   delay(1150);
 }
 void playBootJingle(){
-  // Original JOHNNY startup motif; deliberately not a transcription of any game soundtrack.
+  // Original JOHNNY startup motif; slower and longer.
   const uint16_t notes[8]={659,784,988,880,698,587,784,1047};
   for(size_t i=0;i<BOOT_JINGLE_SAMPLES;i++){
-    size_t step=i/1024,offset=i%1024;float phase=6.28318530718f*(float)notes[step]*(float)offset/16000.0f;
-    float attack=min(1.0f,(float)offset/90.0f),release=min(1.0f,(float)(1023-offset)/130.0f);
-    float env=min(attack,release);float sample=(sinf(phase)+0.12f*sinf(phase*2.0f))*env*5200.0f;
-    if(sample>32767.0f)sample=32767.0f;if(sample< -32768.0f)sample=-32768.0f;bootJingleBuffer[i]=(int16_t)sample;
+    const size_t step=i/2048,offset=i%2048;
+    const float phase=6.28318530718f*(float)notes[step]*(float)offset/16000.0f;
+    const float attack=min(1.0f,(float)offset/150.0f),release=min(1.0f,(float)(2047-offset)/220.0f);
+    const float env=min(attack,release);
+    const float sample=(sinf(phase)+0.10f*sinf(phase*2.0f))*env*10500.0f;
+    bootJingleBuffer[i]=(int16_t)constrain(sample,-32768.0f,32767.0f);
   }
-  M5Cardputer.Speaker.setVolume(118);
+  M5Cardputer.Speaker.setVolume(255);
   M5Cardputer.Speaker.playRaw(bootJingleBuffer,BOOT_JINGLE_SAMPLES,16000,false,1,0,false);
 }
+void drawPianoStatus(){
+  auto& d=M5Cardputer.Display;
+  d.fillRect(7,96,226,21,BG);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(9,99);d.printf("PAD %u",synthPadSelected+1);
+  d.setTextColor(micRecording?UI_PINK:UI_LAVENDER,BG);d.setCursor(72,99);d.print(micRecording?"REC":"READY");
+  d.setTextColor(UI_CYAN,BG);d.setCursor(9,111);d.printf("%s   %d%%",effectNames[pianoEffect],pianoVolume);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(133,111);d.print("[R] REC  [ ] PAD");
+}
 void pianoScreen() {
-  header("POCKET SYNTH");
-  auto &d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG);d.setCursor(8,42);d.printf("OCT %d  %s  VOL %d%%",4+pianoOctave,effectNames[pianoEffect],pianoVolume);
+  header("SYNTH");
+  auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_MUTED,BG);d.setCursor(9,42);d.printf("OCT %d",4+pianoOctave);
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(151,42);d.print(effectNames[pianoEffect]);
   const char* labels[]={"C","D","E","F","G","A","B"};
-  for(int i=0;i<7;i++){int x=5+i*33;uint16_t key=(i==1||i==3)?0xBDBF:0xEFFF;d.fillRoundRect(x,55,30,28,3,key);d.setTextColor(BG,key);d.setCursor(x+11,60);d.print(labels[i]);d.setCursor(x+10,71);d.printf("%c","QWERTYU"[i]);}
-  d.setTextColor(UI_CYAN,BG);d.setCursor(8,88);d.print("1-7 SHARPS   S/A/L FLATS   Q-U / I-O-P NOTES");
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,101);d.printf("PADS Z X C V B N M  |  PAD %u %s",synthPadSelected+1,micRecording?"REC":"READY");
-  d.setTextColor(UI_MUTED,BG);d.setCursor(8,113);d.print("R RECORD PAD   [ ] SELECT PAD");footer(", / OCTAVE   ; . TIMBRE   - / + VOLUME   ESC BACK");
+  for(int i=0;i<7;i++){
+    const int x=5+i*33;const uint16_t key=(i==1||i==3)?0xBDBF:0xEFFF;
+    d.fillRoundRect(x,55,30,30,4,key);d.setTextColor(BG,key);
+    d.setCursor(x+11,61);d.print(labels[i]);d.setCursor(x+11,73);d.printf("%c","QWERTYU"[i]);
+  }
+  drawPianoStatus();
+  footer(", / OCT   ; . FX   - / + VOL   ESC BACK");
 }
 float synthWave(uint32_t phase){return synthSineTable[(uint16_t)(phase>>22)];}
 void requestSynthPad(uint8_t index){if(index>6||!sdReady)return;synthPadRequest=(int8_t)index;}
 void playNote(char c){
   c=(char)tolower((unsigned char)c);
+  if(c=='r')return;
   const char* pads="zxcvbnm";const char* pad=strchr(pads,c);
   if(pad){requestSynthPad((uint8_t)(pad-pads));return;}
   int semitone=-1;const char* natural="qwertyuiop";const int offsets[10]={0,2,4,5,7,9,11,12,14,16};const char* n=strchr(natural,c);if(n)semitone=offsets[n-natural];
@@ -1760,21 +1775,21 @@ void startMicRecording(){
   else{SD.mkdir("/RECORDINGS");for(int i=1;i<=9999;i++){char name[32];snprintf(name,sizeof(name),"/RECORDINGS/MIC%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}}
   if(candidate.length()==0||SD.exists(candidate)){micRecordStatus="NO FREE FILENAME";micRecordPadIndex=-1;drawMicRecorder();return;}
   micRecordFile=SD.open(candidate,FILE_WRITE);if(!micRecordFile){micRecordStatus="FILE OPEN FAILED";if(screen==PIANO)pianoScreen();else drawMicRecorder();return;}
-  uint8_t blank[44]{};micRecordFile.write(blank,sizeof(blank));micRecordPath=candidate;micRecordBytes=0;micRecording=true;micRecordStatus="RECORDING PCM 16 KHZ";micRecordLastDraw=0;if(screen==PIANO)pianoScreen();else drawMicRecorder();
+  uint8_t blank[44]{};micRecordFile.write(blank,sizeof(blank));micRecordPath=candidate;micRecordBytes=0;micRecording=true;micRecordStatus="RECORDING PCM 16 KHZ";micRecordLastDraw=0;if(screen==PIANO)drawPianoStatus();else drawMicRecorder();
 }
 void stopMicRecording(){
   if(!micRecording)return;
   micRecording=false;
   if(micRecordFile){writeWavHeader(micRecordFile,micRecordBytes,16000);micRecordFile.flush();micRecordFile.close();}
-  stopMicCapture();micRecordStatus=micRecordPadIndex>=0?"PAD SAMPLE SAVED":"SAVED TO MICROSD";micRecordPadIndex=-1;if(screen==PIANO)pianoScreen();else drawMicRecorder();
+  stopMicCapture();micRecordStatus=micRecordPadIndex>=0?"PAD SAMPLE SAVED":"SAVED TO MICROSD";micRecordPadIndex=-1;if(screen==PIANO)drawPianoStatus();else drawMicRecorder();
 }
 void serviceMicRecorder(){
   if(!micRecording)return;
-  if(!captureMic(micRecordSamples,3072,420)){if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)pianoScreen();else drawMicRecorder();}}return;}
+  if(!captureMic(micRecordSamples,3072,420)){if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)drawPianoStatus();else drawMicRecorder();}}return;}
   size_t bytes=sizeof(micRecordSamples);
   if(!micRecordFile||micRecordFile.write((const uint8_t*)micRecordSamples,bytes)!=bytes){micRecordStatus="SD WRITE ERROR";stopMicRecording();return;}
   micRecordBytes+=(uint32_t)bytes;
-  if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)pianoScreen();else drawMicRecorder();}}
+  if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)drawPianoStatus();else drawMicRecorder();}}
 }
 void radioRecorderTask(void* parameter){
   (void)parameter;File output;radioRecorderTaskReady=true;
@@ -1928,7 +1943,7 @@ void setup() {
   M5Cardputer.begin(cfg,true);
   M5Cardputer.Display.setRotation(1);
   M5Cardputer.Speaker.begin();
-  M5Cardputer.Speaker.setVolume(118);playBootJingle();
+  M5Cardputer.Speaker.setVolume(255);playBootJingle();
   audioMutex=xSemaphoreCreateMutex();
   if(!audioMutex) Serial.println("JOHNNY: AUDIO MUTEX FAILED");
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
