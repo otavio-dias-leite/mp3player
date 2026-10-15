@@ -1392,8 +1392,10 @@ void serviceAudio() {
 void audioTask(void* parameter) {
   (void)parameter;
   audioTaskReady=true;
+  // Keep decoding cooperative: never wait behind UI/control code and never
+  // run above the Arduino loop task. This prevents audio from starving redraws.
   for(;;) {
-    if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(50))==pdTRUE) {
+    if(audioMutex && xSemaphoreTake(audioMutex,0)==pdTRUE) {
       if(audioStarted && !audioPaused && audioDecoder) {
         if(!audioDecoder->loop()) {
           audioTaskEndedWasRadio=audioIsRadio;
@@ -1760,7 +1762,9 @@ void setup() {
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
   refreshBatteryCache(true);
-  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,3,nullptr,1);
+  // Audio shares core 1 with the UI at equal priority and yields every 1 ms.
+  // This keeps playback smooth without allowing the decoder to freeze menus.
+  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",8192,nullptr,1,nullptr,1);
   radioRecordQueue=xQueueCreate(8,sizeof(RadioRecordBlock));
   if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,2,nullptr,0);
   splash();selected=0;drawHome();
