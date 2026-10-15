@@ -113,11 +113,16 @@ public:
   }
   void flush() override {
     if(!speaker_||bufferIndex_==0)return;
-    // Bound output back-pressure so MP3 decoding cannot monopolize the audio mutex.
-    uint32_t started=millis();bool queued=false;
-    // Never truncate a DMA block to make room for the next decoder block.
-    while((uint32_t)(millis()-started)<120UL){if(speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,false)){queued=true;break;}vTaskDelay(pdMS_TO_TICKS(1));}
-    if(queued)bufferSlot_=(bufferSlot_+1)%3;bufferIndex_=0;
+    // Apply back-pressure instead of silently discarding decoded MP3 samples.
+    while(!audioStopRequested){
+      if(speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,false)){
+        bufferSlot_=(bufferSlot_+1)%3;
+        bufferIndex_=0;
+        return;
+      }
+      vTaskDelay(pdMS_TO_TICKS(1));
+    }
+    bufferIndex_=0;
   }
   void flushRecording(){if(recordIndex_>0)sendRecordBlock();}
   void resetRecordingBuffer(){recordIndex_=0;}
@@ -343,20 +348,20 @@ void drawUiGrid(int top=20,int bottom=117){
   d.drawFastHLine(7,top,226,UI_EDGE);
 }
 void header(const char* title) {
-  auto &d=M5Cardputer.Display;
-  d.fillScreen(BG);d.fillRect(0,0,240,19,0x1808);drawUiGrid(20,117);
-  d.fillRoundRect(6,3,11,11,3,0x3815);d.drawRoundRect(6,3,11,11,3,UI_PURPLE);
-  d.drawFastVLine(11,5,7,UI_LAVENDER);d.drawFastHLine(8,8,7,UI_PINK);
-  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(21,5);d.print("JOHNNY");
-  d.setTextColor(UI_MUTED,BG);d.setCursor(66,5);d.print("CARDPUTER ADV");drawBatteryIndicator();
-  d.fillRoundRect(7,23,226,24,5,0x1C0D);d.drawRoundRect(7,23,226,24,5,UI_EDGE);
-  d.fillRoundRect(7,23,3,24,1,UI_PINK);
-  d.setTextSize(2);d.setTextColor(WHITE,0x1C0D);d.setCursor(15,28);d.print(title);d.setTextSize(1);
+  auto& d=M5Cardputer.Display;
+  d.fillScreen(BG);
+  d.fillRect(0,0,240,19,0x1008);
+  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(9,5);d.print("JOHNNY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(184,5);d.print("ADV");
+  drawBatteryIndicator();
+  d.drawFastHLine(8,21,224,UI_EDGE);
+  d.setTextSize(2);d.setTextColor(WHITE,BG);d.setCursor(9,29);d.print(title);
+  d.setTextSize(1);
 }
 void footer(const char* s="") {
+  (void)s;
   auto& d=M5Cardputer.Display;
-  d.drawFastHLine(7,117,226,0x5140);
-  d.setTextSize(1);d.setTextColor(UI_MUTED,BG);d.setCursor(8,123);d.print(s);
+  d.drawFastHLine(8,117,224,UI_EDGE);
 }
 void drawAppIcon(uint8_t app,int x,int y,uint16_t color){
   auto& d=M5Cardputer.Display;
@@ -366,18 +371,19 @@ void drawAppIcon(uint8_t app,int x,int y,uint16_t color){
   else{d.drawCircle(x+10,y+10,6,color);d.drawCircle(x+10,y+10,2,color);d.drawFastHLine(x,y+10,3,color);d.drawFastHLine(x+17,y+10,3,color);d.drawFastVLine(x+10,y,3,color);d.drawFastVLine(x+10,y+17,3,color);}
 }
 void drawHome(){
-  auto& d=M5Cardputer.Display;d.fillScreen(BG);d.fillRect(0,0,240,19,0x1808);drawUiGrid(20,117);
-  d.fillRoundRect(6,3,11,11,3,0x3815);d.drawRoundRect(6,3,11,11,3,UI_PURPLE);d.drawFastVLine(11,5,7,UI_LAVENDER);d.drawFastHLine(8,8,7,UI_PINK);
-  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(21,5);d.print("JOHNNY");d.setTextColor(UI_MUTED,BG);d.setCursor(66,5);d.print("CARDPUTER ADV // 1.0");drawBatteryIndicator();
+  auto& d=M5Cardputer.Display;
+  d.fillScreen(BG);d.fillRect(0,0,240,19,0x1008);
+  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(9,5);d.print("JOHNNY");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(184,5);d.print("ADV");drawBatteryIndicator();
   const char* labels[APP_COUNT]={"HACK","GAMES","MUSIC","SYSTEM"};
-  const char* hints[APP_COUNT]={"NETWORK / INFORMATION SECURITY","LIGHTWEIGHT ARCADE","PLAYER / RADIO / SYNTH","DEVICE / CLOCK / STORAGE"};
-  int idx=constrain(selected,0,APP_COUNT-1);
-  d.fillRoundRect(8,29,224,84,7,UI_PANEL_HI);d.drawRoundRect(8,29,224,84,7,UI_PINK);d.fillRoundRect(8,29,5,84,2,UI_PINK);
-  d.setTextSize(2);d.setTextColor(UI_CYAN,BG);d.setCursor(18,39);d.printf("0%d",idx+1);d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(184,43);d.printf("%02d / 04",idx+1);
-  d.fillRoundRect(18,60,38,38,7,0x3015);drawAppIcon((uint8_t)idx,27,69,UI_LAVENDER);
-  d.setTextSize(2);d.setTextColor(WHITE,BG);d.setCursor(65,64);d.print(labels[idx]);d.setTextSize(1);d.setTextColor(UI_MUTED,BG);d.setCursor(65,88);d.print(hints[idx]);
-  for(int i=0;i<APP_COUNT;i++)d.fillCircle(102+i*13,105,3,i==idx?UI_PINK:UI_EDGE);
-  d.setTextColor(UI_MUTED,BG);d.setCursor(12,122);d.print("LEFT / RIGHT CHANGE SECTION   ENTER OPEN");
+  const int idx=constrain(selected,0,APP_COUNT-1);
+  d.fillRoundRect(8,31,224,78,8,UI_PANEL_HI);
+  d.drawRoundRect(8,31,224,78,8,UI_EDGE);
+  d.fillRoundRect(8,31,3,78,1,UI_PINK);
+  d.fillRoundRect(18,50,38,38,7,0x3015);drawAppIcon((uint8_t)idx,27,59,UI_LAVENDER);
+  d.setTextSize(2);d.setTextColor(WHITE,BG);d.setCursor(68,59);d.print(labels[idx]);
+  d.setTextSize(1);
+  for(int i=0;i<APP_COUNT;i++)d.fillCircle(102+i*13,121,2,i==idx?UI_PINK:UI_EDGE);
 }
 void drawModuleIcon(uint8_t category,uint8_t item,int x,int y,uint16_t color){
   auto& d=M5Cardputer.Display;
