@@ -482,28 +482,30 @@ void runFirmwareUpdate(){
 }
 
 void splash(){
-  auto &d=M5Cardputer.Display;
+  auto& d=M5Cardputer.Display;
   d.setBrightness(190);d.fillScreen(BG);
-  d.drawRoundRect(5,5,230,125,9,UI_EDGE);d.drawRoundRect(8,8,224,119,7,0x2815);
-  for(int x=16;x<232;x+=18)d.drawFastVLine(x,14,105,UI_GRID);
-  d.drawCircle(120,50,43,0x3014);d.drawCircle(120,50,37,0x4018);
-  d.drawFastHLine(22,91,196,UI_PURPLE);d.drawFastHLine(34,94,172,UI_GRID);
-  d.setTextSize(3);d.setTextColor(UI_PURPLE,BG);d.setCursor(65,37);d.print("JOHNNY");
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(63,36);d.print("JOHNNY");
-  d.drawFastHLine(57,67,126,UI_PINK);d.drawFastHLine(81,70,78,UI_CYAN);
-  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(72,82);d.print("WAKE FUCK UP SAMURAI");
-  d.setTextColor(UI_MUTED,BG);d.setCursor(91,105);d.print("SYSTEM ONLINE");
-  delay(1150);
+  d.fillCircle(120,64,37,0x2412);d.drawCircle(120,64,37,UI_EDGE);
+  d.drawCircle(120,64,27,UI_PURPLE);d.drawCircle(120,64,18,UI_PINK);
+  d.drawFastHLine(91,64,58,UI_LAVENDER);
+  d.drawFastVLine(120,35,58,UI_CYAN);
+  d.fillCircle(120,64,5,UI_LAVENDER);
+  delay(240);
 }
 void playBootJingle(){
-  // Original JOHNNY startup motif; slower and longer.
-  const uint16_t notes[8]={659,784,988,880,698,587,784,1047};
+  // Original slow, saturated electric-guitar-like arpeggio; no sampled recording.
+  const float notes[8]={110.0f,164.81f,220.0f,164.81f,130.81f,196.0f,261.63f,196.0f};
+  const size_t samplesPerNote=6000;
   for(size_t i=0;i<BOOT_JINGLE_SAMPLES;i++){
-    const size_t step=i/2048,offset=i%2048;
-    const float phase=6.28318530718f*(float)notes[step]*(float)offset/16000.0f;
-    const float attack=min(1.0f,(float)offset/150.0f),release=min(1.0f,(float)(2047-offset)/220.0f);
-    const float env=min(attack,release);
-    const float sample=(sinf(phase)+0.10f*sinf(phase*2.0f))*env*10500.0f;
+    const size_t step=i/samplesPerNote,offset=i%samplesPerNote;
+    const float t=(float)offset/16000.0f;
+    const float f=notes[step]*(1.0f+0.012f*sinf(6.2831853f*4.2f*t));
+    const float phase=6.2831853f*f*t;
+    float guitar=0.62f*sinf(phase)+0.24f*sinf(phase*2.01f)+0.10f*sinf(phase*3.97f);
+    guitar=tanhf(guitar*2.8f);
+    const float attack=min(1.0f,(float)offset/900.0f);
+    const float decay=expf(-(float)offset/5200.0f);
+    const float tail=(step==7)?min(1.0f,(float)(BOOT_JINGLE_SAMPLES-i)/4500.0f):1.0f;
+    const float sample=guitar*attack*decay*tail*11500.0f;
     bootJingleBuffer[i]=(int16_t)constrain(sample,-32768.0f,32767.0f);
   }
   M5Cardputer.Speaker.setVolume(255);
@@ -537,7 +539,7 @@ void pianoScreen() {
   footer(", / OCT   ; . FX   - / + VOL   ESC BACK");
 }
 float synthWave(uint32_t phase){return synthSineTable[(uint16_t)(phase>>22)];}
-void requestSynthPad(uint8_t index){if(index>6||!sdReady)return;synthPadRequest=(int8_t)index;}
+void requestSynthPad(uint8_t index){if(index>6||!sdReady)return;synthPadRequest=(int8_t)index;if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
 void playNote(char c){
   c=(char)tolower((unsigned char)c);
   if(c=='r')return;
@@ -1242,6 +1244,7 @@ bool startAudioSource(AudioFileSource* source, const String& title, const String
   audioStatusMessage=radio?"LIVE RADIO":"PLAYING";
   M5Cardputer.Speaker.setVolume(255);
   if(audioMutex) xSemaphoreGive(audioMutex);
+  if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);
   return true;
 }
 String audioExtension(const String& path) {
@@ -1476,10 +1479,11 @@ void serviceAudio() {
 void audioTask(void* parameter) {
   (void)parameter;audioTaskReady=true;
   for(;;){
-    if(audioMutex&&xSemaphoreTake(audioMutex,0)==pdTRUE){
+    if(audioMutex&&xSemaphoreTake(audioMutex,portMAX_DELAY)==pdTRUE){
       if(audioStopRequested){stopAudioLocked();audioTaskEnded=false;}
-      else if(audioStarted&&!audioPaused&&audioDecoder){if(!audioDecoder->loop()){audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;}}
-      else if(synthPadRequest>=0&&!audioStarted){
+      else if(audioStarted&&!audioPaused&&audioDecoder){
+        if(!audioDecoder->loop()){audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;}
+      }else if(synthPadRequest>=0&&!audioStarted){
         int pad=synthPadRequest;synthPadRequest=-1;char path[40];snprintf(path,sizeof(path),"/JOHNNY/PADS/PAD%d.WAV",pad+1);
         File sample=SD.open(path,FILE_READ);
         if(sample&&sample.size()>44){uint8_t head[44];bool valid=sample.read(head,44)==44&&memcmp(head,"RIFF",4)==0&&memcmp(head+8,"WAVE",4)==0;
@@ -1489,7 +1493,8 @@ void audioTask(void* parameter) {
       }
       xSemaphoreGive(audioMutex);
     }
-    vTaskDelay(pdMS_TO_TICKS(1));
+    if(!audioStarted&&!audioStopRequested&&synthPadRequest<0)ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+    else vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
 void toggleAudioPause() {
@@ -1754,7 +1759,7 @@ void startRadioRecording(){
   for(int i=1;i<=9999;i++){char name[32];snprintf(name,sizeof(name),"/RECORDINGS/RADIO%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}
   if(candidate.length()==0||SD.exists(candidate)){radioRecordState=5;return;}
   radioRecordPath=candidate;radioRecordFailed=false;radioRecordSampleRate=0;radioRecordDataBytes=0;
-  radioRecordState=1;radioRecordStartRequested=true;
+  radioRecordState=1;radioRecordStartRequested=true;if(johnnyRecorderTaskHandle)xTaskNotifyGive(johnnyRecorderTaskHandle);
 }
 void stopRadioRecording(){
   if(radioRecordState!=1&&radioRecordState!=2)return;
@@ -1762,6 +1767,7 @@ void stopRadioRecording(){
   if(audioOutput)audioOutput->flushRecording();
   radioRecording=false;radioRecordStopRequested=true;radioRecordState=3;
   if(audioMutex)xSemaphoreGive(audioMutex);
+  if(johnnyRecorderTaskHandle)xTaskNotifyGive(johnnyRecorderTaskHandle);
 }
 void writeWavHeader(File& file,uint32_t dataBytes,uint32_t sampleRate){
   uint8_t h[44]{};memcpy(h,"RIFF",4);uint32_t riff=36U+dataBytes;memcpy(h+4,&riff,4);
@@ -1806,6 +1812,8 @@ void serviceMicRecorder(){
 void radioRecorderTask(void* parameter){
   (void)parameter;File output;radioRecorderTaskReady=true;
   for(;;){
+    if(!radioRecordStartRequested&&!radioRecordStopRequested&&radioRecordState!=2)
+      ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
     if(radioRecordStartRequested){
       radioRecordStartRequested=false;if(output)output.close();
       if(!SD.exists("/RECORDINGS"))SD.mkdir("/RECORDINGS");
@@ -1814,7 +1822,7 @@ void radioRecorderTask(void* parameter){
       else{radioRecording=false;radioRecordState=5;}
     }
     RadioRecordBlock block{};
-    if(radioRecordQueue&&xQueueReceive(radioRecordQueue,&block,pdMS_TO_TICKS(40))==pdTRUE){
+    if(radioRecordState==2&&radioRecordQueue&&xQueueReceive(radioRecordQueue,&block,pdMS_TO_TICKS(40))==pdTRUE){
       if(output&&block.count>0){
         size_t bytes=(size_t)block.count*sizeof(int16_t),written=output.write((const uint8_t*)block.samples,bytes);
         if(written==bytes)radioRecordDataBytes+=(uint32_t)written;
@@ -1826,7 +1834,6 @@ void radioRecorderTask(void* parameter){
       if(output){uint32_t rate=radioRecordSampleRate>0?radioRecordSampleRate:22050U;writeWavHeader(output,radioRecordDataBytes,rate);output.flush();output.close();radioRecordState=radioRecordFailed?5:4;}
       else radioRecordState=5;
     }
-    vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
 
@@ -1980,11 +1987,10 @@ void setup() {
   micCfg.sample_rate=16000;
   M5Cardputer.Mic.config(micCfg);
   refreshBatteryCache(true);
-  // Audio shares core 1 with the UI at equal priority and yields every 1 ms.
-  // This keeps playback smooth without allowing the decoder to freeze menus.
+  // Workers sleep completely while their module is idle; notifications wake only the active worker.
   if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,&johnnyAudioTaskHandle,0);
   radioRecordQueue=xQueueCreate(8,sizeof(RadioRecordBlock));
-  if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,2,&johnnyRecorderTaskHandle,0);
+  if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,1,&johnnyRecorderTaskHandle,0);
   splash();selected=0;drawHome();
 }
 void loop() {
