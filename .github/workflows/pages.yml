@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   workflow_run:
-    workflows: ["Build and publish JOHNNY firmware"]
+    workflows: ["Firmware build"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
