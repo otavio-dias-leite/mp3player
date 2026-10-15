@@ -1167,6 +1167,7 @@ void stopAudioLocked() {
 }
 void stopAudio() {
   audioStopRequested=true;
+  if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);
   if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(55))==pdTRUE){stopAudioLocked();audioTaskEnded=false;xSemaphoreGive(audioMutex);}
 }
 bool stopAudioAndWait(uint32_t timeoutMs=650){
@@ -1494,7 +1495,8 @@ void audioTask(void* parameter) {
       }
       xSemaphoreGive(audioMutex);
     }
-    if(!audioStarted&&!audioStopRequested&&synthPadRequest<0)ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
+    if((!audioStarted||audioPaused)&&!audioStopRequested&&synthPadRequest<0)
+      ulTaskNotifyTake(pdTRUE,portMAX_DELAY);
     else vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
@@ -1505,6 +1507,7 @@ void toggleAudioPause() {
   }
   audioPaused=!audioPaused;
   xSemaphoreGive(audioMutex);
+  if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);
 }
 void setAudioVolume(int value) {
   if(!audioMutex || xSemaphoreTake(audioMutex,pdMS_TO_TICKS(5))!=pdTRUE) {
