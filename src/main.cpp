@@ -113,8 +113,9 @@ public:
   }
   void flush() override {
     if(!speaker_||bufferIndex_==0)return;
-    // Apply back-pressure instead of silently discarding decoded MP3 samples.
-    while(!audioStopRequested){
+    // Retry for a generous DMA window before abandoning a genuinely stalled output.
+    const uint32_t started=millis();
+    while((uint32_t)(millis()-started)<750UL){
       if(speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,false)){
         bufferSlot_=(bufferSlot_+1)%3;
         bufferIndex_=0;
