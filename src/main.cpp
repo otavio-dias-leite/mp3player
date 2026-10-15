@@ -12,7 +12,7 @@
 #include "johnny_version.h"
 namespace {
 constexpr int CS=12,SCK_PIN=40,MISO_PIN=39,MOSI_PIN=14;
-constexpr uint16_t BG=0x0000,PANEL=0x2104,JOHNNY_RED=0xF124,LIGHT=0xFC8E,MUTED=0x8410,EDGE=0x5000;
+constexpr uint16_t BG=0x0000,PANEL=0x2104,LIGHT=0xFC8E,MUTED=0x8410,EDGE=0x5000;uint16_t JOHNNY_RED=0xF124;
 SPIClass sd(FSPI);bool sdOK=false;
 enum Page:uint8_t{HOME,LIST,PLAYER,SYSTEM,WIFI_SCAN,SYNTH,TUNER,RECORDER,GAME,SETTINGS};Page page=HOME;
 bool musicOnly=true,playing=false,paused=false;bool micActive=false;uint8_t brightness=180;bool alternateTheme=false;uint32_t lastGameTick=0;int snakeX[80],snakeY[80],snakeLen=4,dirX=1,dirY=0,foodX=12,foodY=6;bool gameOver=false;static int16_t recordSamples[32000];
@@ -76,7 +76,7 @@ void bootSplash(){
  }
  d.setTextDatum(top_left);d.fillScreen(BG);
 }
-void setup(){Serial.begin(115200);auto cfg=M5.config();M5Cardputer.begin(cfg,true);M5Cardputer.Display.setRotation(1);M5Cardputer.Speaker.begin();M5Cardputer.Speaker.setVolume(190);pinMode(38,OUTPUT);digitalWrite(38,HIGH);sd.begin(SCK_PIN,MISO_PIN,MOSI_PIN,CS);sdOK=SD.begin(CS,sd,16000000);bootSplash();homeDraw();Serial.printf("JOHNNY %s SD=%d\n",JOHNNY_VERSION,sdOK);}
+void setup(){Serial.begin(115200);auto cfg=M5.config();M5Cardputer.begin(cfg,true);M5Cardputer.Display.setRotation(1);M5Cardputer.Speaker.begin();M5Cardputer.Speaker.setVolume(190);pinMode(38,OUTPUT);digitalWrite(38,HIGH);sd.begin(SCK_PIN,MISO_PIN,MOSI_PIN,CS);sdOK=SD.begin(CS,sd,16000000);if(sdOK){File cfgFile=SD.open("/JOHNNY.CFG",FILE_READ);if(cfgFile){int b=180,v=70,t=0;String cfgText=cfgFile.readString();cfgFile.close();if(sscanf(cfgText.c_str(),"%d,%d,%d",&b,&v,&t)==3){brightness=(uint8_t)constrain(b,20,255);volume=constrain(v,0,100);alternateTheme=t!=0;JOHNNY_RED=alternateTheme?0xFD20:0xF124;}}}M5Cardputer.Display.setBrightness(brightness);bootSplash();homeDraw();Serial.printf("JOHNNY %s SD=%d\n",JOHNNY_VERSION,sdOK);}
 void loop(){
  M5Cardputer.update();
  if(page==PLAYER&&playing&&!paused&&mp3&&!mp3->loop()){closePlayer();page=LIST;listDraw();}
@@ -90,6 +90,6 @@ void loop(){
  else if(page==PLAYER){if(k.space||c==' '){paused=!paused;playerDraw();}else if(c=='p'||c=='P'){closePlayer();page=LIST;listDraw();}else if(c=='-'||c=='_'){volume=max(0,volume-5);if(out)out->SetGain((float)volume/100.0f);playerDraw();}else if(c=='='||c=='+'){volume=min(100,volume+5);if(out)out->SetGain((float)volume/100.0f);playerDraw();}}
  else if(page==SYNTH){const char* keys="asdfghjkl";const int notes[]={262,294,330,349,392,440,494,523,587};for(int i=0;i<9;i++)if(c==keys[i]){M5Cardputer.Speaker.tone(notes[i],160);break;}footer("A S D F G H J K L / BACK");}
  else if(page==RECORDER){if(c=='r'||c=='R')recordAudio();else footer("R RECORD  BACK");}
- else if(page==SETTINGS){if(c==';'||c==','){brightness=brightness>40?brightness-20:20;M5Cardputer.Display.setBrightness(brightness);}else if(c=='.'||c=='/'){volume=min(100,volume+5);M5Cardputer.Speaker.setVolume((uint8_t)(volume*255/100));}else if(c=='t'||c=='T'){alternateTheme=!alternateTheme;JOHNNY_RED=alternateTheme?0xFD20:0xF124;}else if(k.enter){if(sdOK){SD.remove("/JOHNNY.CFG");File f=SD.open("/JOHNNY.CFG",FILE_WRITE);if(f){f.printf("%u,%d,%u",brightness,volume,alternateTheme?1:0);f.close();}}}settingsDraw();}
+ else if(page==SETTINGS){if(c==';'||c==','){brightness=brightness>40?brightness-20:20;M5Cardputer.Display.setBrightness(brightness);}else if(c=='.'||c=='/'){volume=min(100,volume+5);M5Cardputer.Speaker.setVolume((uint8_t)(volume*255/100));}else if(c=='-'||c=='_'){volume=max(0,volume-5);M5Cardputer.Speaker.setVolume((uint8_t)(volume*255/100));}else if(c=='t'||c=='T'){alternateTheme=!alternateTheme;JOHNNY_RED=alternateTheme?0xFD20:0xF124;}else if(k.enter){if(sdOK){SD.remove("/JOHNNY.CFG");File f=SD.open("/JOHNNY.CFG",FILE_WRITE);if(f){f.printf("%u,%d,%u",brightness,volume,alternateTheme?1:0);f.close();}}}settingsDraw();}
  else if(page==SYSTEM)systemDraw();
 }
