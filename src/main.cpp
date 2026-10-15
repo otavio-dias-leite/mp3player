@@ -1810,6 +1810,126 @@ void radioRecorderTask(void* parameter){
     vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
+
+const char* themeNames[]={"JOHNNY PURPLE","BRUCE DARK","CYBERPUNK","MATRIX","AMBER","MINIMAL"};
+const uint16_t themePalette[6][10]={
+ {0x1008,0x280C,0xA01F,0xF19F,0xD5BF,0xB5B4,0x180B,0x4933,0x3414,0x5DDF},
+ {0x0000,0x1082,0x39C7,0x7BEF,0xBDF7,0x8410,0x0801,0x3186,0x2104,0x5DDF},
+ {0x1008,0x280C,0xA01F,0xF81F,0xD7FF,0xB5B4,0x180B,0x4933,0x3414,0x07FF},
+ {0x0000,0x0100,0x03E0,0x07E0,0xBFE0,0x87F0,0x0020,0x03E0,0x0200,0x07E0},
+ {0x2104,0x4208,0xFC00,0xFD20,0xFFE0,0xC618,0x2945,0x7BE0,0x6300,0xFEA0},
+ {0x0000,0x2104,0x7BEF,0xFFFF,0xE71C,0xA514,0x1082,0x6318,0x3186,0xC618}
+};
+void applyTheme(uint8_t index){
+  themeMode=index%6;const uint16_t* p=themePalette[themeMode];
+  BG=p[0];PANEL=p[1];UI_PURPLE=p[2];UI_PINK=p[3];UI_LAVENDER=p[4];UI_MUTED=p[5];
+  UI_GRID=p[6];UI_EDGE=p[7];UI_PANEL_HI=p[8];UI_CYAN=p[9];
+}
+void drawThemeScreen(){
+  header("THEME SETTINGS");auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_MUTED,BG);d.setCursor(8,44);d.print("PREVIEW / SELECT WITH LEFT OR RIGHT");
+  d.fillRoundRect(8,57,224,43,5,UI_PANEL_HI);d.drawRoundRect(8,57,224,43,5,UI_PINK);
+  d.setTextSize(2);d.setTextColor(UI_LAVENDER,BG);d.setCursor(17,68);d.print(themeNames[themeSelection]);d.setTextSize(1);
+  d.setTextColor(UI_CYAN,BG);d.setCursor(18,88);d.print("JOHNNY // COLOR PROFILE");
+  for(int i=0;i<6;i++)d.fillRoundRect(16+i*35,106,27,7,2,themePalette[i][3]);
+  footer(", / PREVIEW   ENTER SAVE   ESC BACK");
+}
+void beginClockNtp(){
+  if(WiFi.status()!=WL_CONNECTED)return;
+  setenv("TZ","America/Sao_Paulo",1);tzset();
+  configTime(-3*3600,0,"pool.ntp.org","time.google.com","time.cloudflare.com");
+  clockNtpStarted=true;
+}
+void persistAlarm(){
+  preferences.putBool("alarm_on",alarmEnabled);preferences.putUChar("alarm_h",alarmHour);
+  preferences.putUChar("alarm_m",alarmMinute);preferences.putUChar("alarm_days",alarmWeekdayMask);
+  preferences.putString("alarm_mp3",alarmSoundPath);
+}
+void drawClockScreen(){
+  header("CLOCK / ALARMS");auto& d=M5Cardputer.Display;
+  time_t now=time(nullptr);struct tm t{};bool valid=now>1600000000&&localtime_r(&now,&t)!=nullptr;
+  d.fillRoundRect(8,52,224,37,5,UI_PANEL_HI);
+  d.setTextSize(3);d.setTextColor(valid?WHITE:UI_MUTED,BG);d.setCursor(22,57);
+  if(valid)d.printf("%02d:%02d:%02d",t.tm_hour,t.tm_min,t.tm_sec);else d.print("--:--:--");
+  d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(13,94);
+  if(valid)d.printf("%02d/%02d/%04d  SAO PAULO",t.tm_mday,t.tm_mon+1,t.tm_year+1900);
+  else d.print(WiFi.status()==WL_CONNECTED?"WAITING FOR NTP SYNC":"NO CLOCK SYNC // CONNECT WI-FI");
+  d.fillRoundRect(8,103,224,11,3,0x2010);
+  d.setTextColor(alarmEnabled?UI_PINK:UI_MUTED,0x2010);d.setCursor(13,105);
+  d.printf("ALARM %s  %02u:%02u  %s",alarmEnabled?"ON":"OFF",alarmHour,alarmMinute,alarmSoundPath.length()?"CUSTOM MP3":"BUILT-IN TONE");
+  if(alarmActive){d.fillRoundRect(8,39,224,12,3,UI_PINK);d.setTextColor(BLACK,UI_PINK);d.setCursor(82,42);d.print("ALARM RINGING");}
+  footer("T SYNC  A ON/OFF  ; . HOUR  , / MIN  D DAYS  ENTER STOP  S SNOOZE");
+}
+void drawDiskManager(){
+  header("DISK MANAGER");auto& d=M5Cardputer.Display;
+  uint32_t flash=ESP.getFlashChipSize(),sketch=ESP.getSketchSize(),freeSketch=ESP.getFreeSketchSpace();
+  d.setTextColor(UI_CYAN,BG);d.setCursor(8,43);d.print("INTERNAL FLASH");
+  d.setTextColor(WHITE,BG);d.setCursor(8,55);d.printf("PHYSICAL %.2f MB",flash/1048576.0f);
+  d.setCursor(8,67);d.printf("APP IMAGE %.2f MB",sketch/1048576.0f);
+  d.setCursor(8,79);d.printf("OTA SLOT %.2f MB FREE",freeSketch/1048576.0f);
+  d.setTextColor(UI_CYAN,BG);d.setCursor(8,94);d.print("MICROSD");
+  if(sdReady){
+    uint64_t total=SD.totalBytes(),used=SD.usedBytes(),freeBytes=total>used?total-used:0;
+    d.setTextColor(WHITE,BG);d.setCursor(8,106);d.printf("%.1f / %.1f MB USED",used/1048576.0,total/1048576.0);
+    d.setCursor(8,117);d.printf("%.1f MB FREE",freeBytes/1048576.0);
+  }else{d.setTextColor(UI_PINK,BG);d.setCursor(8,107);d.print("CARD NOT MOUNTED");}
+  footer("CAPACITY VIEW / SAFE MODE   R REFRESH");
+}
+void drawProcessInfo(){
+  header("PROCESS MANAGER");auto& d=M5Cardputer.Display;
+  d.setTextColor(UI_CYAN,BG);d.setCursor(8,43);d.print("RUNTIME / HEAP");
+  d.setTextColor(WHITE,BG);d.setCursor(8,55);d.printf("FREE HEAP   %lu KB",ESP.getFreeHeap()/1024UL);
+  d.setCursor(8,66);d.printf("LARGEST BLK %lu KB",ESP.getMaxAllocHeap()/1024UL);
+  d.setCursor(8,77);d.printf("TASKS       %u",uxTaskGetNumberOfTasks());
+  d.setTextColor(UI_CYAN,BG);d.setCursor(8,91);d.print("JOHNNY TASKS");
+  TaskHandle_t tasks[2]={johnnyAudioTaskHandle,johnnyRecorderTaskHandle};
+  const char* labels[2]={"AUDIO DECODER","RADIO RECORDER"};
+  for(int i=0;i<2;i++){int y=103+i*11;if(!tasks[i])continue;d.setTextColor(UI_LAVENDER,BG);d.setCursor(8,y);d.print(labels[i]);d.setTextColor(UI_MUTED,BG);d.setCursor(126,y);d.printf("STACK %u B",(unsigned)(uxTaskGetStackHighWaterMark(tasks[i])*sizeof(StackType_t)));}
+  footer("MANAGED TASKS ONLY / NO FORCE KILL");
+}
+void drawChargingSaver(){
+  auto& d=M5Cardputer.Display;d.fillScreen(BLACK);int pct=batteryPercent();
+  d.drawRoundRect(53,34,134,57,10,UI_LAVENDER);d.fillRect(187,51,6,22,UI_LAVENDER);
+  if(pct>=0){int w=constrain(pct,0,100)*116/100;if(w>0)d.fillRoundRect(61,42,w,41,5,UI_PINK);}
+  d.setTextSize(3);d.setTextColor(WHITE,BLACK);d.setCursor(75,53);if(pct>=0)d.printf("%d%%",pct);else d.print("--%");
+  d.setTextSize(1);d.setTextColor(UI_CYAN,BLACK);d.setCursor(91,104);d.print("CHARGING // JOHNNY");
+  d.setTextColor(UI_MUTED,BLACK);d.setCursor(67,119);d.print("PRESS ANY KEY TO EXIT");
+}
+void silenceAlarm(bool snooze){
+  if(snooze){alarmSnoozeUntilMs=millis()+300000UL;time_t now=time(nullptr);if(now>1600000000)alarmSnoozeUntilMs=0,alarmSnoozeUntilEpoch=(uint64_t)now+300U;}
+  else{alarmSnoozeUntilMs=0;alarmSnoozeUntilEpoch=0;}
+  alarmActive=false;alarmTriedFile=false;alarmSoundStarted=false;M5Cardputer.Speaker.stop(0);
+  if(audioStarted||audioStopRequested)stopAudio();
+  if(screen==CLOCKSCREEN)drawClockScreen();
+}
+void serviceClockAlarm(){
+  if(WiFi.status()==WL_CONNECTED&&!clockNtpStarted)beginClockNtp();
+  time_t now=time(nullptr);struct tm t{};bool valid=now>1600000000&&localtime_r(&now,&t)!=nullptr;
+  if(!alarmActive&&alarmEnabled){
+    bool snoozeDue=alarmSnoozeUntilEpoch?(uint64_t)now>=alarmSnoozeUntilEpoch:(alarmSnoozeUntilMs&&(int32_t)(millis()-alarmSnoozeUntilMs)>=0);
+    int32_t dayKey=valid?(t.tm_year+1900)*10000+(t.tm_mon+1)*100+t.tm_mday:-1;
+    bool due=valid&&(alarmWeekdayMask&(1U<<t.tm_wday))&&t.tm_hour==alarmHour&&t.tm_min==alarmMinute&&dayKey!=alarmLastDayKey;
+    if(snoozeDue||due){
+      alarmActive=true;alarmTriedFile=false;alarmSoundStarted=false;alarmLastDayKey=dayKey;
+      alarmSnoozeUntilEpoch=0;alarmSnoozeUntilMs=0;stopAudio();M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);
+      if(micRecording)stopMicRecording();screen=CLOCKSCREEN;lastClockDraw=0;drawClockScreen();
+    }
+  }
+  if(!alarmActive)return;
+  if(!alarmTriedFile){
+    if(audioStarted||audioStopRequested)return;
+    alarmTriedFile=true;
+    if(alarmSoundPath.length()&&sdReady&&SD.exists(alarmSoundPath)&&audioExtension(alarmSoundPath)=="mp3")alarmSoundStarted=startLocalAudio(alarmSoundPath);
+  }
+  if(alarmSoundStarted&&!audioStarted&&!audioStopRequested){alarmSoundStarted=false;alarmTriedFile=false;lastAlarmToneMs=millis()-900;}
+  if(!alarmSoundStarted&&!audioStarted&&(uint32_t)(millis()-lastAlarmToneMs)>=900UL){
+    lastAlarmToneMs=millis();
+    uint32_t phase=0,step=(uint32_t)(880.0*(4294967296.0/16000.0));
+    for(size_t i=0;i<512;i++){float env=(i<28)?(float)i/28.0f:((i>468)?(float)(511-i)/43.0f:1.0f);alarmToneSamples[i]=(int16_t)(sinf(6.28318530718f*(float)i*880.0f/16000.0f)*env*8500.0f);phase+=step;}
+    M5Cardputer.Speaker.playRaw(alarmToneSamples,512,16000,false,1,0,false);
+  }
+}
+
 void setup() {
   auto cfg=M5.config();
   M5Cardputer.begin(cfg,true);
