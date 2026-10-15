@@ -600,7 +600,7 @@ void drawNetworkScreen() {
 
 uint8_t audioProgressPercent();
 void drawBleScreen();
-void stopAudio();
+bool stopAudio();
 void stopBleScan();
 void onBleScanComplete(BLEScanResults results){(void)results;bleScanDone=true;}
 void startBleScan(){
