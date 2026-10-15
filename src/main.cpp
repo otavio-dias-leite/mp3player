@@ -179,7 +179,7 @@ String entries[96];
 String entryPaths[96];
 bool entryIsDir[96];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
-int pianoOctave=0,pianoEffect=0,pianoVolume=82;
+int pianoOctave=0,pianoVolume=82;
 bool musicNowPlaying=false;
 int radioSelected=0;
 bool radioEditingUrl=false;
@@ -250,15 +250,11 @@ bool micStarted=false;
 uint32_t micWarmupUntil=0;
 constexpr size_t SYNTH_SAMPLES=4096;
 constexpr uint8_t SYNTH_AUDIO_CHANNEL=2;
-constexpr size_t BOOT_JINGLE_SAMPLES=48000;
-constexpr size_t BOOT_JINGLE_CHUNK_SAMPLES=2048;
-static int16_t bootJingleBuffer[BOOT_JINGLE_CHUNK_SAMPLES];
 static int16_t alarmToneSamples[512];
 static int16_t synthAudioBuffers[3][SYNTH_SAMPLES];
 static float synthSineTable[1024];
 uint8_t synthAudioBufferIndex=0;
 bool synthSineReady=false;
-const char* effectNames[]={"CLEAN","WARM","DRIVE","FUZZ","SQUARE","PAD","BELL","BASS"};
 String selectedFile;
 volatile bool audioStarted = false;
 volatile bool audioPaused = false;
@@ -472,27 +468,8 @@ void runFirmwareUpdate(){
 }
 
 void splash(){auto& d=M5Cardputer.Display;d.setBrightness(190);d.fillScreen(BG);d.setTextDatum(middle_center);d.setTextSize(2);d.setTextColor(0xF800,BG);d.drawString("WAKE FUCK UP SAMURAI",120,67);uint32_t t=millis();while((uint32_t)(millis()-t)<1000UL){M5Cardputer.update();delay(10);}d.setTextDatum(top_left);d.setTextSize(1);d.fillScreen(BG);}
-void playBootJingle(){
-  // Original picked-guitar motif, generated in short chunks to preserve RAM on the no-PSRAM ADV.
-  const float notes[8]={146.83f,220.00f,293.66f,220.00f,130.81f,196.00f,261.63f,196.00f};
-  const size_t samplesPerNote=6000;
-  M5Cardputer.Speaker.setVolume(190);
-  for(size_t base=0;base<BOOT_JINGLE_SAMPLES;base+=BOOT_JINGLE_CHUNK_SAMPLES){
-    const size_t count=min(BOOT_JINGLE_CHUNK_SAMPLES,BOOT_JINGLE_SAMPLES-base);
-    for(size_t n=0;n<count;n++){
-      const size_t i=base+n,step=i/samplesPerNote,offset=i%samplesPerNote;
-      const float t=(float)offset/16000.0f,f=notes[step]*(1.0f+0.0045f*sinf(6.2831853f*4.0f*t));
-      const float phase=6.2831853f*f*t;
-      const float guitar=0.72f*sinf(phase)+0.20f*sinf(phase*2.0f)+0.08f*sinf(phase*3.0f);
-      const float pick=1.0f-expf(-(float)offset/500.0f),decay=0.82f+0.18f*expf(-(float)offset/15000.0f);
-      const float tremolo=0.94f+0.06f*sinf(6.2831853f*3.1f*t);
-      bootJingleBuffer[n]=(int16_t)constrain(tanhf(guitar*2.0f)*pick*decay*tremolo*8900.0f,-32768.0f,32767.0f);
-    }
-    M5Cardputer.Speaker.playRaw(bootJingleBuffer,count,16000,false,1,0,false);
-    while(M5Cardputer.Speaker.isPlaying(0)>0)delay(1);
-  }
-}
-void drawPianoStatus(){auto& d=M5Cardputer.Display;d.fillRect(7,96,226,21,BG);d.setTextColor(UI_MUTED,BG);d.setCursor(9,103);d.print("36 NOTES  |  LETTERS + NUMBERS");}
+
+
 void drawPianoMeta(){auto& d=M5Cardputer.Display;d.fillRect(7,39,226,12,BG);d.setTextColor(UI_MUTED,BG);d.setCursor(9,42);d.printf("OCTAVE %d",4+pianoOctave);d.setTextColor(UI_LAVENDER,BG);d.setCursor(151,42);d.print("CHROMATIC");}
 void pianoScreen(){header("PIANO");auto& d=M5Cardputer.Display;drawPianoMeta();const char* rows[]={"1234567890","qwertyuiop","asdfghjkl","zxcvbnm"};const int counts[]={10,10,9,7},ys[]={52,68,84,100},offs[]={0,10,20,29};for(int r=0;r<4;r++){int w=counts[r]==10?21:(counts[r]==9?23:29),gap=counts[r]==10?1:2,total=counts[r]*w+(counts[r]-1)*gap,x0=(240-total)/2;for(int c=0;c<counts[r];c++){int note=(offs[r]+c)%12;bool black=note==1||note==3||note==6||note==8||note==10;int x=x0+c*(w+gap);uint16_t fill=black?0x4208:0xEFFF;d.fillRoundRect(x,ys[r],w,13,2,fill);d.drawRoundRect(x,ys[r],w,13,2,black?UI_PINK:UI_EDGE);d.setTextColor(black?WHITE:BG,fill);d.setCursor(x+(w-6)/2,ys[r]+3);d.print(rows[r][c]);}}d.setTextColor(UI_MUTED,BG);d.setCursor(9,117);d.print("36 NOTES  |  ESC BACK");footer();}
 float synthWave(uint32_t phase){return synthSineTable[(uint16_t)(phase>>22)];}
@@ -1631,14 +1608,7 @@ void drawMicRecorder(){
 }
 void startMicRecording(){if(!sdReady){micRecordStatus="NO SD CARD";drawMicRecorder();return;}SD.mkdir("/RECORDINGS");String candidate;for(int i=1;i<=9999;i++){char name[32];snprintf(name,sizeof(name),"/RECORDINGS/MIC%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}if(candidate.length()==0||SD.exists(candidate)){micRecordStatus="NO FREE FILENAME";drawMicRecorder();return;}micRecordFile=SD.open(candidate,FILE_WRITE);if(!micRecordFile){micRecordStatus="FILE OPEN FAILED";drawMicRecorder();return;}uint8_t blank[44]{};micRecordFile.write(blank,sizeof(blank));micRecordPath=candidate;micRecordBytes=0;micRecording=true;micRecordStatus="RECORDING PCM 16 KHZ";micRecordLastDraw=0;drawMicRecorder();}
 void stopMicRecording(){if(!micRecording)return;micRecording=false;if(micRecordFile){writeWavHeader(micRecordFile,micRecordBytes,16000);micRecordFile.flush();micRecordFile.close();}stopMicCapture();micRecordStatus="SAVED TO MICROSD";if(screen==MICREC)drawMicRecorder();}
-void serviceMicRecorder(){
-  if(!micRecording)return;
-  if(!captureMic(micRecordSamples,3072,420)){if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)drawPianoStatus();else drawMicRecorder();}}return;}
-  size_t bytes=sizeof(micRecordSamples);
-  if(!micRecordFile||micRecordFile.write((const uint8_t*)micRecordSamples,bytes)!=bytes){micRecordStatus="SD WRITE ERROR";stopMicRecording();return;}
-  micRecordBytes+=(uint32_t)bytes;
-  if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)drawPianoStatus();else drawMicRecorder();}}
-}
+void serviceMicRecorder(){if(!micRecording)return;if(!captureMic(micRecordSamples,3072,420)){if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive)drawMicRecorder();}return;}size_t bytes=sizeof(micRecordSamples);if(!micRecordFile||micRecordFile.write((const uint8_t*)micRecordSamples,bytes)!=bytes){micRecordStatus="SD WRITE ERROR";stopMicRecording();return;}micRecordBytes+=(uint32_t)bytes;if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive)drawMicRecorder();}}
 void radioRecorderTask(void* parameter){
   (void)parameter;File output;radioRecorderTaskReady=true;
   for(;;){
@@ -1973,7 +1943,7 @@ void loop() {
 if(usbActive) endUsbMode();
       screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();
     } else {
-      if(screen==PIANO){if(micRecording)stopMicRecording();M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);}
+      if(screen==PIANO){M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);}
       if(screen==TUNER) stopMicCapture();
       if(screen==NETWORK && wifiConfigStage==2) { wifiConfigStage=1; wifiEntry=""; drawNetworkScreen(); }
       else { wifiConfigStage=0;screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu(); }
