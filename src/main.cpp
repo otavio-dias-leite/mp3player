@@ -1366,14 +1366,7 @@ bool startLocalAudio(const String& path) {
   if(!stopAudioAndWait(650)){audioStatusMessage="AUDIO BUSY TIMEOUT";return false;}
   loadTrackMetadata(path);
   const String ext=audioExtension(path);
-  if(ext!="mp3" && ext!="wav" && ext!="flac" && ext!="aac" && ext!="ogg" && ext!="opus" && ext!="oga") {
-    audioStatusMessage="UNSUPPORTED FORMAT";
-    return false;
-  }
-  if((ext=="ogg" || ext=="opus" || ext=="oga") && !isOggOpusFile(path)) {
-    audioStatusMessage="OGG VORBIS NOT SUPPORTED";
-    return false;
-  }
+  if(ext!="mp3") {audioStatusMessage="MP3 ONLY IN THIS BUILD";return false;}
   AudioFileSourceSD* source=new AudioFileSourceSD();
   if(!source || !source->open(path.c_str())) {
     if(source) delete source;
@@ -1767,8 +1760,8 @@ void startMicRecording(){
   if(screen==PIANO){SD.mkdir("/JOHNNY");SD.mkdir("/JOHNNY/PADS");char path[40];snprintf(path,sizeof(path),"/JOHNNY/PADS/PAD%u.WAV",synthPadSelected+1);candidate=String(path);if(SD.exists(candidate))SD.remove(candidate);micRecordPadIndex=synthPadSelected;}
   else{SD.mkdir("/RECORDINGS");for(int i=1;i<=9999;i++){char name[32];snprintf(name,sizeof(name),"/RECORDINGS/MIC%04d.WAV",i);candidate=String(name);if(!SD.exists(candidate))break;}}
   if(candidate.length()==0||SD.exists(candidate)){micRecordStatus="NO FREE FILENAME";micRecordPadIndex=-1;drawMicRecorder();return;}
-  micRecordFile=SD.open(candidate,FILE_WRITE);if(!micRecordFile){micRecordStatus="FILE OPEN FAILED";drawMicRecorder();return;}
-  uint8_t blank[44]{};micRecordFile.write(blank,sizeof(blank));micRecordPath=candidate;micRecordBytes=0;micRecording=true;micRecordStatus="RECORDING PCM 16 KHZ";micRecordLastDraw=0;drawMicRecorder();
+  micRecordFile=SD.open(candidate,FILE_WRITE);if(!micRecordFile){micRecordStatus="FILE OPEN FAILED";if(screen==PIANO)pianoScreen();else drawMicRecorder();return;}
+  uint8_t blank[44]{};micRecordFile.write(blank,sizeof(blank));micRecordPath=candidate;micRecordBytes=0;micRecording=true;micRecordStatus="RECORDING PCM 16 KHZ";micRecordLastDraw=0;if(screen==PIANO)pianoScreen();else drawMicRecorder();
 }
 void stopMicRecording(){
   if(!micRecording)return;
@@ -1962,7 +1955,7 @@ void setup() {
   refreshBatteryCache(true);
   // Audio shares core 1 with the UI at equal priority and yields every 1 ms.
   // This keeps playback smooth without allowing the decoder to freeze menus.
-  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,&johnnyAudioTaskHandle,1);
+  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,&johnnyAudioTaskHandle,0);
   radioRecordQueue=xQueueCreate(8,sizeof(RadioRecordBlock));
   if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,2,&johnnyRecorderTaskHandle,0);
   splash();selected=0;drawHome();
@@ -1983,7 +1976,7 @@ void loop() {
     if(!chargingSaverDismissed&&!chargingSaverActive&&(uint32_t)(millis()-chargingDetectedAt)>=2000UL&&screen!=USBMODE){chargingSaverActive=true;screenSaverActive=true;drawChargingSaver();}
   }else{
     chargingDetectedAt=0;chargingSaverDismissed=false;
-    if(chargingSaverActive){chargingSaverActive=false;screenSaverActive=false;if(screen==HOME)drawHome();else if(screen==CLOCKSCREEN)drawClockScreen();else if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioNowTitle);else if(screen==RADIO)drawRadioScreen();else drawCategoryMenu();}
+    if(chargingSaverActive){chargingSaverActive=false;screenSaverActive=false;if(screen==HOME)drawHome();else if(screen==CLOCKSCREEN)drawClockScreen();else if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioNowTitle);else if(screen==RADIO)drawRadioScreen();else if(screen==PIANO)pianoScreen();else if(screen==MICREC)drawMicRecorder();else if(screen==FILES||screen==MUSIC)drawFiles(screen==MUSIC);else if(screen==NETWORK)drawNetworkScreen();else drawCategoryMenu();}
   }
   if((screen==MICREC||screen==PIANO)&&micRecording)serviceMicRecorder();
   if(!screenSaverActive&&screen==LIFE&&lifeRunning&&millis()-lifeLastStep>=lifeIntervalMs){stepLife();drawLife();}
@@ -2080,6 +2073,7 @@ void loop() {
   bool back=(c==0x1B || c=='`' || c=='~' || (k.del && screen!=RADIO && screen!=HACKINPUT && screen!=NETWORK));
   if(back) {
     if(screen==MICREC){stopMicRecording();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
+    else if(screen==THEMES){applyTheme(themeMode);screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==UPDATEINFO){screen=SYSTEMMENU;selected=3;drawCategoryMenu();}
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU){screen=HOME;selected=0;drawHome();}
     else if(screen==BLESCAN){stopBleScan();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
