@@ -1360,7 +1360,6 @@ void serviceAudio() {
       }
     }
   }
-  if(!screenSaverActive){if(screen==MUSIC&&musicNowPlaying)drawMusicDynamic();else if(screen==RADIO)drawRadioScreen();}
 }
 void toggleAudioPause(){
   if(!audioStarted)return;
