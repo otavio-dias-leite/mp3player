@@ -1608,20 +1608,20 @@ void openApp(){
 }
 void openLegacyApp() {
   switch(selected) {
-    case 0: stopMicCapture(); stopAudio(); audioEqualizer.reset(); screen=PIANO; pianoScreen(); break;
+    case 0: if(!stopAudioAndWait(650)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}stopMicCapture();audioEqualizer.reset();screen=PIANO;pianoScreen();break;
     case 1:
-      stopAudio(); stopMicCapture(); screen=TUNER; tunerInstrument=0;
+      if(!stopAudioAndWait(650)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}stopMicCapture();screen=TUNER;tunerInstrument=0;
       tunerFrequency=0; tunerFilteredFrequency=0; tunerHasSignal=false;
       tunerLastSignalAt=0; tunerLastSample=0; tunerScreen(); break;
     case 2:
-      stopAudio();
+      if(!stopAudioAndWait(650)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}
       screen=MUSIC;musicNowPlaying=false;currentPath="/";scanDirectory(true);drawFiles(true);break;
     case 3:
-      if(!audioIsRadio && audioStarted) stopAudio();
+      if(!audioIsRadio && audioStarted && !stopAudioAndWait(650)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}
       screen=RADIO; radioEditingUrl=false; radioSelected=0; drawRadioScreen(); break;
     case 4:
-      stopAudio();
-      {uint32_t started=millis();while(radioRecordState==3&&millis()-started<5000UL)delay(5);}
+      if(!stopAudioAndWait(650)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}
+      {uint32_t started=millis();while(radioRecordState==3&&millis()-started<1500UL)vTaskDelay(pdMS_TO_TICKS(5));}
       screen=FILES;currentPath="/";scanDirectory(false);drawFiles();break;
     case 5: screen=NETWORK; wifiConfigStage=0; lastWiFiStatus=-1; drawNetworkScreen(); break;
     case 6: screen=USBMODE;drawUsbScreen(beginUsbMode());break;
@@ -1830,8 +1830,9 @@ void drawThemeScreen(){
 }
 void beginClockNtp(){
   if(WiFi.status()!=WL_CONNECTED)return;
-  setenv("TZ","America/Sao_Paulo",1);tzset();
-  configTime(-3*3600,0,"pool.ntp.org","time.google.com","time.cloudflare.com");
+  configTime(0,0,"pool.ntp.org","time.google.com","time.cloudflare.com");
+  // Embedded newlib uses POSIX TZ strings; BRT3 is the current Sao Paulo UTC-3 rule.
+  setenv("TZ","BRT3",1);tzset();
   clockNtpStarted=true;
 }
 void persistAlarm(){
@@ -1906,7 +1907,7 @@ void serviceClockAlarm(){
     if(snoozeDue||due){
       alarmActive=true;alarmTriedFile=false;alarmSoundStarted=false;alarmLastDayKey=dayKey;
       alarmSnoozeUntilEpoch=0;alarmSnoozeUntilMs=0;stopAudio();M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);
-      if(micRecording)stopMicRecording();screen=CLOCKSCREEN;lastClockDraw=0;drawClockScreen();
+      if(micRecording)stopMicRecording();if(radioRecordState==1||radioRecordState==2)stopRadioRecording();screen=CLOCKSCREEN;lastClockDraw=0;drawClockScreen();
     }
   }
   if(!alarmActive)return;
@@ -2092,7 +2093,7 @@ void loop() {
     }else if(screen==LIFE){saveLife();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
-      if(music && musicNowPlaying) {stopAudio();musicNowPlaying=false;audioStatusMessage="STOPPED";drawFiles(true);}
+      if(music && musicNowPlaying) {if(stopAudioAndWait(650)){musicNowPlaying=false;audioStatusMessage="STOPPED";drawFiles(true);}else{audioStatusMessage="AUDIO BUSY TIMEOUT";drawMusicInfo(audioNowTitle);}}
       else if(currentPath!="/") {currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
       else {screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     } else if(screen==RADIO) {
@@ -2102,7 +2103,7 @@ void loop() {
 if(usbActive) endUsbMode();
       screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();
     } else {
-      if(screen==PIANO)M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);
+      if(screen==PIANO){if(micRecording)stopMicRecording();M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);}
       if(screen==TUNER) stopMicCapture();
       if(screen==NETWORK && wifiConfigStage==2) { wifiConfigStage=1; wifiEntry=""; drawNetworkScreen(); }
       else { wifiConfigStage=0;screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu(); }
