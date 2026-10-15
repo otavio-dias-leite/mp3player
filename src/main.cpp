@@ -369,8 +369,8 @@ void drawHome(){
   auto& d=M5Cardputer.Display;d.fillScreen(BG);d.fillRect(0,0,240,19,0x1808);drawUiGrid(20,117);
   d.fillRoundRect(6,3,11,11,3,0x3815);d.drawRoundRect(6,3,11,11,3,UI_PURPLE);d.drawFastVLine(11,5,7,UI_LAVENDER);d.drawFastHLine(8,8,7,UI_PINK);
   d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.setCursor(21,5);d.print("JOHNNY");d.setTextColor(UI_MUTED,BG);d.setCursor(66,5);d.print("CARDPUTER ADV // 1.0");drawBatteryIndicator();
-  const char* labels[APP_COUNT]={"HACK / SECURITY","GAMES / ARCADE","MUSIC / STUDIO","SYSTEM / DEVICE"};
-  const char* hints[APP_COUNT]={"WI-FI / BLE / NETWORK TOOLS","LIFE AND LIGHTWEIGHT GAMES","SYNTH / PLAYER / RADIO / REC","CLOCK / STORAGE / TASKS"};
+  const char* labels[APP_COUNT]={"HACK","GAMES","MUSIC","SYSTEM"};
+  const char* hints[APP_COUNT]={"NETWORK / INFORMATION SECURITY","LIGHTWEIGHT ARCADE","PLAYER / RADIO / SYNTH","DEVICE / CLOCK / STORAGE"};
   int idx=constrain(selected,0,APP_COUNT-1);
   d.fillRoundRect(8,29,224,84,7,UI_PANEL_HI);d.drawRoundRect(8,29,224,84,7,UI_PINK);d.fillRoundRect(8,29,5,84,2,UI_PINK);
   d.setTextSize(2);d.setTextColor(UI_CYAN,BG);d.setCursor(18,39);d.printf("0%d",idx+1);d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(184,43);d.printf("%02d / 04",idx+1);
@@ -421,25 +421,23 @@ void drawCategoryMenu(){
   const char** items=music?musicMenuItems:(system?systemMenuItems:(games?gamesMenuItems:hackMenuItems));
   const int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
   const uint8_t category=music?2:(system?3:(games?1:0));
-  const int visible=6;
   if(selected<0)selected=0;if(selected>=count)selected=count-1;
-  if(selected<categoryScroll || selected>=categoryScroll+visible)categoryScroll=(selected/visible)*visible;
+  const char* detail="JOHNNY MODULE";
+  if(music){const char* v[]={"PLAY NOTES / 8 TIMBRES / RECORD PADS","GUITAR / BASS / UKULELE TUNER","LOCAL MP3 / COVER / PLAYBACK CONTROLS","BUFFERED INTERNET RADIO / RECORDING","5-BAND EQUALIZER / PRESETS","RECORD MICROPHONE TO WAV"};detail=v[selected];}
+  else if(system){const char* v[]={"BROWSE MICROSD FILES","USB FILE TRANSFER MODE","CONNECT TO WI-FI / SCAN NETWORKS","FIRMWARE UPDATE","BATTERY / NETWORK / DEVICE STATUS","BLUETOOTH SCANNER","LOCAL CLOCK / NTP / ALARM","FLASH AND MICROSD CAPACITY","HEAP / TASK STACK MONITOR","SIX COLOR THEMES"};detail=v[selected];}
+  else if(games){detail="CONWAY LIFE / EDITABLE GRID";}
+  else{const char* v[]={"WI-FI RECONNAISSANCE","BLE DEVICE SCANNER","TCP CONNECTION TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL EFFECTS","HTTP SECURITY AUDIT","DEVICE SECURITY AUDIT"};detail=v[selected];}
   header(title);auto& d=M5Cardputer.Display;
-  d.fillRoundRect(8,51,224,12,3,0x2010);
-  d.setTextColor(UI_MUTED,0x2010);d.setCursor(13,54);d.printf("%02d AVAILABLE MODULES",count);
-  d.setTextColor(UI_CYAN,0x2010);d.setCursor(193,54);d.printf("%02d/%02d",selected+1,count);
-  for(int cell=0;cell<visible;cell++){
-    const int i=categoryScroll+cell;if(i>=count)break;
-    const int x=8+(cell%2)*114,y=64+(cell/2)*17;
-    const bool active=i==selected;const uint16_t fill=active?UI_PANEL_HI:0x1C0D;
-    d.fillRoundRect(x,y,108,15,4,fill);d.drawRoundRect(x,y,108,15,4,active?UI_PINK:UI_EDGE);
-    d.fillRoundRect(x+4,y+1,14,13,3,active?0x5020:0x2815);
-    drawModuleIcon(category,(uint8_t)i,x+4,y+1,active?UI_LAVENDER:UI_MUTED);
-    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+22,y+4);
-    String label=String(items[i]);if(label.length()>12)label=label.substring(0,11)+"~";
-    d.print(label);if(active)d.fillCircle(x+101,y+7,2,UI_PINK);
-  }
-  footer(", / LEFT RIGHT  ; . UP DOWN  ENTER LAUNCH");
+  d.setTextColor(UI_CYAN,BG);d.setCursor(9,42);d.printf("%02d / %02d",selected+1,count);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(76,42);d.print("SWIPE WITH LEFT / RIGHT");
+  d.fillRoundRect(8,54,224,58,7,UI_PANEL_HI);d.drawRoundRect(8,54,224,58,7,UI_PINK);
+  d.fillRoundRect(8,54,4,58,2,UI_PINK);
+  d.fillRoundRect(17,65,36,36,7,0x3015);drawModuleIcon(category,(uint8_t)selected,28,76,UI_LAVENDER);
+  String label=String(items[selected]);if(label.length()>15){d.setTextSize(1);d.setTextColor(WHITE,UI_PANEL_HI);d.setCursor(62,70);}else{d.setTextSize(2);d.setTextColor(WHITE,UI_PANEL_HI);d.setCursor(62,67);}
+  d.print(label);d.setTextSize(1);d.setTextColor(UI_CYAN,UI_PANEL_HI);d.setCursor(62,91);d.print(detail);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(20,120);
+  for(int i=0;i<count;i++){int x=20+(i*200/count);d.fillCircle(x,123,2,i==selected?UI_PINK:UI_EDGE);}
+  footer(", / PREVIOUS / NEXT   ENTER OPEN   ESC BACK");
 }
 void drawDeviceStatus(){
   header("DEVICE STATUS");auto& d=M5Cardputer.Display;
@@ -2136,10 +2134,8 @@ if(usbActive) endUsbMode();
   } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) {
     int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:(screen==GAMESMENU?GAMES_MENU_COUNT:HACK_MENU_COUNT));
     if(k.enter){openApp();delay(8);return;}
-    if(c==','){if(selected%2==1)selected--;}
-    else if(c=='/'){if(selected%2==0&&selected+1<count)selected++;}
-    else if(c==';')selected=max(0,selected-2);
-    else if(c=='.')selected=min(count-1,selected+2);
+    if(c==','||c==';')selected=(selected+count-1)%count;
+    else if(c=='/'||c=='.')selected=(selected+1)%count;
     drawCategoryMenu();
   } else if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
