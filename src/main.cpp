@@ -1611,6 +1611,15 @@ void seedLife();
 void drawLife();
 bool loadLife();
 void openLegacyApp();
+void stopRadioRecording();
+void stopModuleTasks(){
+  if(bleScanner||bleScanning||bleInitialized)stopBleScan();
+  if(micRecording)stopMicRecording();else stopMicCapture();
+  if(!stopAudioAndWait(1400))return;
+  if(radioRecordState==1||radioRecordState==2)stopRadioRecording();
+  if(wifiScanPending){WiFi.scanDelete();wifiScanPending=false;}
+  hackVisualFx=false;
+}
 void openApp(){
   if(screen==HOME){screen=selected==0?HACKMENU:(selected==1?GAMESMENU:(selected==2?MUSICMENU:SYSTEMMENU));selected=0;drawCategoryMenu();return;}
   int item=selected;Screen menu=screen;
@@ -1629,6 +1638,8 @@ void openApp(){
   openLegacyApp();
 }
 void openLegacyApp() {
+  stopModuleTasks();
+  if(audioStarted||audioStopRequested){screen=MUSIC;musicNowPlaying=true;drawMusicInfo(audioNowTitle);return;}
   switch(selected) {
     case 0: if(!stopAudioAndWait(650)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}stopMicCapture();audioEqualizer.reset();screen=PIANO;pianoScreen();break;
     case 1:
@@ -2121,7 +2132,12 @@ void loop() {
       else {screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     } else if(screen==RADIO) {
       if(radioEditingUrl) {radioEditingUrl=false;drawRadioScreen();}
-      else {screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
+      else {
+        stopAudioAndWait(1400);
+        if(radioRecordState==1||radioRecordState==2)stopRadioRecording();
+        uint32_t stopStarted=millis();while(radioRecordState==3&&(uint32_t)(millis()-stopStarted)<1800UL)vTaskDelay(pdMS_TO_TICKS(5));
+        screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();
+      }
     } else if(screen==USBMODE) {
 if(usbActive) endUsbMode();
       screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();
