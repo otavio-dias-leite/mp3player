@@ -1946,6 +1946,8 @@ void setup() {
   preferences.begin("johnny",false);
   savedSsid=preferences.getString("ssid","");
   savedPassword=preferences.getString("pass","");
+  themeMode=preferences.getUChar("theme",0);applyTheme(themeMode);
+  alarmEnabled=preferences.getBool("alarm_on",false);alarmHour=preferences.getUChar("alarm_h",7);alarmMinute=preferences.getUChar("alarm_m",0);alarmWeekdayMask=preferences.getUChar("alarm_days",0x7F);alarmSoundPath=preferences.getString("alarm_mp3","");
   radioEntry=preferences.getString("radio_url","");
   eqPreset=preferences.getInt("eqpreset",0);if(eqPreset<0||eqPreset>3)eqPreset=-1;
   for(int i=0;i<(int)JOHNNY_EQ_BANDS;i++){
@@ -1960,20 +1962,29 @@ void setup() {
   refreshBatteryCache(true);
   // Audio shares core 1 with the UI at equal priority and yields every 1 ms.
   // This keeps playback smooth without allowing the decoder to freeze menus.
-  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,nullptr,1);
+  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,&johnnyAudioTaskHandle,1);
   radioRecordQueue=xQueueCreate(8,sizeof(RadioRecordBlock));
-  if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,2,nullptr,0);
+  if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,2,&johnnyRecorderTaskHandle,0);
   splash();selected=0;drawHome();
 }
 void loop() {
   M5Cardputer.update();
-  if(millis()-batteryLastSample>=30000UL) {
+  if(millis()-batteryLastSample>=2000UL) {
     batteryLastDraw=millis();
     refreshBatteryCache(true);
     if(screen!=USBMODE && !screenSaverActive) { drawBatteryIndicator(); if(screen==ABOUT)drawDeviceStatus(); }
   }
   serviceAudio();
+  serviceClockAlarm();
   serviceMusicProgress();
+  if(screen==CLOCKSCREEN&&!screenSaverActive&&(uint32_t)(millis()-lastClockDraw)>=1000UL){lastClockDraw=millis();drawClockScreen();}
+  if(batteryCharging()){
+    if(!chargingDetectedAt)chargingDetectedAt=millis();
+    if(!chargingSaverDismissed&&!chargingSaverActive&&(uint32_t)(millis()-chargingDetectedAt)>=2000UL&&screen!=USBMODE){chargingSaverActive=true;screenSaverActive=true;drawChargingSaver();}
+  }else{
+    chargingDetectedAt=0;chargingSaverDismissed=false;
+    if(chargingSaverActive){chargingSaverActive=false;screenSaverActive=false;if(screen==HOME)drawHome();else if(screen==CLOCKSCREEN)drawClockScreen();else if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioNowTitle);else if(screen==RADIO)drawRadioScreen();else drawCategoryMenu();}
+  }
   if((screen==MICREC||screen==PIANO)&&micRecording)serviceMicRecorder();
   if(!screenSaverActive&&screen==LIFE&&lifeRunning&&millis()-lifeLastStep>=lifeIntervalMs){stepLife();drawLife();}
   static uint8_t lastRecorderDisplayState=255;
@@ -2036,6 +2047,8 @@ void loop() {
     else if(screen==HACKFX)drawHackFxScreen();
     else if(screen==HACKINFO)drawHackInfo();
     else if(screen==HACKINPUT)drawHackInput();
+    else if(screen==CLOCKSCREEN)drawClockScreen();else if(screen==DISKMANAGER)drawDiskManager();else if(screen==PROCESSINFO)drawProcessInfo();else if(screen==THEMES)drawThemeScreen();
+    if(chargingSaverActive){chargingSaverActive=false;chargingSaverDismissed=true;}
     return;
   }
   if(screenSaverActive) {
@@ -2058,9 +2071,12 @@ void loop() {
     else if(screen==HACKFX)drawHackFxScreen();
     else if(screen==HACKINFO)drawHackInfo();
     else if(screen==HACKINPUT)drawHackInput();
+    else if(screen==CLOCKSCREEN)drawClockScreen();else if(screen==DISKMANAGER)drawDiskManager();else if(screen==PROCESSINFO)drawProcessInfo();else if(screen==THEMES)drawThemeScreen();
+    if(chargingSaverActive){chargingSaverActive=false;chargingSaverDismissed=true;}
     return;
   }
 
+  if(alarmActive){if(k.enter||c=='s'||c=='S'){silenceAlarm(c=='s'||c=='S');return;}return;}
   bool back=(c==0x1B || c=='`' || c=='~' || (k.del && screen!=RADIO && screen!=HACKINPUT && screen!=NETWORK));
   if(back) {
     if(screen==MICREC){stopMicRecording();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
@@ -2101,6 +2117,24 @@ if(usbActive) endUsbMode();
 
   if(screen==MICREC) {
     if(k.enter||k.space){if(micRecording)stopMicRecording();else startMicRecording();}
+  } else if(screen==CLOCKSCREEN) {
+    if(alarmActive&&(k.enter||c=='s'||c=='S'))silenceAlarm(c=='s'||c=='S');
+    else if(c=='t'||c=='T'){beginClockNtp();drawClockScreen();}
+    else if(c=='a'||c=='A'){alarmEnabled=!alarmEnabled;persistAlarm();drawClockScreen();}
+    else if(c==';'){alarmHour=(alarmHour+23)%24;persistAlarm();drawClockScreen();}
+    else if(c=='.'){alarmHour=(alarmHour+1)%24;persistAlarm();drawClockScreen();}
+    else if(c==','){alarmMinute=(alarmMinute+59)%60;persistAlarm();drawClockScreen();}
+    else if(c=='/'){alarmMinute=(alarmMinute+1)%60;persistAlarm();drawClockScreen();}
+    else if(c=='d'||c=='D'){alarmWeekdayMask=alarmWeekdayMask==0x7F?0x3E:(alarmWeekdayMask==0x3E?0x41:0x7F);persistAlarm();drawClockScreen();}
+    else if(c=='m'||c=='M'){alarmSoundPath="";persistAlarm();drawClockScreen();}
+  } else if(screen==DISKMANAGER) {
+    if(c=='r'||c=='R')drawDiskManager();
+  } else if(screen==PROCESSINFO) {
+    if(c=='r'||c=='R')drawProcessInfo();
+  } else if(screen==THEMES) {
+    if(c==','){themeSelection=(themeSelection+5)%6;applyTheme(themeSelection);drawThemeScreen();}
+    else if(c=='/'){themeSelection=(themeSelection+1)%6;applyTheme(themeSelection);drawThemeScreen();}
+    else if(k.enter){themeMode=themeSelection;preferences.putUChar("theme",themeMode);applyTheme(themeMode);screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
   } else if(screen==UPDATEINFO) {
     if(k.enter) runFirmwareUpdate();
   } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) {
@@ -2141,6 +2175,7 @@ if(usbActive) endUsbMode();
       else if(c=='.') {seekAudioStep(1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
       else if(c=='s'||c=='S'){audioShuffle=!audioShuffle;drawMusicInfo(audioNowTitle);}
       else if(c=='r'||c=='R'){audioRepeatMode=(audioRepeatMode+1)%3;drawMusicInfo(audioNowTitle);}
+      else if(c=='a'||c=='A'){if(audioTrackExtension=="mp3"&&audioTrackPath.length()){alarmSoundPath=audioTrackPath;persistAlarm();audioStatusMessage="ALARM MP3 SAVED";drawMusicInfo(audioNowTitle);}else{audioStatusMessage="SELECT MP3 FIRST";drawMusicInfo(audioNowTitle);}}
     } else {      if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
       else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
