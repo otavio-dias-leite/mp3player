@@ -3,6 +3,10 @@ name: Deploy JOHNNY website
 on:
   push:
     branches: [main]
+  workflow_run:
+    workflows: ["Build and publish JOHNNY firmware"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,35 +20,79 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
-      - name: Build static website and bundle firmware locally
+
+      - name: Wait for the release built from this commit
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="$(tr -d '\r\n' < VERSION)"
-          mkdir -p _site/firmware
-          cp index.html style.css transfer.html _site/
-          cp firmware/manifest.json _site/firmware/manifest.json
-          ASSET_URL="https://github.com/otavio-dias-leite/johnny/releases/download/v${VERSION}/johnny-cardputer-adv-full.bin"
-          echo "Fetching firmware asset: ${ASSET_URL}"
-          for attempt in $(seq 1 30); do
-            if curl --fail --location --silent --show-error "${ASSET_URL}" -o _site/firmware/johnny-cardputer-adv-full.bin; then
+          API="https://api.github.com/repos/otavio-dias-leite/johnny/releases/latest"
+          for attempt in $(seq 1 36); do
+            curl --fail --silent --show-error \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$API" -o /tmp/johnny-release.json || true
+            if test -s /tmp/johnny-release.json && python - <<'PY'
+          import json, os
+          from pathlib import Path
+          try:
+              release = json.loads(Path("/tmp/johnny-release.json").read_text())
+              assets = {a.get("name") for a in release.get("assets", [])}
+              ok = (release.get("target_commitish") == os.environ["EXPECTED_SHA"]
+                    and "johnny-cardputer-adv-full.bin" in assets)
+              raise SystemExit(0 if ok else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
               break
             fi
-            rm -f _site/firmware/johnny-cardputer-adv-full.bin
-            echo "Firmware release not ready (attempt ${attempt}/30); retrying..."
+            rm -f /tmp/johnny-release.json
+            echo "Release for $EXPECTED_SHA is not ready (attempt $attempt/36)."
             sleep 10
           done
-          test -s _site/firmware/johnny-cardputer-adv-full.bin
+          test -s /tmp/johnny-release.json
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
-          version = Path("VERSION").read_text().strip()
+          release = json.loads(Path("/tmp/johnny-release.json").read_text())
+          assert release.get("target_commitish") == os.environ["EXPECTED_SHA"], "Latest release does not match this source commit"
+          asset = next((a for a in release.get("assets", []) if a.get("name") == "johnny-cardputer-adv-full.bin"), None)
+          assert asset and asset.get("browser_download_url"), "Full firmware image is missing from latest release"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("version=" + release["tag_name"] + "\n")
+              f.write("asset_url=" + asset["browser_download_url"] + "\n")
+          PY
+
+      - name: Build website using the latest release
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_ASSET_URL: ${{ steps.release.outputs.asset_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _site/firmware
+          cp index.html style.css transfer.html _site/
+          echo "Downloading JOHNNY $RELEASE_VERSION"
+          curl --fail --location --retry 3 --retry-delay 2 \
+            "$RELEASE_ASSET_URL" -o _site/firmware/johnny-cardputer-adv-full.bin
+          test "$(stat -c %s _site/firmware/johnny-cardputer-adv-full.bin)" -gt 100000
+          cp firmware/manifest.json _site/firmware/manifest.json
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          version = os.environ["RELEASE_VERSION"]
           for name in ("index.html", "transfer.html"):
               page = Path("_site") / name
               page.write_text(page.read_text().replace("@JOHNNY_VERSION@", version))
@@ -55,9 +103,10 @@ jobs:
               "path": "johnny-cardputer-adv-full.bin",
               "offset": 0
           }]
-          manifest.write_text(json.dumps(data, indent=2) + "\\n")
+          manifest.write_text(json.dumps(data, indent=2) + "\n")
           PY
           touch _site/.nojekyll
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
