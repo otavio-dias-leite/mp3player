@@ -198,6 +198,10 @@ bool audioCoverPng=false;
 bool audioShuffle=false;
 uint8_t audioRepeatMode=0;
 int audioVolume=18;
+enum AudioCommandType:uint8_t{AUDIO_CMD_START,AUDIO_CMD_STOP,AUDIO_CMD_PAUSE,AUDIO_CMD_RESUME,AUDIO_CMD_SEEK,AUDIO_CMD_VOLUME};
+struct AudioCommand{AudioCommandType type;AudioFileSource* source=nullptr;char title[96]{};char extension[8]{};int16_t value=0;bool radio=false;};
+QueueHandle_t audioCommandQueue=nullptr;
+volatile uint8_t audioProgressCached=0;
 AudioFileSource* audioRawSource=nullptr;
 AudioFileSourceBuffer* audioInputBuffer=nullptr;
 AudioGenerator* audioDecoder=nullptr;
@@ -1075,20 +1079,21 @@ void stopAudioLocked() {
   audioIsRadio=false;
   audioStopRequested=false;
 }
-void stopAudio(){audioStopRequested=true;if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);if(audioMutex&&xSemaphoreTake(audioMutex,pdMS_TO_TICKS(1000))==pdTRUE){stopAudioLocked();audioTaskEnded=false;xSemaphoreGive(audioMutex);}}
-bool stopAudioAndWait(uint32_t timeoutMs=3000){
-  stopAudio();uint32_t started=millis();
-  while((audioStarted||audioStopRequested)&&((uint32_t)(millis()-started)<timeoutMs)){
-    if(audioMutex&&xSemaphoreTake(audioMutex,0)==pdTRUE){if(audioStopRequested)stopAudioLocked();xSemaphoreGive(audioMutex);}
-    vTaskDelay(pdMS_TO_TICKS(2));
-  }
-  return !audioStarted&&!audioStopRequested;
-}
+void stopAudio(){audioStopRequested=true;if(audioCommandQueue){AudioCommand cmd{};cmd.type=AUDIO_CMD_STOP;xQueueSend(audioCommandQueue,&cmd,pdMS_TO_TICKS(30));}if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
+bool stopAudioAndWait(uint32_t timeoutMs=3000){stopAudio();uint32_t started=millis();while((audioStarted||audioStopRequested)&&((uint32_t)(millis()-started)<timeoutMs))vTaskDelay(pdMS_TO_TICKS(5));return !audioStarted&&!audioStopRequested;}
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3(mp3DecoderWorkspace,sizeof(mp3DecoderWorkspace));
   return nullptr;
 }
-bool startAudioSource(AudioFileSource* source,const String& title,const String& extension,bool radio){if(!source){audioStatusMessage="SOURCE ERROR";return false;}if(!audioTaskReady||!audioMutex){source->close();delete source;audioStatusMessage="AUDIO TASK UNAVAILABLE";return false;}if(xSemaphoreTake(audioMutex,pdMS_TO_TICKS(1500))!=pdTRUE){source->close();delete source;audioStatusMessage="AUDIO START TIMEOUT";return false;}stopAudioLocked();audioRawSource=source;audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));if(!audioInputBuffer){audioStatusMessage="NO BUFFER MEMORY";stopAudioLocked();xSemaphoreGive(audioMutex);return false;}audioOutput=new JohnnyAudioOutput(&M5Cardputer.Speaker);if(!audioOutput){audioStatusMessage="NO AUDIO OUTPUT";stopAudioLocked();xSemaphoreGive(audioMutex);return false;}audioOutput->SetGain((float)audioVolume/21.0f);audioDecoder=createAudioDecoder(extension);if(!audioDecoder){audioStatusMessage="UNSUPPORTED FORMAT";stopAudioLocked();xSemaphoreGive(audioMutex);return false;}if(!audioDecoder->begin(audioInputBuffer,audioOutput)){Serial.printf("JOHNNY AUDIO: decoder begin failed; format=%s, bytes=%lu, heap=%lu, largest=%lu\n",extension.c_str(),(unsigned long)(audioRawSource?audioRawSource->getSize():0),(unsigned long)ESP.getFreeHeap(),(unsigned long)ESP.getMaxAllocHeap());audioStatusMessage="MP3 INIT / MEMORY ERROR";stopAudioLocked();xSemaphoreGive(audioMutex);return false;}audioNowTitle=title;if(radio){audioTrackPath="";audioTrackExtension="";audioTrackArtist="";audioTrackAlbum="";audioTrackTitle=title;audioCoverSize=0;}audioIsRadio=radio;audioPaused=false;audioTaskEnded=false;audioStarted=true;audioStatusMessage=radio?"LIVE RADIO":"PLAYING";M5Cardputer.Speaker.setVolume(205);xSemaphoreGive(audioMutex);if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);return true;}
+bool startAudioSource(AudioFileSource* source,const String& title,const String& extension,bool radio){
+  if(!source){audioStatusMessage="SOURCE ERROR";return false;}
+  if(!audioTaskReady||!audioCommandQueue){source->close();delete source;audioStatusMessage="AUDIO TASK UNAVAILABLE";return false;}
+  AudioCommand cmd{};cmd.type=AUDIO_CMD_START;cmd.source=source;cmd.radio=radio;
+  strlcpy(cmd.title,title.c_str(),sizeof(cmd.title));strlcpy(cmd.extension,extension.c_str(),sizeof(cmd.extension));
+  if(xQueueSend(audioCommandQueue,&cmd,pdMS_TO_TICKS(100))!=pdTRUE){source->close();delete source;audioStatusMessage="PLAYER BUSY";return false;}
+  audioNowTitle=title;audioPaused=false;audioStarted=true;audioStopRequested=false;audioStatusMessage="LOADING";
+  if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);return true;
+}
 String audioExtension(const String& path) {
   String name=path;
   name.toLowerCase();
@@ -1273,8 +1278,8 @@ bool startRadioStream(const String& url, const String& title) {
   radioMessage=ok?"LIVE / CONNECTED":audioStatusMessage;
   return ok;
 }
-uint8_t audioProgressPercent(){if(!audioMutex||xSemaphoreTake(audioMutex,pdMS_TO_TICKS(25))!=pdTRUE)return musicProgressLastValue==255?0:musicProgressLastValue;uint32_t pos=0,size=0;if(audioRawSource){size=audioRawSource->getSize();pos=audioRawSource->getPos();if(audioInputBuffer){uint32_t n=audioInputBuffer->getFillLevel();pos=pos>n?pos-n:0;}}xSemaphoreGive(audioMutex);if(!size)return 0;if(pos>size)pos=size;return (uint8_t)((uint64_t)pos*100ULL/size);}
-bool seekAudioStep(int direction){if(!audioStarted||audioIsRadio||!audioMutex)return false;if(xSemaphoreTake(audioMutex,pdMS_TO_TICKS(1000))!=pdTRUE){audioStatusMessage="AUDIO CONTROL TIMEOUT";return false;}if(!audioRawSource||!audioInputBuffer||!audioDecoder){xSemaphoreGive(audioMutex);return false;}uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos(),buffered=audioInputBuffer->getFillLevel();pos=pos>buffered?pos-buffered:0;if(size<4096){xSemaphoreGive(audioMutex);return false;}int64_t target=(int64_t)pos+(int64_t)direction*(int64_t)max((uint32_t)4096,size/20U);if(target<0)target=0;if(target>(int64_t)size-1)target=(int64_t)size-1;if(audioTrackExtension!="mp3"&&audioTrackExtension!="aac"){audioStatusMessage="SEEK NOT SUPPORTED";xSemaphoreGive(audioMutex);return false;}bool paused=audioPaused;audioDecoder->stop();delete audioDecoder;audioDecoder=nullptr;delete audioInputBuffer;audioInputBuffer=nullptr;if(!audioRawSource->seek((int32_t)target,SEEK_SET))audioRawSource->seek(0,SEEK_SET);audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));audioDecoder=createAudioDecoder(audioTrackExtension);bool ok=audioInputBuffer&&audioDecoder&&audioDecoder->begin(audioInputBuffer,audioOutput);if(ok){audioStarted=true;audioPaused=paused;audioTaskEnded=false;audioStatusMessage=paused?"PAUSED":"PLAYING";audioEqualizer.reset();}else{if(audioDecoder){delete audioDecoder;audioDecoder=nullptr;}if(audioInputBuffer){delete audioInputBuffer;audioInputBuffer=nullptr;}audioStarted=false;audioPaused=true;audioStatusMessage="SEEK FAILED";}xSemaphoreGive(audioMutex);return ok;}
+uint8_t audioProgressPercent(){return audioProgressCached;}
+bool seekAudioStep(int direction){if(!audioStarted||audioIsRadio||!audioCommandQueue)return false;AudioCommand cmd{};cmd.type=AUDIO_CMD_SEEK;cmd.value=(int8_t)(direction<0?-1:1);return xQueueSend(audioCommandQueue,&cmd,0)==pdTRUE;}
 void serviceMusicProgress(){
   if(screen!=MUSIC||!musicNowPlaying||!audioStarted||screenSaverActive)return;
   if((uint32_t)(millis()-musicProgressLastDraw)<500UL)return;
@@ -1303,9 +1308,43 @@ void serviceAudio() {
   }
   if(!screenSaverActive){if(screen==MUSIC&&musicNowPlaying)drawMusicDynamic();else if(screen==RADIO)drawRadioScreen();}
 }
-void audioTask(void* parameter){(void)parameter;audioTaskReady=true;for(;;){if(audioMutex&&xSemaphoreTake(audioMutex,portMAX_DELAY)==pdTRUE){if(audioStopRequested){stopAudioLocked();audioTaskEnded=false;}else if(audioStarted&&!audioPaused&&audioDecoder){if(!audioDecoder->loop()){if(audioOutput)audioOutput->flush();audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;}}xSemaphoreGive(audioMutex);}if((!audioStarted||audioPaused)&&!audioStopRequested)ulTaskNotifyTake(pdTRUE,portMAX_DELAY);else vTaskDelay(pdMS_TO_TICKS(1));}}
-void toggleAudioPause(){if(!audioMutex||xSemaphoreTake(audioMutex,pdMS_TO_TICKS(1000))!=pdTRUE){audioStatusMessage="AUDIO CONTROL TIMEOUT";return;}audioPaused=!audioPaused;xSemaphoreGive(audioMutex);if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
-void setAudioVolume(int value){if(!audioMutex||xSemaphoreTake(audioMutex,pdMS_TO_TICKS(1000))!=pdTRUE){audioStatusMessage="AUDIO CONTROL TIMEOUT";return;}audioVolume=constrain(value,0,21);if(audioOutput)audioOutput->SetGain((float)audioVolume/21.0f);xSemaphoreGive(audioMutex);}
+void audioTask(void* parameter){
+  (void)parameter;audioTaskReady=true;
+  for(;;){
+    AudioCommand cmd{};
+    if(audioCommandQueue&&xQueueReceive(audioCommandQueue,&cmd,audioStarted&&!audioPaused?0:pdMS_TO_TICKS(40))==pdTRUE){
+      if(cmd.type==AUDIO_CMD_STOP){stopAudioLocked();audioTaskEnded=false;audioProgressCached=0;audioStopRequested=false;}
+      else if(cmd.type==AUDIO_CMD_START){
+        stopAudioLocked();audioTaskEnded=false;audioProgressCached=0;
+        audioRawSource=cmd.source;cmd.source=nullptr;
+        audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));
+        audioOutput=new JohnnyAudioOutput(&M5Cardputer.Speaker);
+        audioDecoder=createAudioDecoder(String(cmd.extension));
+        bool ok=audioInputBuffer&&audioOutput&&audioDecoder;
+        if(ok){audioOutput->SetGain((float)audioVolume/21.0f);ok=audioDecoder->begin(audioInputBuffer,audioOutput);}
+        if(ok){audioNowTitle=String(cmd.title);audioIsRadio=cmd.radio;audioPaused=false;audioStarted=true;audioStatusMessage=cmd.radio?"LIVE RADIO":"PLAYING";M5Cardputer.Speaker.setVolume(190);}
+        else{stopAudioLocked();audioStatusMessage="MP3 OPEN FAILED";}
+      }
+      else if(cmd.type==AUDIO_CMD_PAUSE){if(audioStarted){audioPaused=true;audioStatusMessage="PAUSED";}}
+      else if(cmd.type==AUDIO_CMD_RESUME){if(audioStarted){audioPaused=false;audioStatusMessage="PLAYING";}}
+      else if(cmd.type==AUDIO_CMD_VOLUME){audioVolume=constrain((int)cmd.value,0,21);if(audioOutput)audioOutput->SetGain((float)audioVolume/21.0f);}
+      else if(cmd.type==AUDIO_CMD_SEEK&&audioStarted&&!audioIsRadio&&audioRawSource&&audioInputBuffer&&audioDecoder){
+        uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos(),buffered=audioInputBuffer->getFillLevel();pos=pos>buffered?pos-buffered:0;
+        if(size>4096){int64_t target=(int64_t)pos+(int64_t)cmd.value*(int64_t)max((uint32_t)4096,size/20U);target=constrain((int64_t)target,(int64_t)0,(int64_t)size-1);bool wasPaused=audioPaused;audioDecoder->stop();delete audioDecoder;audioDecoder=nullptr;delete audioInputBuffer;audioInputBuffer=nullptr;audioRawSource->seek((int32_t)target,SEEK_SET);audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));audioDecoder=createAudioDecoder(audioTrackExtension);bool ok=audioInputBuffer&&audioDecoder&&audioDecoder->begin(audioInputBuffer,audioOutput);if(ok){audioPaused=wasPaused;audioStatusMessage=wasPaused?"PAUSED":"PLAYING";}else{stopAudioLocked();audioStatusMessage="SEEK FAILED";}}
+      }
+      if(cmd.source){cmd.source->close();delete cmd.source;}
+    }
+    if(audioStarted&&!audioPaused&&audioDecoder){
+      if(!audioDecoder->loop()){if(audioOutput)audioOutput->flush();audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;}
+      if(audioRawSource&&!audioIsRadio){uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos();if(audioInputBuffer){uint32_t n=audioInputBuffer->getFillLevel();pos=pos>n?pos-n:0;}audioProgressCached=size?(uint8_t)min((uint32_t)100,(uint32_t)(((uint64_t)pos*100ULL)/size)):0;}
+    }
+    if(!audioStarted&&!audioPaused&&audioStopRequested){stopAudioLocked();audioStopRequested=false;}
+    if(!audioStarted||audioPaused)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(5));
+    else taskYIELD();
+  }
+}
+void toggleAudioPause(){if(!audioCommandQueue||!audioStarted)return;AudioCommand cmd{};cmd.type=audioPaused?AUDIO_CMD_RESUME:AUDIO_CMD_PAUSE;if(xQueueSend(audioCommandQueue,&cmd,0)==pdTRUE&&johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
+void setAudioVolume(int value){audioVolume=constrain(value,0,21);if(audioCommandQueue){AudioCommand cmd{};cmd.type=AUDIO_CMD_VOLUME;cmd.value=(int16_t)audioVolume;xQueueSend(audioCommandQueue,&cmd,0);if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}}
 void drawMusicInfo(const String &name){
   header("MP3");
   auto& d=M5Cardputer.Display;
@@ -1498,18 +1537,14 @@ void openLegacyApp() {
 }
 void setEqBandGain(int band,float gain){
   if(band<0||band>=(int)JOHNNY_EQ_BANDS)return;
-  if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
   audioEqGainDb[band]=constrain(gain,-6.0f,6.0f);audioEqualizer.setBand((size_t)band,audioEqGainDb[band]);
-  if(audioMutex)xSemaphoreGive(audioMutex);
   preferences.putInt("eqpreset",-1);preferences.putFloat((String("eq")+String(band)).c_str(),audioEqGainDb[band]);eqPreset=-1;
 }
 void applyEqPreset(int preset){
   preset=(preset+4)%4;
-  if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
   eqPreset=preset;
   for(size_t i=0;i<JOHNNY_EQ_BANDS;i++)audioEqGainDb[i]=eqPresets[preset][i];
   audioEqualizer.setAll(audioEqGainDb);
-  if(audioMutex)xSemaphoreGive(audioMutex);
   preferences.putInt("eqpreset",preset);
   for(size_t i=0;i<JOHNNY_EQ_BANDS;i++)preferences.putFloat((String("eq")+String((int)i)).c_str(),audioEqGainDb[i]);
 }
@@ -1764,7 +1799,8 @@ void setup() {
   M5Cardputer.Speaker.begin();
   M5Cardputer.Speaker.setVolume(190);
   audioMutex=xSemaphoreCreateMutex();
-  if(!audioMutex) Serial.println("JOHNNY: AUDIO MUTEX FAILED");
+  audioCommandQueue=xQueueCreate(8,sizeof(AudioCommand));
+  if(!audioCommandQueue) Serial.println("JOHNNY: AUDIO QUEUE FAILED");
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
   randomSeed(esp_random());
   sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
@@ -1788,7 +1824,7 @@ void setup() {
   M5Cardputer.Mic.config(micCfg);
   refreshBatteryCache(true);
   // Workers sleep completely while their module is idle; notifications wake only the active worker.
-  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,&johnnyAudioTaskHandle,0);
+  if(audioCommandQueue)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,&johnnyAudioTaskHandle,0);
   radioRecordQueue=xQueueCreate(8,sizeof(RadioRecordBlock));
   if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,1,&johnnyRecorderTaskHandle,0);
   splash();selected=0;drawHome();
