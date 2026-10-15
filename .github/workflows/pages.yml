@@ -34,6 +34,7 @@ jobs:
         run: |
           set -euo pipefail
           EXPECTED_SHA="$(git rev-parse HEAD)"
+          export EXPECTED_SHA
           TAG="johnny-$(printf '%.12s' "$EXPECTED_SHA")"
           API="https://api.github.com/repos/otavio-dias-leite/johnny/releases/tags/$TAG"
           for attempt in $(seq 1 36); do
