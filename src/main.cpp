@@ -112,8 +112,9 @@ public:
   }
   void flush() override {
     if(!speaker_||bufferIndex_==0)return;
+    // Bound output back-pressure so MP3 decoding cannot monopolize the audio mutex.
     uint32_t started=millis();
-    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<80UL) delay(1);
+    while(speaker_->isPlaying() && (uint32_t)(millis()-started)<24UL) vTaskDelay(1);
     if(speaker_->isPlaying()) speaker_->stop();
     speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,true);
     bufferSlot_=(bufferSlot_+1)%3;bufferIndex_=0;
@@ -121,12 +122,9 @@ public:
   void flushRecording(){if(recordIndex_>0)sendRecordBlock();}
   void resetRecordingBuffer(){recordIndex_=0;}
   bool stop() override {
-    flush();
-    if(speaker_) {
-      uint32_t started=millis();
-      while(speaker_->isPlaying() && (uint32_t)(millis()-started)<80UL) delay(1);
-      if(speaker_->isPlaying()) speaker_->stop();
-    }
+    // Control-path stop must not wait for the output buffer to drain.
+    bufferIndex_=0;
+    if(speaker_) speaker_->stop();
     return true;
   }
 private:
@@ -247,6 +245,7 @@ volatile bool audioPaused = false;
 volatile bool audioIsRadio = false;
 SemaphoreHandle_t audioMutex = nullptr;
 volatile bool audioTaskEnded = false;
+volatile bool audioStopRequested = false;
 volatile bool audioTaskEndedWasRadio = false;
 volatile bool audioTaskReady = false;
 constexpr int RADIO_STATION_COUNT=4;
@@ -350,23 +349,25 @@ void drawHome(){
   d.setTextColor(UI_MUTED,BG);d.setCursor(62,5);d.print("CARDPUTER ADV");
   drawBatteryIndicator();
   d.drawFastHLine(7,18,226,UI_PURPLE);
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(9,25);d.print("MAIN MENU");
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(9,25);d.print("MAIN MENU / SELECT MODULE");
   const char* labels[APP_COUNT]={"HACK","GAMES","MUSIC","SYSTEM"};
-  const char* hints[APP_COUNT]={"NETWORK & SECURITY","ARCADE & CLASSICS","PLAYER & AUDIO TOOLS","DEVICE & CONNECTIVITY"};
+  const char* hints[APP_COUNT]={"WIRELESS & SECURITY","ARCADE & CLASSICS","MP3 & AUDIO TOOLS","DEVICE & CONNECTIVITY"};
   for(int i=0;i<APP_COUNT;i++){
-    const int x=8,y=39+i*19;
+    const int x=8+(i%2)*114,y=35+(i/2)*39;
     const bool active=(i==selected);
     const uint16_t fill=active?PANEL:BG;
-    d.fillRoundRect(x,y,224,17,3,fill);
-    if(active)d.drawRoundRect(x,y,224,17,3,UI_PURPLE);
-    drawAppIcon((uint8_t)i,x+4,y+1,active?UI_PINK:UI_MUTED);
-    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+27,y+3);d.print(labels[i]);
-    d.setTextColor(active?UI_LAVENDER:UI_MUTED,fill);d.setCursor(x+84,y+4);d.print(hints[i]);
-    if(active){d.setTextColor(UI_PINK,fill);d.setCursor(220,y+4);d.print(">");}
+    d.fillRoundRect(x,y,108,34,5,fill);
+    d.drawRoundRect(x,y,108,34,5,active?UI_PINK:0x5140);
+    drawAppIcon((uint8_t)i,x+5,y+7,active?UI_LAVENDER:UI_MUTED);
+    d.setTextColor(active?WHITE:UI_LAVENDER,fill);d.setCursor(x+29,y+7);d.print(labels[i]);
+    d.setTextColor(active?UI_LAVENDER:UI_MUTED,fill);d.setCursor(x+29,y+20);
+    String hint=hints[i];if(hint.length()>13)hint=hint.substring(0,13);
+    d.print(hint);
+    if(active)d.fillCircle(x+99,y+8,2,UI_PINK);
   }
   d.drawFastHLine(7,117,226,0x5140);
   d.setTextColor(UI_MUTED,BG);d.setCursor(9,123);
-  d.print("UP/DOWN SELECT   ENTER OPEN   TAB SLEEP");
+  d.print(", / LEFT RIGHT  ; . UP DOWN  ENTER OPEN");
 }
 
 void drawModuleIcon(uint8_t type,int x,int y,uint16_t color){
@@ -973,7 +974,8 @@ bool isPlayableAudio(String name) {
   return name.endsWith(".mp3");
 }
 void scanMusicRecursive(const String& folder,uint8_t depth) {
-  if(depth>5 || entryCount>=96) return;
+  // Bound directory traversal and allocations on large or slow SD cards.
+  if(depth>4 || entryCount>=64) return;
   File dir=SD.open(folder,FILE_READ);
   if(!dir || !dir.isDirectory()){if(dir)dir.close();return;}
   File f=dir.openNextFile();
@@ -1087,14 +1089,16 @@ void stopAudioLocked() {
   audioStarted=false;
   audioPaused=false;
   audioIsRadio=false;
+  audioStopRequested=false;
 }
 void stopAudio() {
-  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
-  stopAudioLocked();  audioTaskEnded=false;
-  if(audioMutex) xSemaphoreGive(audioMutex);
-  // Let the SD writer finish the WAV header before another app accesses the card.
-  uint32_t started=millis();
-  while(radioRecordState==3 && (uint32_t)(millis()-started)<5000UL) delay(2);
+  // Never wait indefinitely for the decoder task from the UI thread.
+  audioStopRequested=true;
+  if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(5))==pdTRUE) {
+    stopAudioLocked();
+    audioTaskEnded=false;
+    xSemaphoreGive(audioMutex);
+  }
 }
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3(mp3DecoderWorkspace,sizeof(mp3DecoderWorkspace));
@@ -1106,7 +1110,12 @@ bool startAudioSource(AudioFileSource* source, const String& title, const String
     source->close(); delete source;
     audioStatusMessage="AUDIO TASK UNAVAILABLE";
     return false;
-  }  xSemaphoreTake(audioMutex,portMAX_DELAY);
+  }
+  if(xSemaphoreTake(audioMutex,pdMS_TO_TICKS(20))!=pdTRUE) {
+    source->close(); delete source;
+    audioStatusMessage="AUDIO BUSY - TRY AGAIN";
+    return false;
+  }
   stopAudioLocked();
   audioRawSource=source;
   audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));
@@ -1347,7 +1356,7 @@ bool startRadioStream(const String& url, const String& title) {
 uint8_t audioProgressPercent(){if(!audioMutex||xSemaphoreTake(audioMutex,0)!=pdTRUE)return 0;uint32_t pos=0,size=0;if(audioRawSource){size=audioRawSource->getSize();pos=audioRawSource->getPos();if(audioInputBuffer){uint32_t n=audioInputBuffer->getFillLevel();pos=pos>n?pos-n:0;}}xSemaphoreGive(audioMutex);if(!size)return 0;if(pos>size)pos=size;return (uint8_t)((uint64_t)pos*100ULL/size);}
 bool seekAudioStep(int direction){
   if(!audioStarted||audioIsRadio||!audioMutex)return false;
-  if(xSemaphoreTake(audioMutex,pdMS_TO_TICKS(250))!=pdTRUE){audioStatusMessage="AUDIO BUSY";return false;}
+  if(xSemaphoreTake(audioMutex,pdMS_TO_TICKS(15))!=pdTRUE){audioStatusMessage="AUDIO BUSY";return false;}
   if(!audioRawSource||!audioInputBuffer||!audioDecoder){xSemaphoreGive(audioMutex);return false;}
   uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos(),buffered=audioInputBuffer->getFillLevel();pos=pos>buffered?pos-buffered:0;
   if(size<4096){xSemaphoreGive(audioMutex);return false;}
@@ -1392,11 +1401,13 @@ void serviceAudio() {
 void audioTask(void* parameter) {
   (void)parameter;
   audioTaskReady=true;
-  // Keep decoding cooperative: never wait behind UI/control code and never
-  // run above the Arduino loop task. This prevents audio from starving redraws.
+  // Decoder worker services deferred stops; UI never waits for a long decode.
   for(;;) {
     if(audioMutex && xSemaphoreTake(audioMutex,0)==pdTRUE) {
-      if(audioStarted && !audioPaused && audioDecoder) {
+      if(audioStopRequested) {
+        stopAudioLocked();
+        audioTaskEnded=false;
+      } else if(audioStarted && !audioPaused && audioDecoder) {
         if(!audioDecoder->loop()) {
           audioTaskEndedWasRadio=audioIsRadio;
           audioTaskEnded=true;
@@ -1410,15 +1421,21 @@ void audioTask(void* parameter) {
   }
 }
 void toggleAudioPause() {
-  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  if(!audioMutex || xSemaphoreTake(audioMutex,pdMS_TO_TICKS(5))!=pdTRUE) {
+    audioStatusMessage="AUDIO BUSY";
+    return;
+  }
   audioPaused=!audioPaused;
-  if(audioMutex) xSemaphoreGive(audioMutex);
+  xSemaphoreGive(audioMutex);
 }
 void setAudioVolume(int value) {
-  if(audioMutex) xSemaphoreTake(audioMutex,portMAX_DELAY);
+  if(!audioMutex || xSemaphoreTake(audioMutex,pdMS_TO_TICKS(5))!=pdTRUE) {
+    audioStatusMessage="AUDIO BUSY";
+    return;
+  }
   audioVolume=constrain(value,0,21);
   if(audioOutput) audioOutput->SetGain((float)audioVolume/21.0f);
-  if(audioMutex) xSemaphoreGive(audioMutex);
+  xSemaphoreGive(audioMutex);
 }
 void drawMusicInfo(const String &name){
   header("JOHNNY MUSIC");auto& d=M5Cardputer.Display;
@@ -1915,8 +1932,8 @@ if(usbActive) endUsbMode();
     drawCategoryMenu();
   } else if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
-    if(c==',')selected=(selected+APP_COUNT-1)%APP_COUNT;
-    else if(c=='/')selected=(selected+1)%APP_COUNT;
+    if(c==','){if(selected%2==1)selected--;}
+    else if(c=='/'){if(selected%2==0&&selected+1<APP_COUNT)selected++;}
     else if(c==';')selected=max(0,selected-2);
     else if(c=='.')selected=min(APP_COUNT-1,selected+2);
     drawHome();
