@@ -157,7 +157,7 @@ namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
 uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
 uint16_t UI_GRID=0x180B, UI_EDGE=0x4933, UI_PANEL_HI=0x3414, UI_CYAN=0x5DDF;
-enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC, CLOCKSCREEN, DISKMANAGER, PROCESSINFO, THEMES };
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, SYNTH, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC, CLOCKSCREEN, DISKMANAGER, PROCESSINFO, THEMES };
 Screen eqReturnScreen=HOME;
 Screen appReturnMenu=MUSICMENU;
 int appReturnSelected=0;
@@ -179,7 +179,7 @@ String entries[96];
 String entryPaths[96];
 bool entryIsDir[96];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
-int pianoOctave=0,pianoVolume=82;
+int synthOctave=0,synthVolume=82;
 bool musicNowPlaying=false;
 int radioSelected=0;
 bool radioEditingUrl=false;
@@ -474,10 +474,10 @@ void runFirmwareUpdate(){
 void splash(){auto& d=M5Cardputer.Display;d.setBrightness(190);d.fillScreen(BG);d.setTextDatum(middle_center);d.setTextSize(2);d.setTextColor(0xF800,BG);d.drawString("WAKE FUCK UP",120,56);d.drawString("SAMURAI",120,82);uint32_t t=millis();while((uint32_t)(millis()-t)<1000UL){M5Cardputer.update();delay(10);}d.setTextDatum(top_left);d.setTextSize(1);d.fillScreen(BG);}
 
 
-void drawPianoMeta(){auto& d=M5Cardputer.Display;d.fillRect(7,39,226,12,BG);d.setTextColor(UI_MUTED,BG);d.setCursor(9,42);d.printf("OCTAVE %d",4+pianoOctave);d.setTextColor(UI_LAVENDER,BG);d.setCursor(151,42);d.print("NATURAL / FLAT");}
-void pianoScreen(){header("PIANO");auto& d=M5Cardputer.Display;drawPianoMeta();const char* rows[]={"1234567890","qwertyuiop"};const int ys[]={62,84};for(int r=0;r<2;r++){int w=20,gap=2,total=10*w+9*gap,x0=(240-total)/2;for(int c=0;c<10;c++){bool black=(r==0);int x=x0+c*(w+gap);uint16_t fill=black?0x4208:0xEFFF;d.fillRoundRect(x,ys[r],w,17,2,fill);d.drawRoundRect(x,ys[r],w,17,2,black?UI_PINK:UI_EDGE);d.setTextColor(black?WHITE:BG,fill);d.setCursor(x+7,ys[r]+5);d.print(rows[r][c]);}}d.setTextColor(UI_MUTED,BG);d.setCursor(9,112);d.print("Q-P NATURAL  |  1-0 FLATS");footer();}
-float synthWave(uint32_t phase){return synthSineTable[(uint16_t)(phase>>22)];}
-void playNote(char c){c=(char)tolower((unsigned char)c);static const char naturalKeys[]="qwertyuiop";static const uint8_t naturalSemis[]={0,2,4,5,7,9,11,12,14,16};static const char flatKeys[]="1234567890";static const uint8_t flatSemis[]={1,3,6,8,10,13,15,18,20,22};int semi=-1;const char* p=strchr(naturalKeys,c);if(p)semi=naturalSemis[p-naturalKeys];else{p=strchr(flatKeys,c);if(p)semi=flatSemis[p-flatKeys];}if(semi<0||pianoVolume<=0)return;if(!synthSineReady){for(size_t i=0;i<1024;i++)synthSineTable[i]=sinf(6.28318530718f*(float)i/1024.0f);synthSineReady=true;}if(M5Cardputer.Speaker.isPlaying(SYNTH_AUDIO_CHANNEL)>=2)return;if(audioMutex&&xSemaphoreTake(audioMutex,pdMS_TO_TICKS(25))!=pdTRUE)return;int midi=60+pianoOctave*12+semi;float hz=440.0f*powf(2.0f,((float)midi-69.0f)/12.0f);uint32_t step=(uint32_t)((double)hz*(4294967296.0/22050.0));float gain=(float)pianoVolume*0.72f*256.0f;uint8_t slot=synthAudioBufferIndex;int16_t* samples=synthAudioBuffers[slot];uint32_t phase=0;for(size_t i=0;i<SYNTH_SAMPLES;i++){float env=1.0f;if(i<100)env=(float)i/100.0f;else if(i>SYNTH_SAMPLES-500)env=(float)(SYNTH_SAMPLES-i)/500.0f;float out=synthWave(phase)*env*gain;if(out>32767.0f)out=32767.0f;if(out< -32768.0f)out=-32768.0f;samples[i]=(int16_t)out;phase+=step;}if(M5Cardputer.Speaker.playRaw(samples,SYNTH_SAMPLES,22050,false,1,SYNTH_AUDIO_CHANNEL,false))synthAudioBufferIndex=(uint8_t)((slot+1)%3);if(audioMutex)xSemaphoreGive(audioMutex);}
+void drawSynthMeta(){auto& d=M5Cardputer.Display;d.fillRect(7,39,226,12,BG);d.setTextColor(UI_MUTED,BG);d.setCursor(9,42);d.printf("OCT %d",4+synthOctave);d.setTextColor(UI_LAVENDER,BG);d.setCursor(151,42);d.print(synthWaveNames[synthWaveform]);}
+void synthScreen(){header("SYNTHESIZER");auto& d=M5Cardputer.Display;drawSynthMeta();const char* rows[]={"1234567890","qwertyuiop"};const int ys[]={62,84};for(int r=0;r<2;r++){int w=20,gap=2,total=10*w+9*gap,x0=(240-total)/2;for(int c=0;c<10;c++){bool sharp=(r==0);int x=x0+c*(w+gap);uint16_t fill=sharp?0x4208:0xEFFF;d.fillRoundRect(x,ys[r],w,17,2,fill);d.drawRoundRect(x,ys[r],w,17,2,sharp?UI_PINK:UI_EDGE);d.setTextColor(sharp?WHITE:BG,fill);d.setCursor(x+7,ys[r]+5);d.print(rows[r][c]);}}d.setTextColor(UI_MUTED,BG);d.setCursor(9,112);d.print("Q-P NOTES  |  1-0 SHARPS");d.setCursor(9,124);d.print("[-] WAVE  [; / .] OCTAVE");footer();}
+uint8_t synthWaveform=0;const char* synthWaveNames[]={"SINE","TRIANGLE","SQUARE","SAW"};float synthWave(uint32_t phase){const uint16_t index=(uint16_t)(phase>>22);const float p=(float)index/1024.0f;if(synthWaveform==1)return 1.0f-4.0f*fabsf(p-0.5f);if(synthWaveform==2)return p<0.5f?1.0f:-1.0f;if(synthWaveform==3)return 2.0f*p-1.0f;return synthSineTable[index];}
+void playSynthNote(char c){c=(char)tolower((unsigned char)c);static const char naturalKeys[]="qwertyuiop";static const uint8_t naturalSemis[]={0,2,4,5,7,9,11,12,14,16};static const char flatKeys[]="1234567890";static const uint8_t flatSemis[]={1,3,6,8,10,13,15,18,20,22};int semi=-1;const char* p=strchr(naturalKeys,c);if(p)semi=naturalSemis[p-naturalKeys];else{p=strchr(flatKeys,c);if(p)semi=flatSemis[p-flatKeys];}if(semi<0||synthVolume<=0)return;if(!synthSineReady){for(size_t i=0;i<1024;i++)synthSineTable[i]=sinf(6.28318530718f*(float)i/1024.0f);synthSineReady=true;}if(M5Cardputer.Speaker.isPlaying(SYNTH_AUDIO_CHANNEL)>=2)return;if(audioMutex&&xSemaphoreTake(audioMutex,pdMS_TO_TICKS(25))!=pdTRUE)return;int midi=60+synthOctave*12+semi;float hz=440.0f*powf(2.0f,((float)midi-69.0f)/12.0f);uint32_t step=(uint32_t)((double)hz*(4294967296.0/22050.0));float gain=(float)synthVolume*0.72f*256.0f;uint8_t slot=synthAudioBufferIndex;int16_t* samples=synthAudioBuffers[slot];uint32_t phase=0;for(size_t i=0;i<SYNTH_SAMPLES;i++){float env=1.0f;if(i<100)env=(float)i/100.0f;else if(i>SYNTH_SAMPLES-500)env=(float)(SYNTH_SAMPLES-i)/500.0f;float out=synthWave(phase)*env*gain;if(out>32767.0f)out=32767.0f;if(out< -32768.0f)out=-32768.0f;samples[i]=(int16_t)out;phase+=step;}if(M5Cardputer.Speaker.playRaw(samples,SYNTH_SAMPLES,22050,false,1,SYNTH_AUDIO_CHANNEL,false))synthAudioBufferIndex=(uint8_t)((slot+1)%3);if(audioMutex)xSemaphoreGive(audioMutex);}
 void stopMicCapture() {
   if(micStarted) M5Cardputer.Mic.end();
   micStarted=false; micWarmupUntil=0;
@@ -1079,7 +1079,7 @@ void stopAudioLocked() {
   audioIsRadio=false;
   audioStopRequested=false;
 }
-void stopAudio(){audioStopRequested=true;if(audioCommandQueue){AudioCommand cmd{};cmd.type=AUDIO_CMD_STOP;xQueueSend(audioCommandQueue,&cmd,pdMS_TO_TICKS(30));}if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
+void stopAudio(){if(!audioCommandQueue)return;AudioCommand cmd{};cmd.type=AUDIO_CMD_STOP;audioStopRequested=true;if(xQueueSendToFront(audioCommandQueue,&cmd,pdMS_TO_TICKS(80))!=pdTRUE){audioStopRequested=false;return;}if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);}
 bool stopAudioAndWait(uint32_t timeoutMs=3000){stopAudio();uint32_t started=millis();while((audioStarted||audioStopRequested)&&((uint32_t)(millis()-started)<timeoutMs))vTaskDelay(pdMS_TO_TICKS(5));return !audioStarted&&!audioStopRequested;}
 AudioGenerator* createAudioDecoder(const String& extension) {
   if(extension=="mp3") return new AudioGeneratorMP3(mp3DecoderWorkspace,sizeof(mp3DecoderWorkspace));
@@ -1289,14 +1289,7 @@ void serviceMusicProgress(){
 void serviceAudio() {
   bool ended=false;
   bool wasRadio=false;
-  if(audioMutex && xSemaphoreTake(audioMutex,0)==pdTRUE) {
-    if(audioTaskEnded) {
-      ended=true;
-      wasRadio=audioTaskEndedWasRadio;
-      audioTaskEnded=false;
-    }
-    xSemaphoreGive(audioMutex);
-  }
+  if(audioTaskEnded) { ended=true; wasRadio=audioTaskEndedWasRadio; audioTaskEnded=false; }
   if(!ended) return;
   stopAudio();audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";if(wasRadio)radioMessage=audioStatusMessage;
   else if(screen==MUSIC&&musicNowPlaying&&entryCount>0){
@@ -1325,7 +1318,8 @@ void audioTask(void* parameter){
         if(ok){audioNowTitle=String(cmd.title);audioIsRadio=cmd.radio;audioPaused=false;audioStarted=true;audioStatusMessage=cmd.radio?"LIVE RADIO":"PLAYING";M5Cardputer.Speaker.setVolume(190);}
         else{stopAudioLocked();audioStatusMessage="MP3 OPEN FAILED";}
       }
-      else if(cmd.type==AUDIO_CMD_TOGGLE){if(audioStarted){audioPaused=!audioPaused;audioStatusMessage=audioPaused?"PAUSED":"PLAYING";}}\n      else if(cmd.type==AUDIO_CMD_PAUSE){if(audioStarted){audioPaused=true;audioStatusMessage="PAUSED";}}
+      else if(cmd.type==AUDIO_CMD_TOGGLE){if(audioStarted){audioPaused=!audioPaused;audioStatusMessage=audioPaused?"PAUSED":"PLAYING";}}
+      else if(cmd.type==AUDIO_CMD_PAUSE){if(audioStarted){audioPaused=true;audioStatusMessage="PAUSED";}}
       else if(cmd.type==AUDIO_CMD_RESUME){if(audioStarted){audioPaused=false;audioStatusMessage="PLAYING";}}
       else if(cmd.type==AUDIO_CMD_VOLUME){audioVolume=constrain((int)cmd.value,0,21);if(audioOutput)audioOutput->SetGain((float)audioVolume/21.0f);}
       else if(cmd.type==AUDIO_CMD_SEEK&&audioStarted&&!audioIsRadio&&audioRawSource&&audioInputBuffer&&audioDecoder){
@@ -1497,7 +1491,7 @@ void openLegacyApp() {
   if(!stopModuleTasks()){drawCategoryMenu();return;}
   if(audioStarted||audioStopRequested){screen=MUSIC;musicNowPlaying=true;drawMusicInfo(audioNowTitle);return;}
   switch(selected) {
-    case 0: if(!stopAudioAndWait(3000)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}stopMicCapture();audioEqualizer.reset();screen=PIANO;pianoScreen();break;
+    case 0: if(!stopAudioAndWait(3000)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}stopMicCapture();audioEqualizer.reset();screen=SYNTH;synthScreen();break;
     case 1:
       if(!stopAudioAndWait(3000)){screen=MUSIC;drawMusicInfo(audioNowTitle);break;}stopMicCapture();screen=TUNER;tunerInstrument=0;
       tunerFrequency=0; tunerFilteredFrequency=0; tunerHasSignal=false;
@@ -1845,7 +1839,7 @@ void loop() {
     if(!chargingSaverDismissed&&!chargingSaverActive&&(uint32_t)(millis()-chargingDetectedAt)>=2000UL&&screen!=USBMODE){chargingSaverActive=true;screenSaverActive=true;drawChargingSaver();}
   }else{
     chargingDetectedAt=0;chargingSaverDismissed=false;
-    if(chargingSaverActive){chargingSaverActive=false;screenSaverActive=false;if(screen==HOME)drawHome();else if(screen==CLOCKSCREEN)drawClockScreen();else if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioNowTitle);else if(screen==RADIO)drawRadioScreen();else if(screen==PIANO)pianoScreen();else if(screen==MICREC)drawMicRecorder();else if(screen==FILES||screen==MUSIC)drawFiles(screen==MUSIC);else if(screen==NETWORK)drawNetworkScreen();else drawCategoryMenu();}
+    if(chargingSaverActive){chargingSaverActive=false;screenSaverActive=false;if(screen==HOME)drawHome();else if(screen==CLOCKSCREEN)drawClockScreen();else if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioNowTitle);else if(screen==RADIO)drawRadioScreen();else if(screen==SYNTH)synthScreen();else if(screen==MICREC)drawMicRecorder();else if(screen==FILES||screen==MUSIC)drawFiles(screen==MUSIC);else if(screen==NETWORK)drawNetworkScreen();else drawCategoryMenu();}
   }
   if(screen==MICREC&&micRecording)serviceMicRecorder();
   if(!screenSaverActive&&screen==LIFE&&lifeRunning&&millis()-lifeLastStep>=lifeIntervalMs){stepLife();drawLife();}
@@ -1895,7 +1889,7 @@ void loop() {
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) drawCategoryMenu();
     else if(screen==UPDATEINFO) drawUpdateInfo();
     else if(screen==MICREC) drawMicRecorder();
-    else if(screen==PIANO) pianoScreen();
+    else if(screen==SYNTH) synthScreen();
     else if(screen==TUNER) tunerScreen();
     else if(screen==FILES) drawFiles(false);
     else if(screen==MUSIC) musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
@@ -1919,7 +1913,7 @@ void loop() {
     else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) drawCategoryMenu();
     else if(screen==UPDATEINFO) drawUpdateInfo();
     else if(screen==MICREC) drawMicRecorder();
-    else if(screen==PIANO) pianoScreen();
+    else if(screen==SYNTH) synthScreen();
     else if(screen==TUNER) tunerScreen();
     else if(screen==FILES) drawFiles(false);
     else if(screen==MUSIC) musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
@@ -1954,7 +1948,7 @@ void loop() {
       screen=eqReturnScreen;
       if(screen==HOME)drawHome();
       else if(screen==MUSICMENU)drawCategoryMenu();
-      else if(screen==PIANO)pianoScreen();
+      else if(screen==SYNTH)synthScreen();
       else if(screen==MUSIC)musicNowPlaying?drawMusicInfo(audioNowTitle):drawFiles(true);
       else if(screen==RADIO)drawRadioScreen();
     }else if(screen==LIFE){saveLife();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
@@ -1979,7 +1973,7 @@ void loop() {
 if(usbActive) endUsbMode();
       screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();
     } else {
-      if(screen==PIANO){M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);}
+      if(screen==SYNTH){M5Cardputer.Speaker.stop(SYNTH_AUDIO_CHANNEL);}
       if(screen==TUNER) stopMicCapture();
       if(screen==NETWORK && wifiConfigStage==2) { wifiConfigStage=1; wifiEntry=""; drawNetworkScreen(); }
       else { wifiConfigStage=0;screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu(); }
@@ -2020,7 +2014,7 @@ if(usbActive) endUsbMode();
     if(c==',')selected=(selected+APP_COUNT-1)%APP_COUNT;
     else if(c=='/')selected=(selected+1)%APP_COUNT;
     drawHome();
-  } else if(screen==PIANO) { if(c)playNote(c); } else if(screen==TUNER) {
+  } else if(screen==SYNTH) { if(c=='['||c=='-'){synthWaveform=(synthWaveform+3)%4;synthScreen();}else if(c==']'||c=='='){synthWaveform=(synthWaveform+1)%4;synthScreen();}else if(c==';'){synthOctave=max(-2,synthOctave-1);synthScreen();}else if(c=='.'){synthOctave=min(2,synthOctave+1);synthScreen();}else if(c)playSynthNote(c); } else if(screen==TUNER) {
     if(c==','||c=='/') {tunerInstrument=(tunerInstrument+1)%3;tunerScreen();}
   } else if(screen==MUSIC) {
     if(musicNowPlaying) {
