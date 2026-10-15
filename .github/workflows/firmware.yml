@@ -72,17 +72,3 @@ jobs:
           fi
           gh release upload "$TAG" release/firmware/* --clobber
           gh release edit "$TAG" --title "$TITLE" --latest
-
-      - name: Publish versioned firmware release
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          VERSION="$(tr -d '\r\n' < VERSION)"
-          TAG="v$VERSION"
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "JOHNNY $VERSION" --notes "JOHNNY Cardputer ADV firmware $VERSION. Built by GitHub Actions." --target "$GITHUB_SHA"
-          fi
-          gh release upload "$TAG" release/firmware/* --clobber
