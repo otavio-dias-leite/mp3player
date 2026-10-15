@@ -1,13 +1,13 @@
 {
   "name": "JOHNNY — Cardputer ADV",
-  "version": "0.0.0-alpha.18",
+  "version": "0.0.0-alpha.20",
   "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "https://github.com/otavio-dias-leite/johnny/releases/download/v0.0.0-alpha.18/johnny-cardputer-adv-full.bin",
+          "path": "https://github.com/otavio-dias-leite/johnny/releases/download/v0.0.0-alpha.20/johnny-cardputer-adv-full.bin",
           "offset": 0
         }
       ]
