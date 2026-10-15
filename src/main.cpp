@@ -23,6 +23,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
+#include <time.h>
 #include "johnny_version.h"
 
 
@@ -148,9 +149,9 @@ private:
 
 namespace {
 constexpr int SD_CS = 12, SD_SCK = 40, SD_MISO = 39, SD_MOSI = 14;
-constexpr uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
-constexpr uint16_t UI_GRID=0x180B, UI_EDGE=0x4933, UI_PANEL_HI=0x3414, UI_CYAN=0x5DDF;
-enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC };
+uint16_t BG = 0x1008, PANEL = 0x280C, UI_PURPLE = 0xA01F, UI_PINK = 0xF19F, UI_LAVENDER = 0xD5BF, UI_MUTED = 0xB5B4;
+uint16_t UI_GRID=0x180B, UI_EDGE=0x4933, UI_PANEL_HI=0x3414, UI_CYAN=0x5DDF;
+enum Screen : uint8_t { HOME, MUSICMENU, SYSTEMMENU, GAMESMENU, HACKMENU, HACKFX, BLESCAN, HACKINFO, HACKINPUT, PIANO, TUNER, FILES, MUSIC, RADIO, NETWORK, USBMODE, EQSCREEN, LIFE, ABOUT, UPDATEINFO, MICREC, CLOCKSCREEN, DISKMANAGER, PROCESSINFO, THEMES };
 Screen eqReturnScreen=HOME;
 Screen appReturnMenu=MUSICMENU;
 int appReturnSelected=0;
@@ -197,6 +198,15 @@ AudioGenerator* audioDecoder=nullptr;
 JohnnyAudioOutput* audioOutput=nullptr;
 Preferences preferences;
 String savedSsid, savedPassword, wifiEntry;
+uint8_t themeMode=0,themeSelection=0;
+bool clockNtpStarted=false;
+bool alarmEnabled=false,alarmActive=false,alarmTriedFile=false,alarmSoundStarted=false;
+uint8_t alarmHour=7,alarmMinute=0,alarmWeekdayMask=0x7F;
+int32_t alarmLastDayKey=-1;
+uint64_t alarmSnoozeUntilEpoch=0;
+uint32_t alarmSnoozeUntilMs=0,lastAlarmToneMs=0,lastClockDraw=0,chargingDetectedAt=0;
+bool chargingSaverActive=false,chargingSaverDismissed=false;
+String alarmSoundPath;TaskHandle_t johnnyAudioTaskHandle=nullptr,johnnyRecorderTaskHandle=nullptr;
 uint8_t wifiConfigStage=0;
 int lastWiFiStatus=-1;
 int lastAboutWiFiStatus=-1;
@@ -239,11 +249,12 @@ static int16_t bootJingleBuffer[BOOT_JINGLE_SAMPLES];
 static int16_t synthPadSamples[8192];
 volatile int8_t synthPadRequest=-1;
 uint8_t synthPadSelected=0;
+int8_t micRecordPadIndex=-1;
 static int16_t synthAudioBuffers[3][SYNTH_SAMPLES];
 static float synthSineTable[1024];
 uint8_t synthAudioBufferIndex=0;
 bool synthSineReady=false;
-const char* effectNames[]={"CLEAN","OVERDRIVE","FUZZ","SQUARE"};
+const char* effectNames[]={"CLEAN","WARM","DRIVE","FUZZ","SQUARE","PAD","BELL","BASS"};
 String selectedFile;
 volatile bool audioStarted = false;
 volatile bool audioPaused = false;
@@ -271,12 +282,12 @@ bool screenSaverActive = false;
 const char* apps[] = {"HACK","GAMES","MUSIC","SYSTEM"};
 constexpr int APP_COUNT=4;
 const char* musicMenuItems[]={"SYNTH","TUNER","MUSIC PLAYER","WEB RADIO","EQUALIZER","MIC RECORDER"};
-const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS","BLUETOOTH DEVICES"};
+const char* systemMenuItems[]={"FILES","USB TRANSFER","WI-FI","UPDATE FIRMWARE","DEVICE STATUS","BLUETOOTH DEVICES","CLOCK / ALARMS","DISK MANAGER","PROCESS INFO","THEMES"};
 const char* gamesMenuItems[]={"CONWAY LIFE"};
 const char* hackMenuItems[]={"WI-FI RECON","BLE SCANNER","TCP CONNECT TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL FX","HTTP SECURITY AUDIT","DEVICE SECURITY AUDIT"};
 bool hackVisualFx=false;
 uint32_t hackFxLastFrame=0;
-constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=6, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=9;
+constexpr int MUSIC_MENU_COUNT=6, SYSTEM_MENU_COUNT=10, GAMES_MENU_COUNT=1, HACK_MENU_COUNT=9;
 String updateMessage="CONNECT TO WI-FI";
 File micRecordFile;
 bool micRecording=false;
@@ -1096,6 +1107,7 @@ void scanDirectory(bool musicMode=false) {
 }
 
 void drawMusicInfo(const String &name);
+void drawClockScreen();void drawDiskManager();void drawProcessInfo();void drawThemeScreen();void drawChargingSaver();void serviceClockAlarm();
 void drawRadioScreen();
 void stopAudioLocked() {
   if(radioRecordStartRequested && radioRecordState==1) {
@@ -1590,6 +1602,10 @@ void openApp(){
   if(menu!=MUSICMENU&&menu!=SYSTEMMENU&&menu!=GAMESMENU)return;
   appReturnMenu=menu;appReturnSelected=item;
   if(menu==SYSTEMMENU&&item==5){screen=BLESCAN;startBleScan();drawBleScreen();return;}
+  if(menu==SYSTEMMENU&&item==6){screen=CLOCKSCREEN;lastClockDraw=0;drawClockScreen();return;}
+  if(menu==SYSTEMMENU&&item==7){screen=DISKMANAGER;drawDiskManager();return;}
+  if(menu==SYSTEMMENU&&item==8){screen=PROCESSINFO;drawProcessInfo();return;}
+  if(menu==SYSTEMMENU&&item==9){screen=THEMES;themeSelection=themeMode;drawThemeScreen();return;}
   screen=HOME;
   if(menu==MUSICMENU){if(item==5){screen=MICREC;micRecording=false;micRecordStatus="READY";drawMicRecorder();return;}const int map[]={0,1,2,3,7};selected=map[item];}
   else if(menu==SYSTEMMENU){if(item==3){screen=UPDATEINFO;updateMessage="PRESS ENTER TO INSTALL LATEST";drawUpdateInfo();return;}if(item==4){selected=9;openLegacyApp();return;}const int map[]={4,6,5};selected=map[item];}
@@ -1762,11 +1778,11 @@ void stopMicRecording(){
 }
 void serviceMicRecorder(){
   if(!micRecording)return;
-  if(!captureMic(micRecordSamples,3072,420)){if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive)drawMicRecorder();}return;}
+  if(!captureMic(micRecordSamples,3072,420)){if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)pianoScreen();else drawMicRecorder();}}return;}
   size_t bytes=sizeof(micRecordSamples);
   if(!micRecordFile||micRecordFile.write((const uint8_t*)micRecordSamples,bytes)!=bytes){micRecordStatus="SD WRITE ERROR";stopMicRecording();return;}
   micRecordBytes+=(uint32_t)bytes;
-  if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive)drawMicRecorder();}
+  if(millis()-micRecordLastDraw>500){micRecordLastDraw=millis();if(!screenSaverActive){if(screen==PIANO)pianoScreen();else drawMicRecorder();}}
 }
 void radioRecorderTask(void* parameter){
   (void)parameter;File output;radioRecorderTaskReady=true;
