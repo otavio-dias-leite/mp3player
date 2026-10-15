@@ -7,38 +7,130 @@
 #include <AudioFileSourceBuffer.h>
 #include <AudioGeneratorMP3.h>
 #include "johnny_version.h"
+
 namespace {
-constexpr int CS=12,SCK_PIN=40,MISO_PIN=39,MOSI_PIN=14;
-constexpr uint16_t BG=0x1008,PANEL=0x280C,PINK=0xF19F,LIGHT=0xD5BF,MUTED=0x8C92,EDGE=0x4933;
-SPIClass sd(FSPI);bool sdOK=false;
-enum Page:uint8_t{HOME,LIST,PLAYER,SYSTEM};Page page=HOME;
-bool musicOnly=true,playing=false,paused=false;
-String folder="/",track="";String files[64],paths[64];bool dirs[64];int total=0,indexFile=0,offset=0,volume=70;
-AudioFileSourceSD* source=nullptr;AudioFileSourceBuffer* buffer=nullptr;AudioGeneratorMP3* mp3=nullptr;alignas(4) uint8_t decodeBuffer[4096];
-class JohnnyOutput:public AudioOutput{
- m5::Speaker_Class* speaker;int16_t pcm[3][512]{};size_t used=0;uint8_t slot=0;
- bool send(){if(!used)return true;uint32_t t=millis();while(!speaker->playRaw(pcm[slot],used,hertz,false,1,0,false)){if(millis()-t>150)return false;delay(1);}slot=(slot+1)%3;used=0;return true;}
+constexpr int SD_CS=12, SD_SCK=40, SD_MISO=39, SD_MOSI=14;
+constexpr uint16_t BLACK=0x0000, RED=0xF800, WHITE=0xFFFF, GREY=0x9CF3, PANEL=0x2800;
+SPIClass sdSPI(FSPI);
+bool sdReady=false, isPlaying=false, isPaused=false;
+String files[80], currentTrack;
+int fileCount=0, selected=0, firstVisible=0, volume=75;
+uint8_t audioBuffer[4096];
+AudioFileSourceSD *source=nullptr;
+AudioFileSourceBuffer *buffered=nullptr;
+AudioGeneratorMP3 *mp3=nullptr;
+
+class CardputerAudioOutput : public AudioOutput {
+  int16_t samples[2][384]{};
+  size_t count=0;
+  uint8_t active=0;
+  bool flushSamples() {
+    if (!count) return true;
+    uint32_t started=millis();
+    while (!M5Cardputer.Speaker.playRaw(samples[active], count, hertz, false, 1, 0, false)) {
+      if (millis()-started>150) return false;
+      delay(1);
+    }
+    active^=1; count=0; return true;
+  }
 public:
- explicit JohnnyOutput(m5::Speaker_Class* s):speaker(s){}
- bool begin()override{return speaker!=nullptr;}
- bool ConsumeSample(int16_t sample[2])override{if(used==512&&!send())return false;int32_t v=((int32_t)sample[0]+sample[1])/2;v=(int32_t)(v*(float)volume/100.0f);v=constrain(v,-32768,32767);pcm[slot][used++]=(int16_t)v;return true;}
- void flush()override{send();}
- bool stop()override{used=0;speaker->stop();return true;}
+  bool begin() override { return true; }
+  bool ConsumeSample(int16_t sample[2]) override {
+    if (count>=384 && !flushSamples()) return false;
+    int32_t mono=((int32_t)sample[0]+sample[1])/2;
+    mono=mono*volume/100;
+    samples[active][count++]=(int16_t)constrain(mono,-32768,32767);
+    return true;
+  }
+  void flush() override { flushSamples(); }
+  bool stop() override { count=0; M5Cardputer.Speaker.stop(); return true; }
 };
-JohnnyOutput* out=nullptr;
-void closePlayer(){if(mp3){if(mp3->isRunning())mp3->stop();delete mp3;mp3=nullptr;}if(buffer){delete buffer;buffer=nullptr;}if(source){source->close();delete source;source=nullptr;}if(out){out->stop();delete out;out=nullptr;}M5Cardputer.Speaker.stop();playing=false;paused=false;}
-void header(const char* title){auto& d=M5Cardputer.Display;d.fillScreen(BG);d.fillRect(0,0,240,20,0x180B);d.setTextSize(1);d.setTextColor(PINK,BG);d.setCursor(8,6);d.print("JOHNNY");d.setTextColor(MUTED,BG);d.setCursor(190,6);d.print("ADV");d.drawFastHLine(8,22,224,EDGE);d.setTextSize(2);d.setTextColor(WHITE,BG);d.setCursor(8,30);d.print(title);d.setTextSize(1);}
-void footer(const char* s){auto& d=M5Cardputer.Display;d.drawFastHLine(8,117,224,EDGE);d.setTextColor(MUTED,BG);d.setCursor(8,123);d.print(s);}
-void homeDraw(){header("HOME");auto& d=M5Cardputer.Display;const char* a[]={"MUSIC PLAYER","SD FILES","SYSTEM"};for(int i=0;i<3;i++){int y=54+i*21;bool on=i==indexFile;d.fillRoundRect(8,y-3,224,18,4,on?PANEL:BG);d.setTextColor(on?PINK:LIGHT,on?PANEL:BG);d.setCursor(16,y+1);d.printf("%c %s",on?'>':' ',a[i]);}footer("UP/DOWN ENTER");}
-void scanDir(const String& path,uint8_t depth=0){if(!sdOK||depth>2||total>=64)return;File d=SD.open(path,FILE_READ);if(!d||!d.isDirectory()){if(d)d.close();return;}File f=d.openNextFile();while(f&&total<64){String raw=String(f.name());bool isdir=f.isDirectory();f.close();int slash=raw.lastIndexOf('/');String n=slash>=0?raw.substring(slash+1):raw;if(n.length()&&n[0]!='.'&&n!="LOST.DIR"){String full=path=="/"?String("/")+n:path+"/"+n;if(musicOnly){if(isdir)scanDir(full,depth+1);else{String lo=n;lo.toLowerCase();if(lo.endsWith(".mp3")){files[total]=n;paths[total]=full;dirs[total++]=false;}}}else{files[total]=n;paths[total]=full;dirs[total++]=isdir;}}f=d.openNextFile();}d.close();}
-void scan(bool music){musicOnly=music;total=0;indexFile=0;offset=0;scanDir(music?"/":folder);}
-void listDraw(){header(musicOnly?"MUSIC":"FILES");auto& d=M5Cardputer.Display;if(!sdOK){d.setTextColor(PINK,BG);d.setCursor(12,65);d.print("NO MICROSD");footer("CHECK CARD");return;}int row=0;for(int i=offset;i<total&&row<5;i++,row++){int y=musicOnly?54+row*12:56+row*11;bool on=i==indexFile;d.fillRect(8,y-1,224,11,on?PANEL:BG);d.setTextColor(on?PINK:(dirs[i]?LIGHT:WHITE),on?PANEL:BG);d.setCursor(12,y);String n=files[i];if(n.length()>29)n=n.substring(0,26)+"...";d.printf("%c %s%s",on?'>':' ',n.c_str(),dirs[i]?"/":"");}if(total==0){d.setTextColor(MUTED,BG);d.setCursor(12,70);d.print("EMPTY");}footer("UP/DOWN ENTER BACK");}
-bool playFile(const String& p){closePlayer();source=new AudioFileSourceSD();if(!source||!source->open(p.c_str())){closePlayer();return false;}buffer=new AudioFileSourceBuffer(source,decodeBuffer,sizeof(decodeBuffer));out=new JohnnyOutput(&M5Cardputer.Speaker);if(!buffer||!out){closePlayer();return false;}out->SetGain(0.7f);mp3=new AudioGeneratorMP3();if(!mp3||!mp3->begin(buffer,out)){closePlayer();return false;}track=p.substring(p.lastIndexOf('/')+1);playing=true;paused=false;M5Cardputer.Speaker.setVolume(205);return true;}
-void playerDraw(){header("MUSIC PLAYER");auto& d=M5Cardputer.Display;d.fillRoundRect(10,51,220,48,5,PANEL);d.setTextColor(PINK,BG);d.setCursor(20,60);d.print(paused?"PAUSED":playing?"PLAYING":"STOPPED");d.setTextColor(WHITE,BG);d.setCursor(20,79);String n=track;if(n.length()>27)n=n.substring(0,24)+"...";d.print(n);d.setTextColor(LIGHT,BG);d.setCursor(20,91);d.printf("VOLUME %d%%",volume);footer("SPACE PAUSE  +/- VOL  P STOP");}
-void openFile(){if(indexFile<0||indexFile>=total)return;if(musicOnly){if(playFile(paths[indexFile])){page=PLAYER;playerDraw();}}else if(dirs[indexFile]){folder=paths[indexFile];scan(false);listDraw();}else{String p=paths[indexFile];p.toLowerCase();if(p.endsWith(".mp3")&&playFile(paths[indexFile])){page=PLAYER;playerDraw();}}}
-void back(){if(page==PLAYER){closePlayer();page=LIST;listDraw();}else if(page==LIST){if(!musicOnly&&folder!="/"){int s=folder.lastIndexOf('/');folder=s<=0?"/":folder.substring(0,s);scan(false);listDraw();}else{page=HOME;indexFile=0;homeDraw();}}else if(page==SYSTEM){page=HOME;indexFile=2;homeDraw();}else{page=HOME;homeDraw();}}
-void startList(bool music){folder="/";scan(music);page=LIST;listDraw();}
-void systemDraw(){header("SYSTEM");auto& d=M5Cardputer.Display;d.setTextColor(LIGHT,BG);d.setCursor(10,53);d.print("JOHNNY LITE");d.setTextColor(WHITE,BG);d.setCursor(10,71);d.printf("VERSION %s",JOHNNY_VERSION);d.setTextColor(MUTED,BG);d.setCursor(10,91);d.printf("SD %s",sdOK?"READY":"MISSING");d.setCursor(10,105);d.printf("HEAP %lu KB",ESP.getFreeHeap()/1024UL);footer("BACK");}
+CardputerAudioOutput *audioOut=nullptr;
+
+bool isMp3(const String &name) { String lower=name; lower.toLowerCase(); return lower.endsWith(".mp3"); }
+void stopPlayback() {
+  if(mp3){if(mp3->isRunning())mp3->stop();delete mp3;mp3=nullptr;}
+  if(buffered){delete buffered;buffered=nullptr;}
+  if(source){source->close();delete source;source=nullptr;}
+  if(audioOut){audioOut->stop();delete audioOut;audioOut=nullptr;}
+  M5Cardputer.Speaker.stop(); isPlaying=false; isPaused=false;
 }
-void setup(){Serial.begin(115200);auto cfg=M5.config();M5Cardputer.begin(cfg,true);M5Cardputer.Display.setRotation(1);M5Cardputer.Speaker.begin();M5Cardputer.Speaker.setVolume(190);pinMode(38,OUTPUT);digitalWrite(38,HIGH);sd.begin(SCK_PIN,MISO_PIN,MOSI_PIN,CS);sdOK=SD.begin(CS,sd,16000000);homeDraw();Serial.printf("JOHNNY %s SD=%d\n",JOHNNY_VERSION,sdOK);}
-void loop(){M5Cardputer.update();if(page==PLAYER&&playing&&!paused&&mp3&&!mp3->loop()){closePlayer();page=LIST;listDraw();}if(!M5Cardputer.Keyboard.isChange()||!M5Cardputer.Keyboard.isPressed()){delay(2);return;}auto k=M5Cardputer.Keyboard.keysState();char c=k.word.size()?k.word[0]:0;if(c==0x1B||c==0x60||c=='~'||k.del){back();return;}if(page==HOME){if(c==';'||c==',')indexFile=(indexFile+2)%3;else if(c=='.'||c=='/')indexFile=(indexFile+1)%3;else if(k.enter){if(indexFile==0)startList(true);else if(indexFile==1)startList(false);else{page=SYSTEM;systemDraw();}}else homeDraw();}else if(page==LIST){if(c==';'||c==','){if(indexFile>0)indexFile--;if(indexFile<offset)offset=indexFile;}else if(c=='.'||c=='/'){if(indexFile<total-1)indexFile++;if(indexFile>=offset+5)offset=indexFile-4;}else if(k.enter)openFile();listDraw();}else if(page==PLAYER){if(k.space||c==' '){paused=!paused;playerDraw();}else if(c=='p'||c=='P'){closePlayer();page=LIST;listDraw();}else if(c=='-'||c=='_'){volume=max(0,volume-5);if(out)out->SetGain((float)volume/100.0f);playerDraw();}else if(c=='='||c=='+'){volume=min(100,volume+5);if(out)out->SetGain((float)volume/100.0f);playerDraw();}}else if(page==SYSTEM)systemDraw();}
+void drawHeader(const char *title) {
+  auto &d=M5Cardputer.Display;
+  d.fillScreen(BLACK); d.fillRect(0,0,240,23,0x1800);
+  d.setTextSize(1); d.setTextColor(RED,0x1800); d.setCursor(8,7); d.print("JOHNNY");
+  d.setTextColor(GREY,0x1800); d.setCursor(194,7); d.print("MP3");
+  d.drawFastHLine(8,25,224,RED); d.setTextSize(2);
+  d.setTextColor(WHITE,BLACK); d.setCursor(8,33); d.print(title); d.setTextSize(1);
+}
+void drawLibrary() {
+  drawHeader("MUSIC"); auto &d=M5Cardputer.Display;
+  if(!sdReady){d.setTextColor(RED,BLACK);d.setCursor(12,67);d.print("MICROSD NOT FOUND");}
+  else if(!fileCount){d.setTextColor(GREY,BLACK);d.setCursor(12,67);d.print("NO MP3 FILES");}
+  for(int row=0;row<6 && firstVisible+row<fileCount;++row){
+    int i=firstVisible+row,y=55+row*10;bool active=(i==selected);
+    d.fillRect(8,y-1,224,10,active?PANEL:BLACK);
+    d.setTextColor(active?RED:WHITE,active?PANEL:BLACK);
+    String name=files[i];if(name.length()>31)name=name.substring(0,28)+"...";
+    d.setCursor(13,y);d.printf("%c %s",active?'>':' ',name.c_str());
+  }
+  d.drawFastHLine(8,117,224,0x528A);d.setTextColor(GREY,BLACK);
+  d.setCursor(8,124);d.print("UP/DOWN SELECT  ENTER PLAY");
+}
+void drawPlayer() {
+  drawHeader("NOW PLAYING");auto &d=M5Cardputer.Display;
+  d.fillRoundRect(10,53,220,45,5,PANEL);d.setTextColor(RED,BLACK);
+  d.setCursor(19,61);d.print(isPaused?"PAUSED":"PLAYING");
+  d.setTextColor(WHITE,BLACK);d.setCursor(19,80);
+  String name=currentTrack;if(name.length()>29)name=name.substring(0,26)+"...";
+  d.print(name);d.setTextColor(GREY,BLACK);d.setCursor(19,91);d.printf("VOLUME %d%%",volume);
+  d.drawFastHLine(8,117,224,0x528A);d.setCursor(8,124);d.print("SPACE PAUSE  +/- VOLUME  ESC BACK");
+}
+void scanRoot() {
+  fileCount=0;selected=0;firstVisible=0;if(!sdReady)return;
+  File root=SD.open("/");if(!root||!root.isDirectory()){if(root)root.close();return;}
+  File entry=root.openNextFile();
+  while(entry&&fileCount<80){
+    if(!entry.isDirectory()){String name=String(entry.name());int slash=name.lastIndexOf('/');
+      if(slash>=0)name=name.substring(slash+1);if(isMp3(name)&&name.length())files[fileCount++]=name;}
+    entry.close();entry=root.openNextFile();
+  }root.close();
+}
+bool startTrack(const String &name) {
+  stopPlayback();String path="/"+name;
+  source=new AudioFileSourceSD();if(!source||!source->open(path.c_str())){stopPlayback();return false;}
+  buffered=new AudioFileSourceBuffer(source,audioBuffer,sizeof(audioBuffer));
+  audioOut=new CardputerAudioOutput();if(!buffered||!audioOut){stopPlayback();return false;}
+  audioOut->SetGain(1.0f);mp3=new AudioGeneratorMP3();
+  if(!mp3||!mp3->begin(buffered,audioOut)){stopPlayback();return false;}
+  currentTrack=name;isPlaying=true;isPaused=false;drawPlayer();return true;
+}
+void changeSelection(int delta) {
+  if(!fileCount)return;selected=constrain(selected+delta,0,fileCount-1);
+  if(selected<firstVisible)firstVisible=selected;
+  if(selected>=firstVisible+6)firstVisible=selected-5;drawLibrary();
+}
+}
+void setup() {
+  auto cfg=M5.config();M5Cardputer.begin(cfg,true);M5Cardputer.Display.setRotation(1);
+  M5Cardputer.Speaker.begin();pinMode(38,OUTPUT);digitalWrite(38,HIGH);
+  sdSPI.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);sdReady=SD.begin(SD_CS,sdSPI,16000000);
+  scanRoot();drawLibrary();Serial.begin(115200);
+  Serial.printf("JOHNNY MP3 %s SD=%s TRACKS=%d\n",JOHNNY_VERSION,sdReady?"OK":"MISSING",fileCount);
+}
+void loop() {
+  M5Cardputer.update();
+  if(isPlaying&&!isPaused&&mp3&&!mp3->loop()){stopPlayback();drawLibrary();}
+  if(!M5Cardputer.Keyboard.isChange()||!M5Cardputer.Keyboard.isPressed()){delay(2);return;}
+  auto keys=M5Cardputer.Keyboard.keysState();char key=keys.word.size()?keys.word[0]:0;
+  if(isPlaying){
+    if(keys.space||key==' '){isPaused=!isPaused;if(isPaused)mp3->stop();else mp3->begin(buffered,audioOut);drawPlayer();}
+    else if(key=='+'||key=='='){volume=min(100,volume+5);drawPlayer();}
+    else if(key=='-'||key=='_'){volume=max(0,volume-5);drawPlayer();}
+    else if(key==0x1B||key==0x60||key=='~'||keys.del){stopPlayback();drawLibrary();}
+    return;
+  }
+  if(key==';'||key==',')changeSelection(-1);
+  else if(key=='.'||key=='/')changeSelection(1);
+  else if(keys.enter&&fileCount)startTrack(files[selected]);
+}
