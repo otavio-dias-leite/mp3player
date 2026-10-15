@@ -1764,7 +1764,7 @@ void setup() {
   refreshBatteryCache(true);
   // Audio shares core 1 with the UI at equal priority and yields every 1 ms.
   // This keeps playback smooth without allowing the decoder to freeze menus.
-  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",8192,nullptr,1,nullptr,1);
+  if(audioMutex)xTaskCreatePinnedToCore(audioTask,"JOHNNY_AUDIO",10240,nullptr,1,nullptr,1);
   radioRecordQueue=xQueueCreate(8,sizeof(RadioRecordBlock));
   if(radioRecordQueue)xTaskCreatePinnedToCore(radioRecorderTask,"JOHNNY_REC",4096,nullptr,2,nullptr,0);
   splash();selected=0;drawHome();
