@@ -114,8 +114,8 @@ public:
   }
   void flush() override {
     if(!speaker_||bufferIndex_==0)return;
-    // Retry for a generous DMA window before abandoning a genuinely stalled output.
-    while(!audioStopRequested){
+    // Bounded DMA back-pressure: never let a full speaker queue freeze the decoder task.
+    for(uint8_t retry=0;retry<80&&!audioStopRequested;retry++){
       if(speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,false)){
         bufferSlot_=(bufferSlot_+1)%3;
         bufferIndex_=0;
@@ -134,7 +134,7 @@ public:
     return true;
   }
 private:
-  static constexpr size_t kBufferSamples=1024;
+  static constexpr size_t kBufferSamples=2048;
   m5::Speaker_Class* speaker_=nullptr;
   int16_t buffers_[3][kBufferSamples]{};
   size_t bufferIndex_=0;
