@@ -1082,6 +1082,8 @@ void stopAudioLocked() {
   audioPaused=false;
   audioIsRadio=false;
   audioStopRequested=false;
+  audioTaskEnded=false;
+  audioTaskEndedWasRadio=false;
   if(audioMutex)xSemaphoreGive(audioMutex);
 }
 bool stopAudio(){
@@ -1102,6 +1104,9 @@ bool startAudioSource(AudioFileSource* source,const String& title,const String& 
   audioStopRequested=false;
   audioStarting=true;
   audioProgressCached=0;
+  audioTaskEnded=false;
+  audioTaskEndedWasRadio=false;
+  if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
   audioRawSource=source;
   audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));
   audioOutput=new JohnnyAudioOutput(&M5Cardputer.Speaker);
@@ -1109,7 +1114,8 @@ bool startAudioSource(AudioFileSource* source,const String& title,const String& 
   bool ok=audioInputBuffer&&audioOutput&&audioDecoder;
   if(ok){audioOutput->SetGain((float)audioVolume/21.0f);ok=audioDecoder->begin(audioInputBuffer,audioOutput);}
   if(!ok){
-    stopAudioLocked();
+    if(audioMutex)xSemaphoreGive(audioMutex);
+    stopAudio();
     audioStatusMessage="MP3 OPEN FAILED";
     return false;
   }
@@ -1120,6 +1126,7 @@ bool startAudioSource(AudioFileSource* source,const String& title,const String& 
   audioStarted=true;
   audioStatusMessage=radio?"LIVE RADIO":"PLAYING";
   M5Cardputer.Speaker.setVolume(190);
+  if(audioMutex)xSemaphoreGive(audioMutex);
   return true;
 }
 String audioExtension(const String& path) {
@@ -1332,33 +1339,44 @@ void serviceMusicProgress(){
   musicProgressLastDraw=millis();uint8_t pct=audioProgressPercent();if(pct==musicProgressLastValue)return;musicProgressLastValue=pct;
   auto& d=M5Cardputer.Display;d.drawFastHLine(78,96,151,BG);d.drawFastHLine(78,96,(int)pct*151/100,UI_PINK);d.fillCircle(78+(int)pct*151/100,96,3,UI_LAVENDER);d.fillRect(78,101,34,12,BG);d.setTextColor(UI_MUTED,BG);d.setCursor(78,103);d.printf("%3u%%",pct);
 }
+void johnnyAudioPlaybackTask(void* parameter){
+  (void)parameter;
+  for(;;){
+    bool worked=false;
+    if(audioMutex&&xSemaphoreTake(audioMutex,pdMS_TO_TICKS(20))==pdTRUE){
+      if(audioStarted&&!audioPaused&&audioDecoder&&!audioTaskEnded){
+        const bool running=audioDecoder->loop();
+        if(audioRawSource&&!audioIsRadio){
+          const uint32_t size=audioRawSource->getSize();
+          uint32_t pos=audioRawSource->getPos();
+          if(audioInputBuffer){const uint32_t buffered=audioInputBuffer->getFillLevel();pos=pos>buffered?pos-buffered:0;}
+          audioProgressCached=size?(uint8_t)min((uint32_t)100,(uint32_t)(((uint64_t)pos*100ULL)/size)):0;
+        }
+        if(!running){
+          if(audioOutput)audioOutput->flush();
+          audioTaskEndedWasRadio=audioIsRadio;
+          audioTaskEnded=true;
+        }
+        worked=true;
+      }
+      xSemaphoreGive(audioMutex);
+    }
+    if(!worked)vTaskDelay(pdMS_TO_TICKS(2));
+    else taskYIELD();
+  }
+}
 void serviceAudio() {
-  if(audioStarted&&!audioPaused&&audioDecoder){
-    bool running=false;
-    bool locked=!audioMutex||xSemaphoreTake(audioMutex,pdMS_TO_TICKS(20))==pdTRUE;
-    if(locked){
-      running=audioDecoder->loop();
-      if(audioRawSource&&!audioIsRadio){
-        uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos();
-        if(audioInputBuffer){uint32_t buffered=audioInputBuffer->getFillLevel();pos=pos>buffered?pos-buffered:0;}
-        audioProgressCached=size?(uint8_t)min((uint32_t)100,(uint32_t)(((uint64_t)pos*100ULL)/size)):0;
-      }
-      if(!running&&audioOutput)audioOutput->flush();
-      if(audioMutex)xSemaphoreGive(audioMutex);
-    }
-    if(locked&&!running){
-      bool wasRadio=audioIsRadio;
-      stopAudio();
-      audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
-      if(wasRadio)radioMessage=audioStatusMessage;
-      else if(screen==MUSIC&&musicNowPlaying&&entryCount>0){
-        if(audioRepeatMode==2)playSelectedTrack();
-        else if(audioShuffle)moveMusicTrack(1);
-        else if(selected<entryCount-1)moveMusicTrack(1);
-        else if(audioRepeatMode==1){selected=0;playSelectedTrack();}
-        else{musicNowPlaying=false;audioStatusMessage="PLAYBACK COMPLETE";drawFiles(true);}
-      }
-    }
+  if(!audioTaskEnded)return;
+  const bool wasRadio=audioTaskEndedWasRadio;
+  stopAudio();
+  audioStatusMessage=wasRadio?"STREAM ENDED":"TRACK FINISHED";
+  if(wasRadio)radioMessage=audioStatusMessage;
+  else if(screen==MUSIC&&musicNowPlaying&&entryCount>0){
+    if(audioRepeatMode==2)playSelectedTrack();
+    else if(audioShuffle)moveMusicTrack(1);
+    else if(selected<entryCount-1)moveMusicTrack(1);
+    else if(audioRepeatMode==1){selected=0;playSelectedTrack();}
+    else{musicNowPlaying=false;audioStatusMessage="PLAYBACK COMPLETE";drawFiles(true);}
   }
 }
 void toggleAudioPause(){
@@ -1368,7 +1386,9 @@ void toggleAudioPause(){
 }
 void setAudioVolume(int value){
   audioVolume=constrain(value,0,21);
+  if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
   if(audioOutput)audioOutput->SetGain((float)audioVolume/21.0f);
+  if(audioMutex)xSemaphoreGive(audioMutex);
 }
 void drawMusicInfo(const String &name){
   header("MP3");
@@ -1825,6 +1845,7 @@ void setup() {
   M5Cardputer.Speaker.setVolume(190);
   audioMutex=xSemaphoreCreateMutex();
   audioCommandQueue=nullptr;
+  if(audioMutex)xTaskCreatePinnedToCore(johnnyAudioPlaybackTask,"JOHNNY_AUDIO",8192,nullptr,2,&johnnyAudioTaskHandle,1);
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
   randomSeed(esp_random());
   sdBus.begin(SD_SCK,SD_MISO,SD_MOSI,SD_CS);
