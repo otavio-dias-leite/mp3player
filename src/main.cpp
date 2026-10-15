@@ -2004,7 +2004,7 @@ void setup() {
   preferences.begin("johnny",false);
   savedSsid=preferences.getString("ssid","");
   savedPassword=preferences.getString("pass","");
-  themeMode=preferences.getUChar("theme",0);applyTheme(themeMode);
+  themeMode=0;preferences.putUChar("theme",0);applyTheme(0);
   alarmEnabled=preferences.getBool("alarm_on",false);alarmHour=preferences.getUChar("alarm_h",7);alarmMinute=preferences.getUChar("alarm_m",0);alarmWeekdayMask=preferences.getUChar("alarm_days",0x7F);alarmSoundPath=preferences.getString("alarm_mp3","");
   radioEntry=preferences.getString("radio_url","");
   eqPreset=preferences.getInt("eqpreset",0);if(eqPreset<0||eqPreset>3)eqPreset=-1;
