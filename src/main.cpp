@@ -1,6 +1,6 @@
 /*
- * JOHNNY 0.0.0.1 ALPHA - MP3 player para M5Stack Cardputer ADV
- * Primeira versao publica do projeto JOHNNY
+ * JOHNNY 3.0 - MP3 player para M5Stack Cardputer ADV
+ * Versao 3.0 do projeto JOHNNY
  *
  * v5.0: filtra pastas sem MP3 (busca recursiva em fatias), mostra capa JPEG
  * embutida em ID3 APIC no modo CAPA, corrige verificacao de caminho e colore
@@ -51,7 +51,7 @@
 #include <AudioFileSourceBuffer.h>
 #include <AudioGeneratorMP3.h>
 
-#define JOHNNY_VERSION "0.0.0.1 alpha"
+#define JOHNNY_VERSION "3.0"
 
 namespace {
 
