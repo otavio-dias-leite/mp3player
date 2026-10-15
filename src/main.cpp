@@ -810,7 +810,7 @@ void saveNetworkSetup() {
   lastWiFiStatus=-1;
   drawNetworkScreen();
 }
-void stopAudio();
+bool stopAudio();
 bool beginUsbMode();
 void startBleScan();void drawBleScreen();void serviceBleScan();
 void drawHackFxScreen();void drawHackInfo();
