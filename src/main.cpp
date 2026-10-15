@@ -1094,7 +1094,7 @@ void stopAudioLocked() {
 void stopAudio() {
   // Never wait indefinitely for the decoder task from the UI thread.
   audioStopRequested=true;
-  if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(5))==pdTRUE) {
+  if(audioMutex && xSemaphoreTake(audioMutex,pdMS_TO_TICKS(35))==pdTRUE) {
     stopAudioLocked();
     audioTaskEnded=false;
     xSemaphoreGive(audioMutex);
@@ -1308,7 +1308,13 @@ void loadTrackMetadata(const String& path){
 
 bool startLocalAudio(const String& path) {
   if(!sdReady) { audioStatusMessage="NO SD CARD"; return false; }
-  stopAudio();loadTrackMetadata(path);
+  stopAudio();
+  // Do not touch the SD card while the previous decoder still owns it.
+  if(audioStarted || audioStopRequested) {
+    audioStatusMessage="AUDIO STOPPING - TRY AGAIN";
+    return false;
+  }
+  loadTrackMetadata(path);
   const String ext=audioExtension(path);
   if(ext!="mp3" && ext!="wav" && ext!="flac" && ext!="aac" && ext!="ogg" && ext!="opus" && ext!="oga") {
     audioStatusMessage="UNSUPPORTED FORMAT";
