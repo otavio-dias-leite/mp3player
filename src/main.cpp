@@ -116,7 +116,7 @@ public:
     uint32_t started=millis();
     while(speaker_->isPlaying() && (uint32_t)(millis()-started)<24UL) vTaskDelay(1);
     if(speaker_->isPlaying()) speaker_->stop();
-    speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,true);
+    speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,false);
     bufferSlot_=(bufferSlot_+1)%3;bufferIndex_=0;
   }
   void flushRecording(){if(recordIndex_>0)sendRecordBlock();}
@@ -382,21 +382,24 @@ void drawCategoryMenu(){
   const char* title=music?"MUSIC":(system?"SYSTEM":(games?"GAMES":"HACK"));
   const char** items=music?musicMenuItems:(system?systemMenuItems:(games?gamesMenuItems:hackMenuItems));
   int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
-  const int visible=5;
+  const int visible=6;
   if(selected<0)selected=0;if(selected>=count)selected=count-1;
-  if(selected<categoryScroll)categoryScroll=selected;
-  if(selected>=categoryScroll+visible)categoryScroll=selected-visible+1;
+  if(selected<categoryScroll || selected>=categoryScroll+visible)categoryScroll=(selected/visible)*visible;
   header(title);auto& d=M5Cardputer.Display;
   d.setTextColor(UI_MUTED,BG);d.setCursor(9,39);d.printf("%02d MODULES",count);
-  for(int row=0;row<visible;row++){
-    int i=categoryScroll+row;if(i>=count)break;
-    int y=51+row*13;bool active=i==selected;uint16_t bg=active?PANEL:BG;
-    d.fillRoundRect(7,y,225,11,3,bg);if(active)d.drawRoundRect(7,y,225,11,3,UI_PURPLE);
-    drawModuleIcon(music?2:(system?3:(games?1:0)),10,y+1,active?UI_PINK:UI_MUTED);
-    d.setTextColor(active?UI_PINK:UI_MUTED,bg);d.setCursor(25,y+2);d.printf("%c %02d  %s",active?'>':' ',i+1,items[i]);
-    d.setTextColor(active?UI_LAVENDER:UI_MUTED,bg);d.setCursor(216,y+2);d.print(active?">":" ");
+  for(int cell=0;cell<visible;cell++){
+    int i=categoryScroll+cell;if(i>=count)break;
+    int x=8+(cell%2)*114,y=50+(cell/2)*22;
+    bool active=i==selected;uint16_t bg=active?PANEL:BG;
+    d.fillRoundRect(x,y,108,19,4,bg);
+    d.drawRoundRect(x,y,108,19,4,active?UI_PINK:0x5140);
+    drawModuleIcon(music?2:(system?3:(games?1:0)),x+4,y+5,active?UI_LAVENDER:UI_MUTED);
+    d.setTextColor(active?WHITE:UI_MUTED,bg);d.setCursor(x+19,y+6);
+    String label=String(items[i]);if(label.length()>13)label=label.substring(0,12)+"~";
+    d.print(label);
+    if(active)d.fillCircle(x+101,y+5,2,UI_PINK);
   }
-  footer("; / . SELECT   ENTER LAUNCH   ESC BACK");
+  footer(", / LEFT RIGHT  ; . UP DOWN  ENTER LAUNCH");
 }
 void drawDeviceStatus(){
   header("DEVICE STATUS");auto& d=M5Cardputer.Display;bool connected=WiFi.status()==WL_CONNECTED;
@@ -1933,8 +1936,10 @@ if(usbActive) endUsbMode();
   } else if(screen==MUSICMENU||screen==SYSTEMMENU||screen==GAMESMENU||screen==HACKMENU) {
     int count=screen==MUSICMENU?MUSIC_MENU_COUNT:(screen==SYSTEMMENU?SYSTEM_MENU_COUNT:(screen==GAMESMENU?GAMES_MENU_COUNT:HACK_MENU_COUNT));
     if(k.enter){openApp();delay(8);return;}
-    if(c==';')selected=max(0,selected-1);
-    else if(c=='.')selected=min(count-1,selected+1);
+    if(c==','){if(selected%2==1)selected--;}
+    else if(c=='/'){if(selected%2==0&&selected+1<count)selected++;}
+    else if(c==';')selected=max(0,selected-2);
+    else if(c=='.')selected=min(count-1,selected+2);
     drawCategoryMenu();
   } else if(screen==HOME) {
     if(k.enter) { openApp(); delay(8); return; }
