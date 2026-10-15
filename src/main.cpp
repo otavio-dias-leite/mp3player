@@ -1315,21 +1315,35 @@ bool startRadioStream(const String& url, const String& title) {
 }
 uint8_t audioProgressPercent(){return audioProgressCached;}
 bool seekAudioStep(int direction){
-  if(!audioStarted||audioIsRadio||!audioRawSource||!audioInputBuffer||!audioDecoder||!audioOutput)return false;
-  uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos(),buffered=audioInputBuffer->getFillLevel();
-  pos=pos>buffered?pos-buffered:0;
-  if(size<=4096)return false;
-  int64_t target=(int64_t)pos+(int64_t)direction*(int64_t)max((uint32_t)4096,size/20U);
-  target=constrain(target,(int64_t)0,(int64_t)size-1);
-  bool wasPaused=audioPaused;
+  // The playback worker owns the decoder/source while holding this mutex.
+  // Read the position only after acquiring it; otherwise seek races an MP3 frame decode.
   if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
+  if(!audioStarted||audioIsRadio||!audioRawSource||!audioInputBuffer||!audioDecoder||!audioOutput){
+    if(audioMutex)xSemaphoreGive(audioMutex);
+    return false;
+  }
+  const uint32_t size=audioRawSource->getSize();
+  uint32_t pos=audioRawSource->getPos();
+  const uint32_t buffered=audioInputBuffer->getFillLevel();
+  pos=pos>buffered?pos-buffered:0;
+  if(size<=4096){
+    if(audioMutex)xSemaphoreGive(audioMutex);
+    return false;
+  }
+  const int64_t target=constrain((int64_t)pos+(int64_t)direction*(int64_t)max((uint32_t)4096,size/20U),(int64_t)0,(int64_t)size-1);
+  const bool wasPaused=audioPaused;
   audioDecoder->stop();delete audioDecoder;audioDecoder=nullptr;
   delete audioInputBuffer;audioInputBuffer=nullptr;
   bool ok=audioRawSource->seek((int32_t)target,SEEK_SET);
-  if(ok){audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));audioDecoder=createAudioDecoder(audioTrackExtension);ok=audioInputBuffer&&audioDecoder&&audioDecoder->begin(audioInputBuffer,audioOutput);}
+  if(ok){
+    audioInputBuffer=new AudioFileSourceBuffer(audioRawSource,audioDecodeBuffer,sizeof(audioDecodeBuffer));
+    audioDecoder=createAudioDecoder(audioTrackExtension);
+    ok=audioInputBuffer&&audioDecoder&&audioDecoder->begin(audioInputBuffer,audioOutput);
+  }
   if(audioMutex)xSemaphoreGive(audioMutex);
   if(!ok){stopAudio();audioStatusMessage="SEEK FAILED";return false;}
   audioPaused=wasPaused;
+  audioTaskEnded=false;
   audioStatusMessage=wasPaused?"PAUSED":"PLAYING";
   return true;
 }
