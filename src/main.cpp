@@ -1361,8 +1361,8 @@ void johnnyAudioPlaybackTask(void* parameter){
       }
       xSemaphoreGive(audioMutex);
     }
-    if(!worked)vTaskDelay(pdMS_TO_TICKS(2));
-    else taskYIELD();
+    // Yield even after decoding a frame so the UI/input loop always gets CPU time.
+    vTaskDelay(pdMS_TO_TICKS(worked?1:2));
   }
 }
 void serviceAudio() {
