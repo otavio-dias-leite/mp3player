@@ -516,11 +516,16 @@ void drawPianoStatus(){
   d.setTextColor(UI_CYAN,BG);d.setCursor(9,111);d.printf("%s   %d%%",effectNames[pianoEffect],pianoVolume);
   d.setTextColor(UI_MUTED,BG);d.setCursor(133,111);d.print("[R] REC  [ ] PAD");
 }
+void drawPianoMeta(){
+  auto& d=M5Cardputer.Display;
+  d.fillRect(7,39,226,14,BG);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(9,42);d.printf("OCT %d",4+pianoOctave);
+  d.setTextColor(UI_LAVENDER,BG);d.setCursor(151,42);d.print(effectNames[pianoEffect]);
+}
 void pianoScreen() {
   header("SYNTH");
   auto& d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG);d.setCursor(9,42);d.printf("OCT %d",4+pianoOctave);
-  d.setTextColor(UI_LAVENDER,BG);d.setCursor(151,42);d.print(effectNames[pianoEffect]);
+  drawPianoMeta();
   const char* labels[]={"C","D","E","F","G","A","B"};
   for(int i=0;i<7;i++){
     const int x=5+i*33;const uint16_t key=(i==1||i==3)?0xBDBF:0xEFFF;
@@ -2164,14 +2169,14 @@ if(usbActive) endUsbMode();
     else if(c=='/')selected=(selected+1)%APP_COUNT;
     drawHome();
   } else if(screen==PIANO) {
-    if(c==','){pianoOctave=max(-2,pianoOctave-1);pianoScreen();}
-    else if(c=='/'){pianoOctave=min(2,pianoOctave+1);pianoScreen();}
-    else if(c==';'){pianoEffect=(pianoEffect+7)%8;pianoScreen();}
-    else if(c=='.'){pianoEffect=(pianoEffect+1)%8;pianoScreen();}
-    else if(c=='-'){pianoVolume=max(0,pianoVolume-10);pianoScreen();}
-    else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);pianoScreen();}
-    else if(c=='['){synthPadSelected=(synthPadSelected+6)%7;pianoScreen();}
-    else if(c==']'){synthPadSelected=(synthPadSelected+1)%7;pianoScreen();}
+    if(c==','){pianoOctave=max(-2,pianoOctave-1);drawPianoMeta();}
+    else if(c=='/'){pianoOctave=min(2,pianoOctave+1);drawPianoMeta();}
+    else if(c==';'){pianoEffect=(pianoEffect+7)%8;drawPianoMeta();drawPianoStatus();}
+    else if(c=='.'){pianoEffect=(pianoEffect+1)%8;drawPianoMeta();drawPianoStatus();}
+    else if(c=='-'){pianoVolume=max(0,pianoVolume-10);drawPianoStatus();}
+    else if(c=='='||c=='+'){pianoVolume=min(100,pianoVolume+10);drawPianoStatus();}
+    else if(c=='['){synthPadSelected=(synthPadSelected+6)%7;drawPianoStatus();}
+    else if(c==']'){synthPadSelected=(synthPadSelected+1)%7;drawPianoStatus();}
     else if(c=='r'||c=='R'){if(micRecording)stopMicRecording();else startMicRecording();}
     else if(c)playNote(c);
   } else if(screen==TUNER) {
