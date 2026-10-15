@@ -114,8 +114,7 @@ public:
   void flush() override {
     if(!speaker_||bufferIndex_==0)return;
     // Retry for a generous DMA window before abandoning a genuinely stalled output.
-    const uint32_t started=millis();
-    while((uint32_t)(millis()-started)<750UL){
+    while(!audioStopRequested){
       if(speaker_->playRaw(buffers_[bufferSlot_],bufferIndex_,hertz,false,1,0,false)){
         bufferSlot_=(bufferSlot_+1)%3;
         bufferIndex_=0;
@@ -179,7 +178,7 @@ String entries[96];
 String entryPaths[96];
 bool entryIsDir[96];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
-int pianoOctave=0,pianoEffect=0,pianoVolume=100;
+int pianoOctave=0,pianoEffect=0,pianoVolume=82;
 bool musicNowPlaying=false;
 int radioSelected=0;
 bool radioEditingUrl=false;
@@ -197,7 +196,7 @@ uint32_t audioCoverSize=0;
 bool audioCoverPng=false;
 bool audioShuffle=false;
 uint8_t audioRepeatMode=0;
-int audioVolume=21;
+int audioVolume=18;
 AudioFileSource* audioRawSource=nullptr;
 AudioFileSourceBuffer* audioInputBuffer=nullptr;
 AudioGenerator* audioDecoder=nullptr;
@@ -250,7 +249,7 @@ bool micStarted=false;
 uint32_t micWarmupUntil=0;
 constexpr size_t SYNTH_SAMPLES=4096;
 constexpr uint8_t SYNTH_AUDIO_CHANNEL=2;
-constexpr size_t BOOT_JINGLE_SAMPLES=16384;
+constexpr size_t BOOT_JINGLE_SAMPLES=48000;
 static int16_t bootJingleBuffer[BOOT_JINGLE_SAMPLES];
 static int16_t alarmToneSamples[512];
 static int16_t synthPadSamples[8192];
@@ -429,22 +428,16 @@ void drawCategoryMenu(){
   const int count=music?MUSIC_MENU_COUNT:(system?SYSTEM_MENU_COUNT:(games?GAMES_MENU_COUNT:HACK_MENU_COUNT));
   const uint8_t category=music?2:(system?3:(games?1:0));
   if(selected<0)selected=0;if(selected>=count)selected=count-1;
-  const char* detail="JOHNNY MODULE";
-  if(music){const char* v[]={"PLAY NOTES / 8 TIMBRES / RECORD PADS","GUITAR / BASS / UKULELE TUNER","LOCAL MP3 / COVER / PLAYBACK CONTROLS","BUFFERED INTERNET RADIO / RECORDING","5-BAND EQUALIZER / PRESETS","RECORD MICROPHONE TO WAV"};detail=v[selected];}
-  else if(system){const char* v[]={"BROWSE MICROSD FILES","USB FILE TRANSFER MODE","CONNECT TO WI-FI / SCAN NETWORKS","FIRMWARE UPDATE","BATTERY / NETWORK / DEVICE STATUS","BLUETOOTH SCANNER","LOCAL CLOCK / NTP / ALARM","FLASH AND MICROSD CAPACITY","HEAP / TASK STACK MONITOR","SIX COLOR THEMES"};detail=v[selected];}
-  else if(games){detail="CONWAY LIFE / EDITABLE GRID";}
-  else{const char* v[]={"WI-FI RECONNAISSANCE","BLE DEVICE SCANNER","TCP CONNECTION TEST","DNS LOOKUP","HTTP STATUS CHECK","NETWORK / RADIO INFO","OFFLINE VISUAL EFFECTS","HTTP SECURITY AUDIT","DEVICE SECURITY AUDIT"};detail=v[selected];}
   header(title);auto& d=M5Cardputer.Display;
-  d.setTextColor(UI_CYAN,BG);d.setCursor(9,42);d.printf("%02d / %02d",selected+1,count);
-  d.setTextColor(UI_MUTED,BG);d.setCursor(76,42);d.print("SWIPE WITH LEFT / RIGHT");
-  d.fillRoundRect(8,54,224,58,7,UI_PANEL_HI);d.drawRoundRect(8,54,224,58,7,UI_PINK);
-  d.fillRoundRect(8,54,4,58,2,UI_PINK);
-  d.fillRoundRect(17,65,36,36,7,0x3015);drawModuleIcon(category,(uint8_t)selected,28,76,UI_LAVENDER);
-  String label=String(items[selected]);if(label.length()>15){d.setTextSize(1);d.setTextColor(WHITE,UI_PANEL_HI);d.setCursor(62,70);}else{d.setTextSize(2);d.setTextColor(WHITE,UI_PANEL_HI);d.setCursor(62,67);}
-  d.print(label);d.setTextSize(1);d.setTextColor(UI_CYAN,UI_PANEL_HI);d.setCursor(62,91);d.print(detail);
-  d.setTextColor(UI_MUTED,BG);d.setCursor(20,120);
+  d.fillRoundRect(8,45,224,67,7,UI_PANEL_HI);d.drawRoundRect(8,45,224,67,7,UI_EDGE);
+  d.fillRoundRect(8,45,3,67,1,UI_PINK);
+  d.fillRoundRect(18,59,36,36,7,0x3015);drawModuleIcon(category,(uint8_t)selected,28,70,UI_LAVENDER);
+  String label=String(items[selected]);
+  if(label.length()>15){d.setTextSize(1);d.setTextColor(WHITE,UI_PANEL_HI);d.setCursor(64,72);}
+  else{d.setTextSize(2);d.setTextColor(WHITE,UI_PANEL_HI);d.setCursor(64,68);}
+  d.print(label);d.setTextSize(1);
   for(int i=0;i<count;i++){int x=20+(i*200/count);d.fillCircle(x,123,2,i==selected?UI_PINK:UI_EDGE);}
-  footer(", / PREVIOUS / NEXT   ENTER OPEN   ESC BACK");
+  footer();
 }
 void drawDeviceStatus(){
   header("DEVICE STATUS");auto& d=M5Cardputer.Display;
@@ -484,31 +477,32 @@ void runFirmwareUpdate(){
 void splash(){
   auto& d=M5Cardputer.Display;
   d.setBrightness(190);d.fillScreen(BG);
-  d.fillCircle(120,64,37,0x2412);d.drawCircle(120,64,37,UI_EDGE);
-  d.drawCircle(120,64,27,UI_PURPLE);d.drawCircle(120,64,18,UI_PINK);
-  d.drawFastHLine(91,64,58,UI_LAVENDER);
-  d.drawFastVLine(120,35,58,UI_CYAN);
-  d.fillCircle(120,64,5,UI_LAVENDER);
+  d.fillCircle(120,56,34,0x2412);d.drawCircle(120,56,34,UI_EDGE);
+  d.drawCircle(120,56,25,UI_PURPLE);d.drawCircle(120,56,16,UI_PINK);
+  d.drawFastHLine(94,56,52,UI_LAVENDER);d.drawFastVLine(120,30,52,UI_CYAN);
+  d.fillCircle(120,56,5,UI_LAVENDER);
+  d.setTextSize(2);d.setTextColor(WHITE,BG);d.setCursor(82,98);d.print("JOHNNY");
+  d.setTextSize(1);d.setTextColor(UI_LAVENDER,BG);d.setCursor(77,119);d.print("SYSTEM INITIALIZING");
   delay(240);
 }
 void playBootJingle(){
-  // Original slow, saturated electric-guitar-like arpeggio; no sampled recording.
-  const float notes[8]={110.0f,164.81f,220.0f,164.81f,130.81f,196.0f,261.63f,196.0f};
+  // Original melodic electric-guitar intro: slow picked notes, warm overdrive and sustained tails.
+  // It uses an original progression and does not reproduce the Never Fade Away melody.
+  const float notes[8]={146.83f,220.00f,293.66f,220.00f,130.81f,196.00f,261.63f,196.00f};
   const size_t samplesPerNote=6000;
   for(size_t i=0;i<BOOT_JINGLE_SAMPLES;i++){
     const size_t step=i/samplesPerNote,offset=i%samplesPerNote;
     const float t=(float)offset/16000.0f;
-    const float f=notes[step]*(1.0f+0.012f*sinf(6.2831853f*4.2f*t));
+    const float f=notes[step]*(1.0f+0.0045f*sinf(6.2831853f*4.0f*t));
     const float phase=6.2831853f*f*t;
-    float guitar=0.62f*sinf(phase)+0.24f*sinf(phase*2.01f)+0.10f*sinf(phase*3.97f);
-    guitar=tanhf(guitar*2.8f);
-    const float attack=min(1.0f,(float)offset/900.0f);
-    const float decay=expf(-(float)offset/5200.0f);
-    const float tail=(step==7)?min(1.0f,(float)(BOOT_JINGLE_SAMPLES-i)/4500.0f):1.0f;
-    const float sample=guitar*attack*decay*tail*11500.0f;
+    const float guitar=0.72f*sinf(phase)+0.20f*sinf(phase*2.0f)+0.08f*sinf(phase*3.0f);
+    const float pick=1.0f-expf(-(float)offset/500.0f);
+    const float decay=0.82f+0.18f*expf(-(float)offset/15000.0f);
+    const float tremolo=0.94f+0.06f*sinf(6.2831853f*3.1f*t);
+    const float sample=tanhf(guitar*2.0f)*pick*decay*tremolo*8900.0f;
     bootJingleBuffer[i]=(int16_t)constrain(sample,-32768.0f,32767.0f);
   }
-  M5Cardputer.Speaker.setVolume(255);
+  M5Cardputer.Speaker.setVolume(190);
   M5Cardputer.Speaker.playRaw(bootJingleBuffer,BOOT_JINGLE_SAMPLES,16000,false,1,0,false);
 }
 void drawPianoStatus(){
@@ -1242,7 +1236,7 @@ bool startAudioSource(AudioFileSource* source, const String& title, const String
   audioTaskEnded=false;
   audioStarted=true;
   audioStatusMessage=radio?"LIVE RADIO":"PLAYING";
-  M5Cardputer.Speaker.setVolume(255);
+  M5Cardputer.Speaker.setVolume(205);
   if(audioMutex) xSemaphoreGive(audioMutex);
   if(johnnyAudioTaskHandle)xTaskNotifyGive(johnnyAudioTaskHandle);
   return true;
@@ -1515,18 +1509,16 @@ void setAudioVolume(int value) {
   xSemaphoreGive(audioMutex);
 }
 void drawMusicInfo(const String &name){
-  header("JOHNNY MUSIC");auto& d=M5Cardputer.Display;
-  d.setTextColor(UI_MUTED,BG);d.setCursor(8,39);d.print("NOW PLAYING // LOCAL AUDIO");d.fillRoundRect(7,49,77,66,5,PANEL);
+  header("MUSIC");auto& d=M5Cardputer.Display;
+  d.fillRoundRect(7,49,77,66,5,PANEL);
   bool cover=false;if(audioCoverSize>0)cover=audioCoverPng?d.drawPng(audioCoverData,audioCoverSize,9,51,73,62):d.drawJpg(audioCoverData,audioCoverSize,9,51,73,62);
   if(!cover){d.fillCircle(45,82,28,0x2412);d.drawCircle(45,82,25,UI_PURPLE);d.drawCircle(45,82,17,UI_PINK);d.drawCircle(45,82,6,UI_LAVENDER);}
   String title=audioTrackTitle.length()?audioTrackTitle:name;if(title.length()>22)title=title.substring(0,19)+"...";
-  String artist=audioTrackArtist.length()?audioTrackArtist:"UNKNOWN ARTIST";if(artist.length()>21)artist=artist.substring(0,18)+"...";
-  String album=audioTrackAlbum.length()?audioTrackAlbum:"LOCAL LIBRARY";if(album.length()>21)album=album.substring(0,18)+"...";
-  d.setTextColor(WHITE,BG);d.setCursor(91,53);d.print(title);d.setTextColor(UI_LAVENDER,BG);d.setCursor(91,68);d.print(artist);d.setTextColor(UI_MUTED,BG);d.setCursor(91,82);d.print(album);
+  d.setTextColor(WHITE,BG);d.setCursor(91,54);d.print(title);
+  if(audioTrackArtist.length()){d.setTextColor(UI_LAVENDER,BG);d.setCursor(91,70);d.print(audioTrackArtist.substring(0,21));}
   uint8_t pct=audioProgressPercent();d.drawRoundRect(91,94,140,6,3,UI_EDGE);d.fillRoundRect(92,95,max(0,(int)pct*138/100),4,2,UI_PINK);
-  d.setTextColor(UI_CYAN,BG);d.setCursor(91,105);d.printf("%3u%%  VOL %02d",pct,audioVolume);
-  d.setTextColor(audioStarted?(audioPaused?UI_PINK:UI_LAVENDER):UI_MUTED,BG);d.setCursor(91,117);d.print(audioStarted?(audioPaused?"PAUSED":"PLAYING"):audioStatusMessage.substring(0,19));
-  footer("ENTER PAUSE  P STOP  , / TRACK  ; . SEEK  - / + VOL  A SET ALARM");
+  d.setTextColor(UI_MUTED,BG);d.setCursor(91,105);d.printf("%3u%%",pct);
+  footer();
 }
 void drawRadioScreen() {
   header("WEB RADIO");
@@ -1962,7 +1954,7 @@ void setup() {
   M5Cardputer.begin(cfg,true);
   M5Cardputer.Display.setRotation(1);
   M5Cardputer.Speaker.begin();
-  M5Cardputer.Speaker.setVolume(255);playBootJingle();
+  M5Cardputer.Speaker.setVolume(190);playBootJingle();
   audioMutex=xSemaphoreCreateMutex();
   if(!audioMutex) Serial.println("JOHNNY: AUDIO MUTEX FAILED");
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
