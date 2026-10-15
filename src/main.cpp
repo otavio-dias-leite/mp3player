@@ -1048,6 +1048,7 @@ void drawMusicInfo(const String &name);
 void drawClockScreen();void drawDiskManager();void drawProcessInfo();void drawThemeScreen();void drawChargingSaver();void serviceClockAlarm();
 void drawRadioScreen();
 void stopAudioLocked() {
+  if(audioMutex)xSemaphoreTake(audioMutex,portMAX_DELAY);
   if(radioRecordStartRequested && radioRecordState==1) {
     radioRecordStartRequested=false;
     radioRecording=false;
@@ -1081,6 +1082,7 @@ void stopAudioLocked() {
   audioPaused=false;
   audioIsRadio=false;
   audioStopRequested=false;
+  if(audioMutex)xSemaphoreGive(audioMutex);
 }
 bool stopAudio(){
   if(!audioCommandQueue||!audioTaskReady)return false;
@@ -1345,8 +1347,12 @@ void audioTask(void* parameter){
       if(cmd.source){cmd.source->close();delete cmd.source;}
     }
     if(audioStarted&&!audioPaused&&audioDecoder){
-      if(!audioDecoder->loop()){if(audioOutput)audioOutput->flush();audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;}
-      if(audioRawSource&&!audioIsRadio){uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos();if(audioInputBuffer){uint32_t n=audioInputBuffer->getFillLevel();pos=pos>n?pos-n:0;}audioProgressCached=size?(uint8_t)min((uint32_t)100,(uint32_t)(((uint64_t)pos*100ULL)/size)):0;}
+      bool audioLock=!audioMutex||xSemaphoreTake(audioMutex,pdMS_TO_TICKS(50))==pdTRUE;
+      if(audioLock){
+        if(!audioDecoder->loop()){if(audioOutput)audioOutput->flush();audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;}
+        if(audioRawSource&&!audioIsRadio){uint32_t size=audioRawSource->getSize(),pos=audioRawSource->getPos();if(audioInputBuffer){uint32_t n=audioInputBuffer->getFillLevel();pos=pos>n?pos-n:0;}audioProgressCached=size?(uint8_t)min((uint32_t)100,(uint32_t)(((uint64_t)pos*100ULL)/size)):0;}
+        if(audioMutex)xSemaphoreGive(audioMutex);
+      } else taskYIELD();
     }
     if(!audioStarted&&!audioPaused&&audioStopRequested){stopAudioLocked();audioStopRequested=false;}
     if(!audioStarted||audioPaused)ulTaskNotifyTake(pdTRUE,pdMS_TO_TICKS(5));
