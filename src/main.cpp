@@ -1468,7 +1468,7 @@ void serviceAudio() {
     else if(audioRepeatMode==1){selected=0;playSelectedTrack();}
     else {musicNowPlaying=false;audioStatusMessage="PLAYBACK COMPLETE";drawFiles(true);}
   }
-  if(!screenSaverActive){if(screen==MUSIC&&musicNowPlaying)drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);else if(screen==RADIO)drawRadioScreen();}
+  if(!screenSaverActive){if(screen==MUSIC&&musicNowPlaying)drawMusicDynamic();else if(screen==RADIO)drawRadioScreen();}
 }
 void audioTask(void* parameter) {
   (void)parameter;audioTaskReady=true;
@@ -1526,6 +1526,15 @@ void drawMusicInfo(const String &name){
   uint8_t pct=audioProgressPercent();d.drawRoundRect(91,94,140,6,3,UI_EDGE);d.fillRoundRect(92,95,max(0,(int)pct*138/100),4,2,UI_PINK);
   d.setTextColor(UI_MUTED,BG);d.setCursor(91,105);d.printf("%3u%%",pct);
   footer();
+}
+void drawMusicDynamic(){
+  auto& d=M5Cardputer.Display;
+  const uint8_t pct=audioProgressPercent();
+  d.fillRect(90,92,143,27,BG);
+  d.drawRoundRect(91,94,140,6,3,UI_EDGE);
+  d.fillRoundRect(92,95,max(0,(int)pct*138/100),4,2,UI_PINK);
+  d.setTextColor(UI_MUTED,BG);d.setCursor(91,105);d.printf("%3u%%",pct);
+  d.fillCircle(222,108,3,audioPaused?UI_PINK:UI_LAVENDER);
 }
 void drawRadioScreen() {
   header("WEB RADIO");
@@ -2207,15 +2216,15 @@ if(usbActive) endUsbMode();
     if(musicNowPlaying) {
       if(c==',')moveMusicTrack(-1);
       else if(c=='/') moveMusicTrack(1);
-      else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicInfo(audioNowTitle);}
+      else if(k.enter||k.space||c==' ') {toggleAudioPause();drawMusicDynamic();}
       else if(c=='p'||c=='P') {stopAudio();musicNowPlaying=false;audioStatusMessage="STOPPED";drawFiles(true);}
-      else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicInfo(audioNowTitle);}
-      else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicInfo(audioNowTitle);}
-      else if(c==';') {seekAudioStep(-1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
-      else if(c=='.') {seekAudioStep(1);drawMusicInfo(audioTrackTitle.length()?audioTrackTitle:audioNowTitle);}
-      else if(c=='s'||c=='S'){audioShuffle=!audioShuffle;drawMusicInfo(audioNowTitle);}
-      else if(c=='r'||c=='R'){audioRepeatMode=(audioRepeatMode+1)%3;drawMusicInfo(audioNowTitle);}
-      else if(c=='a'||c=='A'){if(audioTrackExtension=="mp3"&&audioTrackPath.length()){alarmSoundPath=audioTrackPath;persistAlarm();audioStatusMessage="ALARM MP3 SAVED";drawMusicInfo(audioNowTitle);}else{audioStatusMessage="SELECT MP3 FIRST";drawMusicInfo(audioNowTitle);}}
+      else if(c=='-'||c=='_') {setAudioVolume(audioVolume-1);drawMusicDynamic();}
+      else if(c=='='||c=='+') {setAudioVolume(audioVolume+1);drawMusicDynamic();}
+      else if(c==';') {seekAudioStep(-1);drawMusicDynamic();}
+      else if(c=='.') {seekAudioStep(1);drawMusicDynamic();}
+      else if(c=='s'||c=='S'){audioShuffle=!audioShuffle;drawMusicDynamic();}
+      else if(c=='r'||c=='R'){audioRepeatMode=(audioRepeatMode+1)%3;drawMusicDynamic();}
+      else if(c=='a'||c=='A'){if(audioTrackExtension=="mp3"&&audioTrackPath.length()){alarmSoundPath=audioTrackPath;persistAlarm();audioStatusMessage="ALARM MP3 SAVED";drawMusicDynamic();}else{audioStatusMessage="SELECT MP3 FIRST";drawMusicDynamic();}}
     } else {      if(c==';') {if(selected>0)selected--;if(selected<scroll)scroll=selected;drawFiles(true);}
       else if(c=='.') {if(selected<entryCount-1)selected++;if(selected>=scroll+5)scroll=selected-4;drawFiles(true);}      else if(c==',') {if(currentPath!="/"){currentPath=parentPath(currentPath);scanDirectory(true);drawFiles(true);}}
       else if(k.enter) openFile(true);
