@@ -1476,7 +1476,14 @@ void audioTask(void* parameter) {
     if(audioMutex&&xSemaphoreTake(audioMutex,portMAX_DELAY)==pdTRUE){
       if(audioStopRequested){stopAudioLocked();audioTaskEnded=false;}
       else if(audioStarted&&!audioPaused&&audioDecoder){
-        if(!audioDecoder->loop()){audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;}
+        if(!audioDecoder->loop()){
+          // Flush the final partial PCM block and let the speaker DMA queue drain before teardown.
+          if(audioOutput)audioOutput->flush();
+          const uint32_t drainStarted=millis();
+          while(!audioStopRequested&&M5Cardputer.Speaker.isPlaying(0)>0&&
+                (uint32_t)(millis()-drainStarted)<1200UL)vTaskDelay(pdMS_TO_TICKS(2));
+          audioTaskEndedWasRadio=audioIsRadio;audioTaskEnded=true;audioStarted=false;audioPaused=true;
+        }
       }else if(synthPadRequest>=0&&!audioStarted){
         int pad=synthPadRequest;synthPadRequest=-1;char path[40];snprintf(path,sizeof(path),"/JOHNNY/PADS/PAD%d.WAV",pad+1);
         File sample=SD.open(path,FILE_READ);
