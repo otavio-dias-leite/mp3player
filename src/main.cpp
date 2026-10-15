@@ -476,19 +476,18 @@ void runFirmwareUpdate(){
 }
 
 void splash(){
-  auto& d=M5Cardputer.Display;d.setBrightness(190);d.fillScreen(BG);
+  auto& d=M5Cardputer.Display;
+  d.setBrightness(190);
+  d.fillScreen(BG);
   d.setTextDatum(middle_center);
-  d.drawCircle(120,57,39,UI_EDGE);d.drawCircle(120,57,31,UI_PURPLE);d.drawCircle(120,57,24,UI_PINK);
-  d.drawCircle(120,57,16,UI_LAVENDER);d.drawFastHLine(77,57,86,UI_PINK);d.drawFastVLine(120,14,86,UI_PINK);
-  d.setTextSize(3);d.setTextColor(WHITE,BG);d.drawString("JOHNNY",120,54);
-  d.setTextSize(1);d.setTextColor(UI_PINK,BG);d.drawString("WAKE UP SAMURAI",120,91);
-  const uint32_t start=millis();uint8_t frame=0;
-  while((uint32_t)(millis()-start)<5000UL){
-    if(frame%3==0){int x=random(52,188),y=random(34,79);d.drawFastVLine(x,y,random(2,8),UI_PINK);}
-    if(frame%7==0){int y=random(35,79);d.drawFastHLine(random(54,100),y,random(12,65),UI_EDGE);}
-    M5Cardputer.update();delay(45);frame++;
-  }
-  d.setTextDatum(top_left);d.fillScreen(BG);
+  d.setTextSize(2);
+  d.setTextColor(0xF800,BG);
+  d.drawString("WAKE UP SAMURAI",120,67);
+  const uint32_t start=millis();
+  while((uint32_t)(millis()-start)<5000UL){M5Cardputer.update();delay(20);}
+  d.setTextDatum(top_left);
+  d.setTextSize(1);
+  d.fillScreen(BG);
 }
 void playBootJingle(){
   // Original picked-guitar motif, generated in short chunks to preserve RAM on the no-PSRAM ADV.
@@ -1524,16 +1523,22 @@ void setAudioVolume(int value) {
   xSemaphoreGive(audioMutex);
 }
 void drawMusicInfo(const String &name){
-  header("MUSIC");auto& d=M5Cardputer.Display;
-  d.fillRoundRect(7,49,77,66,5,PANEL);
-  bool cover=false;if(audioCoverSize>0)cover=audioCoverPng?d.drawPng(audioCoverData,audioCoverSize,9,51,73,62):d.drawJpg(audioCoverData,audioCoverSize,9,51,73,62);
-  if(!cover){d.fillCircle(45,82,28,0x2412);d.drawCircle(45,82,25,UI_PURPLE);d.drawCircle(45,82,17,UI_PINK);d.drawCircle(45,82,6,UI_LAVENDER);}
-  String title=audioTrackTitle.length()?audioTrackTitle:name;if(title.length()>22)title=title.substring(0,19)+"...";
-  d.setTextColor(WHITE,BG);d.setCursor(91,54);d.print(title);
-  if(audioTrackArtist.length()){d.setTextColor(UI_LAVENDER,BG);d.setCursor(91,70);d.print(audioTrackArtist.substring(0,21));}
-  uint8_t pct=audioProgressPercent();d.drawRoundRect(91,94,140,6,3,UI_EDGE);d.fillRoundRect(92,95,max(0,(int)pct*138/100),4,2,UI_PINK);
-  d.setTextColor(UI_MUTED,BG);d.setCursor(91,105);d.printf("%3u%%",pct);
-  footer();
+  header("MP3");
+  auto& d=M5Cardputer.Display;
+  String title=audioTrackTitle.length()?audioTrackTitle:name;
+  if(title.length()>29)title=title.substring(0,26)+"...";
+  d.setTextColor(WHITE,BG);
+  d.setCursor(8,55);
+  d.print(title);
+  d.setTextColor(UI_MUTED,BG);
+  d.setCursor(8,73);
+  d.print(audioPaused?"PAUSED":"PLAYING");
+  uint8_t pct=audioProgressPercent();
+  d.drawRoundRect(8,91,216,7,3,UI_EDGE);
+  d.fillRoundRect(9,92,max(0,(int)pct*214/100),5,2,UI_PINK);
+  d.setCursor(8,106);
+  d.printf("%u%%",pct);
+  footer("ENTER PAUSE  ESC BACK");
 }
 void drawMusicDynamic(){
   auto& d=M5Cardputer.Display;
@@ -1993,7 +1998,7 @@ void setup() {
   M5Cardputer.begin(cfg,true);
   M5Cardputer.Display.setRotation(1);
   M5Cardputer.Speaker.begin();
-  M5Cardputer.Speaker.setVolume(190);playBootJingle();
+  M5Cardputer.Speaker.setVolume(190);
   audioMutex=xSemaphoreCreateMutex();
   if(!audioMutex) Serial.println("JOHNNY: AUDIO MUTEX FAILED");
   pinMode(38,OUTPUT); digitalWrite(38,HIGH);
@@ -2155,7 +2160,11 @@ void loop() {
     }else if(screen==LIFE){saveLife();screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     else if(screen==FILES || screen==MUSIC) {
       bool music=screen==MUSIC;
-      if(music && musicNowPlaying) {if(stopAudioAndWait(650)){musicNowPlaying=false;audioStatusMessage="STOPPED";drawFiles(true);}else{audioStatusMessage="AUDIO BUSY TIMEOUT";drawMusicInfo(audioNowTitle);}}
+      if(music && musicNowPlaying) {
+        screen=appReturnMenu;
+        selected=appReturnSelected;
+        drawCategoryMenu();
+      }
       else if(currentPath!="/") {currentPath=parentPath(currentPath);scanDirectory(music);drawFiles(music);}
       else {screen=appReturnMenu;selected=appReturnSelected;drawCategoryMenu();}
     } else if(screen==RADIO) {
