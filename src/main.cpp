@@ -251,7 +251,8 @@ uint32_t micWarmupUntil=0;
 constexpr size_t SYNTH_SAMPLES=4096;
 constexpr uint8_t SYNTH_AUDIO_CHANNEL=2;
 constexpr size_t BOOT_JINGLE_SAMPLES=48000;
-static int16_t bootJingleBuffer[BOOT_JINGLE_SAMPLES];
+constexpr size_t BOOT_JINGLE_CHUNK_SAMPLES=2048;
+static int16_t bootJingleBuffer[BOOT_JINGLE_CHUNK_SAMPLES];
 static int16_t alarmToneSamples[512];
 static int16_t synthPadSamples[8192];
 volatile int8_t synthPadRequest=-1;
@@ -490,24 +491,24 @@ void splash(){
   d.setTextDatum(top_left);d.fillScreen(BG);
 }
 void playBootJingle(){
-  // Original melodic electric-guitar intro: slow picked notes, warm overdrive and sustained tails.
-  // It uses an original progression and does not reproduce the Never Fade Away melody.
+  // Original picked-guitar motif, generated in short chunks to preserve RAM on the no-PSRAM ADV.
   const float notes[8]={146.83f,220.00f,293.66f,220.00f,130.81f,196.00f,261.63f,196.00f};
   const size_t samplesPerNote=6000;
-  for(size_t i=0;i<BOOT_JINGLE_SAMPLES;i++){
-    const size_t step=i/samplesPerNote,offset=i%samplesPerNote;
-    const float t=(float)offset/16000.0f;
-    const float f=notes[step]*(1.0f+0.0045f*sinf(6.2831853f*4.0f*t));
-    const float phase=6.2831853f*f*t;
-    const float guitar=0.72f*sinf(phase)+0.20f*sinf(phase*2.0f)+0.08f*sinf(phase*3.0f);
-    const float pick=1.0f-expf(-(float)offset/500.0f);
-    const float decay=0.82f+0.18f*expf(-(float)offset/15000.0f);
-    const float tremolo=0.94f+0.06f*sinf(6.2831853f*3.1f*t);
-    const float sample=tanhf(guitar*2.0f)*pick*decay*tremolo*8900.0f;
-    bootJingleBuffer[i]=(int16_t)constrain(sample,-32768.0f,32767.0f);
-  }
   M5Cardputer.Speaker.setVolume(190);
-  M5Cardputer.Speaker.playRaw(bootJingleBuffer,BOOT_JINGLE_SAMPLES,16000,false,1,0,false);
+  for(size_t base=0;base<BOOT_JINGLE_SAMPLES;base+=BOOT_JINGLE_CHUNK_SAMPLES){
+    const size_t count=min(BOOT_JINGLE_CHUNK_SAMPLES,BOOT_JINGLE_SAMPLES-base);
+    for(size_t n=0;n<count;n++){
+      const size_t i=base+n,step=i/samplesPerNote,offset=i%samplesPerNote;
+      const float t=(float)offset/16000.0f,f=notes[step]*(1.0f+0.0045f*sinf(6.2831853f*4.0f*t));
+      const float phase=6.2831853f*f*t;
+      const float guitar=0.72f*sinf(phase)+0.20f*sinf(phase*2.0f)+0.08f*sinf(phase*3.0f);
+      const float pick=1.0f-expf(-(float)offset/500.0f),decay=0.82f+0.18f*expf(-(float)offset/15000.0f);
+      const float tremolo=0.94f+0.06f*sinf(6.2831853f*3.1f*t);
+      bootJingleBuffer[n]=(int16_t)constrain(tanhf(guitar*2.0f)*pick*decay*tremolo*8900.0f,-32768.0f,32767.0f);
+    }
+    M5Cardputer.Speaker.playRaw(bootJingleBuffer,count,16000,false,1,0,false);
+    while(M5Cardputer.Speaker.isPlaying(0)>0)delay(1);
+  }
 }
 void drawPianoStatus(){
   auto& d=M5Cardputer.Display;
