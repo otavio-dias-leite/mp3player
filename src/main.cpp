@@ -179,7 +179,7 @@ String entries[96];
 String entryPaths[96];
 bool entryIsDir[96];
 int entryCount = 0, selected = 0, scroll = 0, tunerInstrument = 0;
-int pianoOctave=0,pianoEffect=0,pianoVolume=85;
+int pianoOctave=0,pianoEffect=0,pianoVolume=100;
 bool musicNowPlaying=false;
 int radioSelected=0;
 bool radioEditingUrl=false;
