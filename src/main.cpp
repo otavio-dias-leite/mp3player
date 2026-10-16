@@ -2015,14 +2015,14 @@ void drawBrowser() {
   }
   drawHeader(g, title, C_CYAN);
 
-  g.setFont(&fonts::Font2);
+  applyUiFont(g);
   g.setTextSize(1);
   constexpr int ROW_H = 17, Y0 = 24;
 
   if (!storageReady()) {
     g.setTextColor(C_RED);
     g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 14, 40);
-    g.setFont(&fonts::Font0);
+    applyUiFont(g);
     g.setTextColor(C_GREY);
     g.drawString(uiText(UI_STORAGE_KEYS), 14, 62);
   } else if (scanning) {
@@ -2261,7 +2261,7 @@ void drawPlayer() {
   const bool p = paused || fadeAction == FA_PAUSE;
   drawHeader(g, p ? uiText(UI_PLAYER_PAUSED) : uiText(UI_PLAYER_PLAYING), p ? C_YELLOW : C_CYAN);
 
-  g.setFont(&fonts::Font0);
+  applyUiFont(g);
   g.setTextSize(1);
   g.setTextColor(C_GREY);
   g.drawString(outMode ? uiText(UI_OUTPUT_HEADPHONE) : uiText(UI_OUTPUT_SPEAKER), 8, 117);
@@ -2298,7 +2298,7 @@ void drawEq() {
     const bool sel = (i == eqSelected);
     if (sel) g.drawRoundRect(cx - 20, 24, 40, 92, 4, C_RED);
 
-    g.setFont(&fonts::Font0);
+    applyUiFont(g);
     g.setTextColor(sel ? C_WHITE : C_GREY);
     g.drawString(EQ_LABELS[i], cx - g.textWidth(EQ_LABELS[i]) / 2, 29);
 
@@ -2428,40 +2428,40 @@ void drawHelp() {
   if (screenOff) return;
   static const char *const pages[3][10] = {
     {
-      "BIBLIOTECA / GERAL",
-      ";/. move item   ,// pagina",
-      "ENTER pasta ou comeca a fila",
-      "DEL sobe pasta  TAB abre player",
-      "SPACE pausa  N/P muda faixa",
-      "- / = volume  1-6 preset EQ",
-      "S ajustes  E equalizador",
-      "R atualiza SD  X para audio",
-      "G realce de som (off/suave/forte)",
+      "LIBRARY / GENERAL",
+      ";/. move item   ,// page",
+      "ENTER open folder or play queue",
+      "DEL parent folder  TAB player",
+      "SPACE pause  N/P track",
+      "- / = volume  1-6 EQ preset",
+      "S settings  E equalizer",
+      "R refresh SD  X stop audio",
+      "G sound enhancement (off/soft/strong)",
       "Formatos: MP3 WAV FLAC AAC",
     },
     {
       "PLAYER",
-      "SPACE pausa | N proxima",
-      "P anterior / reinicia (>3s)",
-      ", / / busca -10s / +10s (MP3)",
+      "SPACE pause | N next track",
+      "P previous / restart (>3s)",
+      ", / / seek -10s / +10s (MP3)",
       "; / . volume +/- 5%",
-      "S aleatorio | R off/todas/uma",
-      "V barras/espelho/onda/capa",
-      "T timer sono | O alto-falante/fone",
-      "TAB/E equalizador | G realce",
-      "DEL ou ` volta a lista; X para",
+      "S shuffle | R repeat off/all/one",
+      "V bars/mirror/wave/cover",
+      "T sleep timer | O speaker/headphones",
+      "TAB/E equalizer | G enhancement",
+      "DEL or ` back to library; X stop",
     },
     {
-      "EQ / AJUSTES",
-      "EQ: , / troca banda",
-      "EQ: ; / . ganho +/-",
+      "EQ / SETTINGS",
+      "EQ: , / select band",
+      "EQ: ; / . gain +/-",
       "EQ: 0 FLAT | 1-6 presets",
-      "AJUSTES: ; / . escolhe item",
-      "AJUSTES: , / / muda valor",
-      "ENTER muda / restaura padroes",
-      "TAB/DEL/` volta a tela anterior",
-      "Tela apagada: qualquer tecla acorda",
-      "H reinicia | TAB/DEL fecha ajuda",
+      "SETTINGS: ; / . select item",
+      "SETTINGS: , / / change value",
+      "ENTER change / restore defaults",
+      "TAB/DEL/` return to previous screen",
+      "Display off: press any key to wake",
+      "H restarts | TAB/DEL closes help",
     },
   };
 
@@ -2469,7 +2469,7 @@ void drawHelp() {
   g.fillSprite(C_BG);
   drawGrid(g);
   char title[24];
-  snprintf(title, sizeof(title), "TUTORIAL %d/3", helpPage + 1);
+  snprintf(title, sizeof(title), "HELP %d/3", helpPage + 1);
   drawHeader(g, title, C_CYAN);
   g.setFont(&fonts::Font0);
   g.setTextSize(1);
@@ -2478,7 +2478,7 @@ void drawHelp() {
     g.drawString(pages[helpPage][i], i == 0 ? 8 : 12, 26 + i * 10);
   }
   g.setTextColor(C_CYAN);
-  g.drawString("H PROXIMA  TAB/DEL/` FECHA", 8, 127);
+  g.drawString("H NEXT  TAB/DEL/` CLOSE", 8, 127);
   ui.pushSprite(0, 0);
 }
 
