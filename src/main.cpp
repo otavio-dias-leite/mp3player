@@ -2374,23 +2374,60 @@ void applyUiFont(LovyanGFX &g, bool small = false) {
 }
 
 
+const char *localizedOn() {
+  static const char *v[9] = {"ON","LIGADO","ACTIVADO","开启","オン","ACTIVE","EIN","ВКЛ","ATTIVO"};
+  return v[constrain(uiLanguage, 0, 8)];
+}
+const char *localizedOff() {
+  static const char *v[9] = {"OFF","DESLIGADO","DESACTIVADO","关闭","オフ","DESACTIVE","AUS","ВЫКЛ","DISATTIVO"};
+  return v[constrain(uiLanguage, 0, 8)];
+}
+const char *localizedNever() {
+  static const char *v[9] = {"NEVER","NUNCA","NUNCA","永不","なし","JAMAIS","NIE","НИКОГДА","MAI"};
+  return v[constrain(uiLanguage, 0, 8)];
+}
+const char *localizedRepeat(int v) {
+  static const char *names[9][3] = {
+    {"OFF","ALL","ONE"},{"DESLIGADO","TODAS","UMA"},{"DESACTIVADO","TODAS","UNA"},
+    {"关闭","全部","单曲"},{"オフ","全曲","1曲"},{"DESACTIVE","TOUT","UN"},
+    {"AUS","ALLE","EINZELN"},{"ВЫКЛ","ВСЕ","ОДИН"},{"DISATTIVO","TUTTE","UNA"}
+  };
+  return names[constrain(uiLanguage,0,8)][constrain(v,0,2)];
+}
+const char *localizedVisual(int v) {
+  static const char *names[9][4] = {
+    {"BARS","MIRROR","WAVE","COVER"},{"BARRAS","ESPELHO","ONDA","CAPA"},{"BARRAS","ESPEJO","ONDA","PORTADA"},
+    {"柱状","镜像","波形","封面"},{"バー","ミラー","波形","カバー"},{"BARRES","MIROIR","ONDE","POCHETTE"},
+    {"BALKEN","SPIEGEL","WELLE","COVER"},{"СТОЛБЦЫ","ЗЕРКАЛО","ВОЛНА","ОБЛОЖКА"},{"BARRE","SPECCHIO","ONDA","COPERTINA"}
+  };
+  return names[constrain(uiLanguage,0,8)][constrain(v,0,3)];
+}
+const char *localizedEnhance(int v) {
+  static const char *names[9][3] = {
+    {"OFF","SOFT","STRONG"},{"DESLIGADO","SUAVE","FORTE"},{"DESACTIVADO","SUAVE","FUERTE"},
+    {"关闭","柔和","强劲"},{"オフ","弱","強"},{"DESACTIVE","DOUX","FORT"},
+    {"AUS","SANFT","STARK"},{"ВЫКЛ","МЯГКО","СИЛЬНО"},{"DISATTIVO","MORBIDO","FORTE"}
+  };
+  return names[constrain(uiLanguage,0,8)][constrain(v,0,2)];
+}
+
 void settingValue(int i, char *out, size_t n) {
   switch (i) {
     case 0: snprintf(out, n, "%d%%", opt.brightness); break;
     case 1:
       if (SCREEN_OFF_SEC[opt.screenOffIdx]) snprintf(out, n, "%ds", SCREEN_OFF_SEC[opt.screenOffIdx]);
-      else safeCopy(out, n, "NEVER");
+      else safeCopy(out, n, localizedNever());
       break;
     case 2:
       if (SLEEP_MIN[sleepIdx]) snprintf(out, n, "%d MIN", SLEEP_MIN[sleepIdx]);
-      else safeCopy(out, n, "OFF");
+      else safeCopy(out, n, localizedOff());
       break;
-    case 3: safeCopy(out, n, imuOk ? (opt.shake ? "ON" : "OFF") : "N/A"); break;
-    case 4: safeCopy(out, n, REPEAT_NAMES[opt.repeat]); break;
-    case 5: safeCopy(out, n, opt.shuffle ? "ON" : "OFF"); break;
-    case 6: safeCopy(out, n, VISUAL_NAMES[opt.visual]); break;
+    case 3: safeCopy(out, n, imuOk ? (opt.shake ? localizedOn() : localizedOff()) : "N/A"); break;
+    case 4: safeCopy(out, n, localizedRepeat(opt.repeat)); break;
+    case 5: safeCopy(out, n, opt.shuffle ? localizedOn() : localizedOff()); break;
+    case 6: safeCopy(out, n, localizedVisual(opt.visual)); break;
     case 7: safeCopy(out, n, THEMES[themeIndex].name); break;
-    case 8: safeCopy(out, n, ENHANCE_NAMES[opt.enhance]); break;
+    case 8: safeCopy(out, n, localizedEnhance(opt.enhance)); break;
     case 9: safeCopy(out, n, uiLanguageName()); break;
     default: safeCopy(out, n, "ENTER"); break;
   }
@@ -2601,6 +2638,7 @@ void activateSelection() {
 }
 
 void resetDefaults() {
+  uiLanguage = 0;
   opt = Options();
   themeIndex = 3;
   applyTheme();
