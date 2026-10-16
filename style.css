@@ -40,3 +40,6 @@ footer{display:flex;justify-content:space-between;gap:12px;padding:20px 0 28px;b
 :focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
 @media(max-width:640px){.topbar{padding:0 16px}.device-state{font-size:8px}main{width:calc(100% - 30px)}.hero{padding-top:70px;min-height:490px}.steps{grid-template-columns:1fr}.steps article{min-height:0;padding:15px}.steps strong{display:inline;margin:0 10px 0 0}.steps p{margin-top:8px}.modules{grid-template-columns:1fr}.transfer{align-items:flex-start;flex-direction:column}.section-head{gap:12px}.section-head h2{font-size:13px}footer{flex-wrap:wrap;font-size:8px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
+
+/* Static presentation: no glitch slices or blinking cursor. */
+.glitch::before,.glitch::after{content:none!important;display:none!important;animation:none!important}.brand span{animation:none!important}
