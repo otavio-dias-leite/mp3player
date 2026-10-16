@@ -44,18 +44,18 @@ jobs:
           cp "$BUILD/firmware.bin" "$OUT/firmware.bin"
           cp "$BOOT_APP0" "$OUT/boot_app0.bin"
           python "$ESPTOOL" --chip esp32s3 merge_bin \
-            -o "$OUT/johnny-cardputer-adv-full.bin" \
+            -o "$OUT/mp3-player-cardputer-adv-full.bin" \
             --flash_mode dio --flash_freq 80m --flash_size 8MB \
             0x0 "$OUT/bootloader.bin" \
             0x8000 "$OUT/partitions.bin" \
             0xe000 "$OUT/boot_app0.bin" \
             0x10000 "$OUT/firmware.bin"
-          test -s "$OUT/johnny-cardputer-adv-full.bin"
+          test -s "$OUT/mp3-player-cardputer-adv-full.bin"
           ls -lh "$OUT"/*.bin
       - name: Upload compiled firmware
         uses: actions/upload-artifact@v4
         with:
-          name: johnny-cardputer-adv-${{ github.sha }}
+          name: mp3-player-cardputer-adv-${{ github.sha }}
           path: release/firmware/
           if-no-files-found: error
       - name: Publish rolling latest release
@@ -65,8 +65,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="johnny-$(echo "$GITHUB_SHA" | cut -c1-12)"
-          TITLE="JOHNNY latest — $(echo "$GITHUB_SHA" | cut -c1-7)"
+          TAG="mp3-player-$(echo "$GITHUB_SHA" | cut -c1-12)"
+          TITLE="MP3 PLAYER latest — $(echo "$GITHUB_SHA" | cut -c1-7)"
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" --title "$TITLE" --notes "Complete USB image and individual firmware parts built from commit $GITHUB_SHA." --target "$GITHUB_SHA" --latest
           fi
