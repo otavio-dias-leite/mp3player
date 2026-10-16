@@ -829,7 +829,7 @@ public:
         continue;
       }
       if (pos_ >= size_) break;  // fim real do arquivo
-      if (++consecutiveFailures > 2 || !recover()) break;
+      if (++consecutiveFailures > 2 || !recover()) { readFailed_ = true; break; }
     }
     return total;
   }
