@@ -1400,8 +1400,6 @@ void sdRemount() {
   showToast(sdReady ? "SD RECUPERADO" : "SD DESCONECTADO");
 }
 
-}
-
 bool startDirValidation(size_t index) {
   dirProbeActive = false;
   if (index >= entryCount || !entries[index].isDir) return false;
