@@ -38,7 +38,7 @@ jobs:
           EXPECTED_SHA="$(git rev-parse HEAD)"
           export EXPECTED_SHA
           TAG="mp3-player-$(printf '%.12s' "$EXPECTED_SHA")"
-          API="https://api.github.com/repos/otavio-dias-leite/johnny/releases/tags/$TAG"
+          API="https://api.github.com/repos/otavio-dias-leite/mp3player/releases/tags/$TAG"
           for attempt in $(seq 1 36); do
             curl --fail --silent --show-error \
               -H "Accept: application/vnd.github+json" \
