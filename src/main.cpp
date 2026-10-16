@@ -668,6 +668,7 @@ void buildResampleTable(uint8_t table, float step) {
 
 void configureResampler(float sampleRate, float speed, bool resetState) {
   rsSourceRate = constrain(sampleRate, 8000.0f, 192000.0f);
+  gSrcRate = rsSourceRate;
   speed = constrain(speed, 0.75f, 1.75f);
   const float target = constrain(rsSourceRate * speed / (float)OUT_RATE, 0.12f, 8.0f);
 
@@ -933,6 +934,28 @@ void applyPreset(int p) {
   for (int i = 0; i < EQ_BANDS; ++i) eqGain[i] = PRESETS[p][i];
   configureDsp();
   markSettingsDirty();
+}
+
+// Buffer de leitura dimensionado pelo maior bloco contiguo disponivel.
+// O Cardputer ADV nao tem PSRAM; preservamos heap para decoder, display e sistema.
+void allocateAudioBuffer() {
+  if (sdAudioBuffer) { free(sdAudioBuffer); sdAudioBuffer = nullptr; }
+  sdAudioBufferSize = 0;
+  const size_t freeHeap = ESP.getFreeHeap();
+  const size_t maxBlock = ESP.getMaxAllocHeap();
+  const size_t candidates[] = {32 * 1024, 24 * 1024, 16 * 1024, 12 * 1024, 8 * 1024};
+  for (size_t candidate : candidates) {
+    if (candidate > SD_AUDIO_BUFFER_TARGET || candidate > maxBlock) continue;
+    if (freeHeap < candidate + 64 * 1024) continue;
+    uint8_t *buffer = (uint8_t *)malloc(candidate);
+    if (!buffer) continue;
+    sdAudioBuffer = buffer;
+    sdAudioBufferSize = candidate;
+    break;
+  }
+  Serial.printf("Audio RAM buffer: %u bytes | free=%u maxblk=%u\n",
+                (unsigned)sdAudioBufferSize, (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
 }
 
 // ============================================================ metadados
@@ -3409,6 +3432,10 @@ void setup() {
   if (!live.createSprite(240, 90)) Serial.println("ERRO: sprite live sem memoria");
   coverCanvas.setColorDepth(16);
   coverCanvasReady = coverCanvas.createSprite(COVER_PX, COVER_PX);
+  for (int i = 0; i < ROWS; ++i) {
+    thumbCanvases[i]->setColorDepth(16);
+    thumbCanvasReady[i] = thumbCanvases[i]->createSprite(THUMB_PX, THUMB_PX);
+  }
   if (!coverCanvasReady) Serial.println("AVISO: capa indisponivel (sem memoria)");
 
   // Speaker: 44.1 kHz nativo, mais DMA, tarefa de audio no core 0
@@ -3431,6 +3458,7 @@ void setup() {
   batteryPercent = M5Cardputer.Power.getBatteryLevel();
   lastActivity = millis();
 
+  allocateAudioBuffer();
   internalReady = LittleFS.begin(false);
   sdReady = mountSD();
   storageKind = sdReady ? STORAGE_SD : STORAGE_INTERNAL;
