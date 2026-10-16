@@ -1555,6 +1555,7 @@ struct ThumbnailCache {
   char title[NAME_SIZE];
   char detail[48];
   uint32_t mediaEpoch = 0;
+  bool loaded = false;
   bool hasImage = false;
 };
 ThumbnailCache thumbnailCache[ROWS];
@@ -2319,10 +2320,11 @@ void drawBrowser() {
       char path[PATH_SIZE];
       const bool pathOk = buildPath(path, sizeof(path), browseDir, entry.name);
       const ThumbnailCache &cache = thumbnailCache[row];
-      const bool cached = pathOk && cache.hasImage &&
-                          cache.mediaEpoch == sdMediaEpoch &&
-                          strcmp(cache.path, path) == 0 && thumbCanvasReady[row];
-      if (cached) {
+      const bool cacheMatch = pathOk && cache.loaded &&
+                              cache.mediaEpoch == sdMediaEpoch &&
+                              strcmp(cache.path, path) == 0;
+      const bool cachedImage = cacheMatch && cache.hasImage && thumbCanvasReady[row];
+      if (cachedImage) {
         thumbCanvases[row]->pushSprite(11, y + 1);
       } else {
         g.fillRoundRect(11, y + 1, THUMB_PX + 2, THUMB_PX + 2, 3, C_PANEL2);
@@ -2343,7 +2345,7 @@ void drawBrowser() {
       }
 
       char name[NAME_SIZE], shown[NAME_SIZE], fit[NAME_SIZE];
-      if (cached && cache.title[0]) safeCopy(shown, sizeof(shown), cache.title);
+      if (cacheMatch && cache.title[0]) safeCopy(shown, sizeof(shown), cache.title);
       else {
         toAscii(entry.name, name, sizeof(name));
         if (!entry.isDir) stripExt(name);
@@ -2354,7 +2356,7 @@ void drawBrowser() {
       g.setTextColor(active ? C_WHITE : C_GREY);
       g.drawString(fit, 50, y + 5);
 
-      if (cached && cache.detail[0]) {
+      if (cacheMatch && cache.detail[0]) {
         g.setFont(&fonts::Font0);
         g.setTextColor(active ? C_CYAN : C_GREY);
         char detail[48];
@@ -2455,6 +2457,7 @@ void thumbnailStep() {
   ThumbnailCache &cache = thumbnailCache[slot];
   safeCopy(cache.path, sizeof(cache.path), path);
   cache.mediaEpoch = sdMediaEpoch;
+  cache.loaded = false;
   cache.hasImage = false;
   cache.title[0] = '\0';
   cache.detail[0] = '\0';
@@ -2470,7 +2473,7 @@ void thumbnailStep() {
     }
     safeCopy(cache.title, sizeof(cache.title), entry.name);
     stripExt(cache.title);
-    safeCopy(cache.detail, sizeof(cache.detail), image.png ? uiText(UI_IMAGE_PNG) : uiText(UI_IMAGE_JPEG));
+    safeCopy(cache.detail, sizeof(cache.detail), image.valid ? (image.png ? uiText(UI_IMAGE_PNG) : uiText(UI_IMAGE_JPEG)) : uiText(UI_IMAGE_UNSUPPORTED));
   } else {
     Meta preview;
     probeMeta(path, formatOf(entry.name), preview);
@@ -2490,6 +2493,7 @@ void thumbnailStep() {
   }
   if (image.valid) cache.hasImage = drawImageRef(*thumbCanvases[slot], image, THUMB_PX, THUMB_PX);
   if (!cache.hasImage) thumbCanvases[slot]->fillSprite(C_PANEL2);
+  cache.loaded = true;
   if (screen == SCR_BROWSER) drawBrowser();
 }
 
@@ -2525,7 +2529,7 @@ void drawImageViewer() {
     }
   }
   g.fillRect(0, 113, 240, 22, C_PANEL2);
-  g.setFont(&fonts::Font0);
+  applyUiFont(g, true);
   g.setTextColor(ok ? C_GREY : C_RED);
   g.drawString(ok ? uiText(UI_IMAGE_KEYS) : uiText(UI_IMAGE_UNSUPPORTED), 6, 120);
   if (imageViewerIndex >= 0 && entryCount) {
