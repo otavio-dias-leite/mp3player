@@ -1,6 +1,6 @@
 {
   "name": "MP3 Player — Cardputer ADV",
-  "version": "1.0.0-alpha.1",
+  "version": "1.0.0-alpha.3",
   "new_install_prompt_erase": true,
   "builds": [
     {
