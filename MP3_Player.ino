@@ -1,39 +1,59 @@
 /*
- * MP3 PLAYER - MP3 player para M5Stack Cardputer ADV
- * Versao 5.0
+ * MP3 PLAYER - player de audio para M5Stack Cardputer ADV
+ * Versao 12.0
  *
- * v5.0: filtra pastas sem MP3 (busca recursiva em fatias), mostra capa JPEG
- * embutida em ID3 APIC no modo CAPA, corrige verificacao de caminho e colore
- * melhor o espectro. Capas são renderizadas uma vez para não pesar no loop.
+ * NOVIDADES DA v12.0
+ *  SOM
+ *   - Limitador de pico suave (envoltoria rapida/lenta) antes do soft-clip:
+ *     volume alto no alto-falante nao "estala" mais; so cai o ganho.
+ *   - Compressor com joelho suave (sem degrau no limiar).
+ *   - Bloqueador de DC (10 Hz) na entrada da cadeia.
+ *   - Cadeia de filtros montada uma vez (so os filtros ativos), menos CPU.
+ *   - Fim da fila nao corta mais a cauda da ultima musica.
+ *  TEMPO
+ *   - Tempo/barra de progresso corretos nos modos SLOWED/SPED UP/Nightcore
+ *     (antes o relogio andava na velocidade da saida, nao do arquivo).
+ *  SD / TRAVAMENTOS
+ *   - SD monta na MAIOR velocidade que funcionar (16 MHz -> 400 kHz). Antes
+ *     o 1o teste era 400 kHz, lento demais para MP3 de 320 kbps/FLAC.
+ *   - Se o SD falhar tocando, remonta e RETOMA ja numa velocidade menor.
+ *   - Ate 12 arquivos abertos; busca automatica do cartao com backoff
+ *     (nao trava mais a interface de 2,5 em 2,5 s quando nao ha cartao).
+ *   - Copia SD->FLASH: so parado, confere espaco, mostra progresso e apaga
+ *     arquivo incompleto.
+ *  MEMORIA / ENERGIA
+ *   - Reverb do SLOWED so ocupa RAM (14 KB) enquanto esse modo esta ligado.
+ *   - CPU a 160 MHz quando parado/ocioso, 240 MHz tocando (sobe na hora ao
+ *     apertar uma tecla).
+ *  USB
+ *   - Cabecalhos USB fora do namespace (compila de forma confiavel).
+ *   - Modo pendrive automatico nao interrompe mais a musica que esta tocando.
+ *  CORRECOES
+ *   - Log do SD imprimia "\\n" literal.
+ *
+ * Modos de velocidade: 7=SLOWED (0.75x) 8=SPED UP (1.25x) 9=Nightcore (1.75x) 0=NORMAL.
+ *
+ * Arquitetura de audio: arquivo -> decodificador (ESP8266Audio) -> mono ->
+ * anti-alias (se acelerado) -> reamostrador cubico para 44.1 kHz -> DC block ->
+ * HPF do alto-falante -> EQ 5 bandas -> loudness -> voicing do modo -> perfil
+ * da saida -> ar/reverb -> preamp -> compressor -> graves virtuais -> volume
+ * e fade -> limitador -> soft-clip -> dither TPDF -> speaker.
+ *
+ * Formatos: MP3, WAV (PCM), FLAC e AAC (ADTS .aac), conforme a sua versao
+ * do ESP8266Audio (__has_include). M4A/OGG/OPUS nao sao suportados.
  *
  * Dependencias: M5Cardputer (M5Unified/M5GFX) e ESP8266Audio (earlephilhower)
- * Codec nesta versao: MP3 (inclui VBR); capas ID3 APIC JPEG/PNG ate 24 KB.
  * Pasta do sketch: MP3_Player/MP3_Player.ino
+ * Modo USB: Tools > USB Mode = "USB-OTG (TinyUSB)".
  *
- * RECURSOS
- *  - Navegador de pastas: exibe apenas diretorios com MP3 (inclusive em
- *    subpastas), varrendo em fatias; fila = MP3 da pasta atual.
- *  - Musica continua tocando enquanto voce navega (ESC no player).
- *  - Troca de faixa sem pausa (gapless na pratica), proxima/anterior,
- *    aleatorio, repetir (off/todas/uma), avanca sozinho.
- *  - Busca +-10 s, duracao real (Xing/VBRI/CBR), barra de progresso.
- *  - Tags ID3v2/ID3v1 (titulo e artista), acentos convertidos para ASCII.
- *  - Equalizador de 5 bandas (+-12 dB), 6 presets, preamp automatico e
- *    limitador suave. Fade in/out em pausa e inicio (sem cliques).
- *  - Visualizador: barras ciano/azul/rosa, espelho, onda e capa ID3 JPEG/PNG.
- *  - Timer de sono, tela apaga sozinha, brilho, agitar para proxima (IMU
- *    BMI270 do ADV), bateria, ajustes salvos na memoria.
- *  - Protecao anti-travamento: decodificacao em fatias de 8 ms, leitura de
- *    pasta em fatias, deteccao de faixa travada/arquivo ruim e pulo
- *    automatico, SD com fallback de frequencia.
- *
- * TECLAS (H abre o tutorial em qualquer tela; H avanca as paginas)
- *  LISTA   ; . sobe/desce   , / pagina   ENTER abre/toca   DEL pasta acima
- *          TAB player   S ajustes   E equalizador   R atualiza
- *          ESPACO pausa  N P faixa  - = volume  1-6 preset  X para
+ * TECLAS (H abre o tutorial em qualquer tela)
+ *  LISTA   ; . sobe/desce   , / pagina   ENTER abre/toca   DEL pasta acima   U modo USB (pendrive)
+ *          M troca SD/FLASH  C copia SD->FLASH   TAB player   S ajustes   E equalizador   R atualiza
+ *          ESPACO pausa  N P faixa  - = volume  1-6 preset  G realce  X para
  *  PLAYER  ESPACO pausa  N proxima  P anterior/reinicia  , / busca 10 s
- *          ; . volume    - = volume  1-6 preset  TAB equalizador
- *          S aleatorio   R repetir   V visual    T timer de sono
+ *          ; . volume    - = volume  1-6 preset  TAB equalizador  G realce
+ *          S aleatorio   R repetir   V visual    T timer de sono   O saida
+ *          7 SLOWED  8 SPED UP  9 Nightcore  0 NORMAL
  *          X para        DEL/` volta a lista (musica continua)
  *  EQ      , / banda     ; . ganho   0 zera      TAB/DEL/` volta
  */
@@ -42,24 +62,79 @@
 #include <M5Cardputer.h>
 #include <SPI.h>
 #include <SD.h>
+#include <LittleFS.h>
 #include <Preferences.h>
 #include <math.h>
 #include <new>
 
 #include <AudioOutput.h>
-#include <AudioFileSourceSD.h>
+#include <AudioFileSource.h>
 #include <AudioFileSourceBuffer.h>
+#include <AudioGenerator.h>
 #include <AudioGeneratorMP3.h>
+#if __has_include(<AudioGeneratorWAV.h>)
+#include <AudioGeneratorWAV.h>
+#define HAVE_WAV 1
+#endif
+#if __has_include(<AudioGeneratorFLAC.h>)
+#include <AudioGeneratorFLAC.h>
+#define HAVE_FLAC 1
+#endif
+#if __has_include(<AudioGeneratorAAC.h>)
+#include <AudioGeneratorAAC.h>
+#define HAVE_AAC 1
+#endif
 
-#define MP3_PLAYER_VERSION "1.0.0-alpha.4"
+// USB mass storage (precisa de USB-OTG/TinyUSB). Fica FORA do namespace.
+#if __has_include(<USBMSC.h>) && defined(ARDUINO_USB_MODE) && (ARDUINO_USB_MODE == 0)
+#include <USB.h>
+#include <USBMSC.h>
+#define HAVE_USB_MSC 1
+extern "C" bool tud_mounted(void);   // TinyUSB: true quando um PC enumerou o dispositivo
+#endif
+
+#if __has_include("mp3_player_version.h")
+#include "mp3_player_version.h"
+#else
+#define MP3_PLAYER_VERSION "12.0.0"
+#endif
+
+// Deteccao de fone: o Cardputer ADV corta o amplificador por hardware quando o
+// plugue entra, mas NAO documenta um GPIO de leitura. Se voce descobrir o pino
+// (ex.: no esquematico), coloque o numero aqui e a troca fica 100% automatica.
+#ifndef HP_DET_PIN
+#define HP_DET_PIN -1
+#endif
+#ifndef HP_DET_ACTIVE_LEVEL
+#define HP_DET_ACTIVE_LEVEL LOW   // nivel lido quando o fone esta ligado
+#endif
 
 namespace {
+// Declaracoes antecipadas do texto da interface (incluido dentro do namespace anonimo).
+enum UiTextId {
+  UI_SD_MISSING, UI_FLASH_MISSING, UI_STORAGE_KEYS, UI_FILTERING, UI_READING,
+  UI_EMPTY, UI_PAUSED, UI_PLAYING, UI_BROWSER_KEYS1, UI_BROWSER_KEYS2,
+  UI_PLAYER_PAUSED, UI_PLAYER_PLAYING, UI_OUTPUT_HEADPHONE, UI_OUTPUT_SPEAKER,
+  UI_PLAYER_KEYS, UI_EQ_TITLE, UI_EQ_PRESET, UI_EQ_KEYS, UI_TEXT_COUNT
+};
+static_assert(UI_TEXT_COUNT == 18, "atualize a tabela UI_TEXT ao mudar o enum");
+const char *uiText(UiTextId id);
+void applyUiFont(LovyanGFX &g, bool small);
+inline void applyUiFont(LovyanGFX &g) { applyUiFont(g, false); }
+
 
 // ============================================================ hardware
 constexpr int SD_CS   = 12;
 constexpr int SD_SCK  = 40;
 constexpr int SD_MISO = 39;
 constexpr int SD_MOSI = 14;
+
+// Velocidades de SPI tentadas (da mais rapida para a mais segura).
+constexpr uint32_t SD_FREQS[] = {16000000, 12000000, 8000000, 4000000, 1000000, 400000};
+constexpr int SD_FREQ_COUNT = sizeof(SD_FREQS) / sizeof(SD_FREQS[0]);
+constexpr int SD_FREQ_DOWNGRADE_MAX = 3;   // a recuperacao em campo nunca passa de 4 MHz
+constexpr int SD_MAX_FILES = 12;
+int sdFreqIdx = 0;                         // primeiro indice a tentar na montagem
 
 // ============================================================ cores
 constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
@@ -80,9 +155,10 @@ constexpr uint16_t C_ORANGE  = rgb(255, 140, 0);
 constexpr uint16_t C_YELLOW  = rgb(255, 230, 60);
 
 // ============================================================ constantes
-constexpr size_t SD_AUDIO_BUFFER_SIZE = 32 * 1024;
-constexpr size_t BLOCK_SAMPLES = 1024;  // amostras por bloco enviado ao speaker
-constexpr size_t RING_BLOCKS   = 4;     // speaker segura no maximo 2 por vez
+constexpr uint32_t OUT_RATE = 44100;               // taxa fixa da saida
+constexpr size_t SD_AUDIO_BUFFER_SIZE = 48 * 1024; // readahead na RAM interna
+constexpr size_t BLOCK_SAMPLES = 2048;             // amostras por bloco no speaker
+constexpr size_t RING_BLOCKS   = 4;                // speaker segura no maximo 2
 constexpr size_t MAX_ENTRIES   = 200;
 constexpr size_t NAME_SIZE     = 80;
 constexpr size_t DIR_SIZE      = 112;
@@ -93,6 +169,8 @@ constexpr int    EQ_LIMIT      = 12;
 constexpr int    NUM_PRESETS   = 6;
 constexpr int    ROWS          = 4;
 constexpr float  SHAKE_G       = 2.6f;
+constexpr int    COVER_PX      = 44;
+constexpr uint32_t COVER_MAX_BYTES = 900UL * 1024UL;
 
 static uint8_t sdAudioBuffer[SD_AUDIO_BUFFER_SIZE];
 
@@ -105,7 +183,15 @@ int helpPage = 0;
 enum FadeAction { FA_NONE, FA_PAUSE, FA_STOP };
 FadeAction fadeAction = FA_NONE;
 
+enum Fmt : uint8_t { FMT_MP3, FMT_WAV, FMT_FLAC, FMT_AAC, FMT_NONE };
+const char *FMT_NAMES[5] = {"MP3", "WAV", "FLAC", "AAC", "?"};
+
 bool sdReady = false;
+bool internalReady = false;
+enum StorageKind : uint8_t { STORAGE_SD, STORAGE_INTERNAL };
+StorageKind storageKind = STORAGE_SD;
+fs::FS &activeFS() { return storageKind == STORAGE_SD ? (fs::FS &)SD : (fs::FS &)LittleFS; }
+bool storageReady() { return storageKind == STORAGE_SD ? sdReady : internalReady; }
 bool playing = false;   // decoder ativo (inclui pausado)
 bool paused = false;
 bool imuOk = false;
@@ -116,6 +202,7 @@ int outMode = 0;
 int eqGain[EQ_BANDS] = {3, 1, 0, 2, 3};
 int eqSelected = 0;
 int settingsSel = 0;
+int uiLanguage = 0;  // 0 English, 1 Portuguese, 2 Spanish, 3 Chinese, 4 Japanese, 5 French, 6 German, 7 Russian, 8 Italian
 int sleepIdx = 0;
 uint32_t sleepDeadline = 0;
 
@@ -126,12 +213,14 @@ struct Options {
   int repeat = 0;   // 0 off, 1 todas, 2 uma
   int shuffle = 0;
   int visual = 0;   // 0 barras, 1 espelho, 2 onda, 3 capa
+  int enhance = 1;  // 0 desligado, 1 suave, 2 forte
 } opt;
 
 const int SCREEN_OFF_SEC[4] = {0, 15, 30, 60};
 const int SLEEP_MIN[5] = {0, 15, 30, 60, 90};
-const char *REPEAT_NAMES[3] = {"DESLIGADO", "TODAS", "UMA"};
-const char *VISUAL_NAMES[4] = {"BARRAS", "ESPELHO", "ONDA", "CAPA"};
+const char *REPEAT_NAMES[3] = {"OFF", "ALL", "ONE"};
+const char *VISUAL_NAMES[4] = {"BARS", "MIRROR", "WAVE", "COVER"};
+const char *ENHANCE_NAMES[3] = {"OFF", "SOFT", "STRONG"};
 
 const char *EQ_LABELS[EQ_BANDS] = {"60", "250", "1K", "4K", "12K"};
 const float EQ_FREQS[EQ_BANDS] = {60.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
@@ -197,6 +286,8 @@ void drawEq();
 void drawSettings();
 void drawHelp();
 void redrawCurrent();
+void sdRemount();
+void pumpAudio();
 
 // ============================================================ texto
 const char LATIN_MAP[] =
@@ -269,11 +360,27 @@ void toAscii(const char *src, char *out, size_t cap) {
   decodeText((const uint8_t *)src, strlen(src), 3, out, cap);
 }
 
-bool hasMp3Extension(const char *name) {
-  const size_t n = name ? strlen(name) : 0;
-  return n >= 4 && name[n - 4] == '.' && tolower(name[n - 3]) == 'm' &&
-         tolower(name[n - 2]) == 'p' && name[n - 1] == '3';
+void stripExt(char *s) {
+  char *d = strrchr(s, '.');
+  if (d && d != s && strlen(d) <= 5) *d = '\0';
 }
+
+Fmt formatOf(const char *name) {
+  const char *dot = name ? strrchr(name, '.') : nullptr;
+  if (!dot) return FMT_NONE;
+  if (!strcasecmp(dot, ".mp3")) return FMT_MP3;
+#ifdef HAVE_WAV
+  if (!strcasecmp(dot, ".wav")) return FMT_WAV;
+#endif
+#ifdef HAVE_FLAC
+  if (!strcasecmp(dot, ".flac")) return FMT_FLAC;
+#endif
+#ifdef HAVE_AAC
+  if (!strcasecmp(dot, ".aac")) return FMT_AAC;
+#endif
+  return FMT_NONE;
+}
+bool isAudioFile(const char *name) { return formatOf(name) != FMT_NONE; }
 
 void fitText(LovyanGFX &g, const char *src, int maxW, char *out, size_t n) {
   safeCopy(out, n, src);
@@ -306,7 +413,7 @@ struct Biquad {
   float z1 = 0, z2 = 0;
   bool active = false;
 
-  // type: 0 peaking, 1 low shelf, 2 high shelf (RBJ)
+  // type: 0 peaking, 1 low shelf, 2 high shelf, 3 high-pass, 4 low-pass (RBJ)
   void configure(int type, float fs, float f, float gainDb, float q) {
     if (f > fs * 0.45f) f = fs * 0.45f;
     const float A = powf(10.0f, gainDb / 40.0f);
@@ -318,6 +425,12 @@ struct Biquad {
     if (type == 0) {
       nb0 = 1 + alpha * A; nb1 = -2 * cw; nb2 = 1 - alpha * A;
       na0 = 1 + alpha / A; na1 = -2 * cw; na2 = 1 - alpha / A;
+    } else if (type == 4) {  // low-pass
+      nb0 = (1 - cw) * 0.5f; nb1 = 1 - cw; nb2 = (1 - cw) * 0.5f;
+      na0 = 1 + alpha; na1 = -2 * cw; na2 = 1 - alpha;
+    } else if (type == 3) {
+      nb0 = (1 + cw) * 0.5f; nb1 = -(1 + cw); nb2 = (1 + cw) * 0.5f;
+      na0 = 1 + alpha; na1 = -2 * cw; na2 = 1 - alpha;
     } else {
       const float t = 2.0f * sqrtf(A) * alpha;
       if (type == 1) {
@@ -338,7 +451,15 @@ struct Biquad {
     }
     b0 = nb0 / na0; b1 = nb1 / na0; b2 = nb2 / na0;
     a1 = na1 / na0; a2 = na2 / na0;
-    active = fabsf(gainDb) > 0.05f;
+    active = (type >= 3) || fabsf(gainDb) > 0.05f;
+  }
+
+  float magDb(float f, float fs) const {
+    const float w = 2.0f * PI * f / fs;
+    const float c1 = cosf(w), s1 = sinf(w), c2 = cosf(2 * w), s2 = sinf(2 * w);
+    const float nr = b0 + b1 * c1 + b2 * c2, ni = -(b1 * s1 + b2 * s2);
+    const float dr = 1 + a1 * c1 + a2 * c2, di = -(a1 * s1 + a2 * s2);
+    return 10.0f * log10f((nr * nr + ni * ni) / (dr * dr + di * di + 1e-12f) + 1e-12f);
   }
 
   inline float process(float x) {
@@ -351,15 +472,51 @@ struct Biquad {
 };
 
 Biquad eq[EQ_BANDS];
+Biquad loudLow, loudHigh, spkHpf, outA, outB;
+Biquad vA, vB;       // "voicing" do modo (SLOWED / SPED UP / NIGHTCORE)
+Biquad aaA, aaB;     // anti-aliasing antes do reamostrador (acelerado)
 
-float gRate = 44100.0f;
+// Cadeia por amostra: apenas os filtros ativos, montada em configureDsp().
+Biquad *gChain[EQ_BANDS + 7];
+int gChainN = 0;
+
+// Reverb Schroeder leve (4 combs + 2 allpass). A memoria (14 KB) so existe
+// enquanto o modo SLOWED esta ativo.
+constexpr int COMB_N[4] = {1557, 1617, 1491, 1422};
+constexpr int AP_N[2] = {556, 441};
+constexpr int REV_TOTAL = 1557 + 1617 + 1491 + 1422 + 556 + 441;
+int16_t *gRevMem = nullptr;
+int gCombOff[4] = {0}, gApOff[2] = {0};
+int gCombI[4] = {0}, gApI[2] = {0};
+float gCombLp[4] = {0};
+float gRevMix = 0;
+float gAirMix = 0, gAirLp = 0;
+int gResLevel = 0;   // 0 normal, 1 pouca RAM, 2 critico (gerenciador de recursos)
+bool autoOut = true; // alterna fone/alto-falante sozinho (se HP_DET_PIN >= 0)
+
+float gSrcRate = 44100.0f;   // taxa original do arquivo (so exibicao e reamostragem)
 float gPreamp = 1.0f;
 float gVolTarget = 0.5f;
 float gVolCur = 0.5f;
 float gFadeGain = 0.0f;
 float gFadeTarget = 1.0f;
-float gFadeStep = 0.001f;
-uint32_t gSamplesSubmitted = 0;
+float gFadeStep = 1.0f / (0.03f * 44100.0f);
+uint32_t gSamplesSubmitted = 0;  // amostras enviadas ao speaker (deteccao de travamento)
+float gPlayedSec = 0.0f;         // tempo de CONTEUDO tocado (considera a velocidade)
+
+// realce de som
+bool gCompOn = false;
+float gCompEnv = 0, gCompThr = 12000.0f, gCompInvThr = 1.0f / 12000.0f, gCompMake = 1.1f;
+float gVBassMix = 0, gBassLp = 0, gBassHp = 0;
+float gDcX = 0, gDcY = 0;
+float gLimEnv = 0;
+uint32_t gRng = 0x1234ABCDu;
+
+// reamostrador (arquivo -> 44.1 kHz)
+bool rsActive = false;
+float rsStep = 1.0f, rsPhase = 0.0f;
+float rsH[4] = {0, 0, 0, 0};
+float playbackSpeed = 1.0f;  // SLOWED 0.75x, NORMAL 1.00x, SPED UP 1.25x, Nightcore 1.75x
 
 float gBand[SPEC_BANDS] = {0};
 int16_t gScope[128] = {0};
@@ -367,30 +524,152 @@ const float SPEC_FREQS[SPEC_BANDS] = {60, 100, 170, 300, 500, 800, 1300, 2000, 3
 float gGoertzel[SPEC_BANDS];
 bool gGoertzelOk[SPEC_BANDS];
 
-// Anel de buffers global: o speaker guarda PONTEIROS, entao os blocos precisam
-// sobreviver a troca de faixa (gapless) e nunca ser reescritos enquanto tocam.
+// O speaker guarda PONTEIROS: os blocos precisam sobreviver a troca de faixa.
 int16_t gRing[RING_BLOCKS][BLOCK_SAMPLES];
 size_t gCur = 0;
 size_t gFill = 0;
-int gSliceLeft = 0;  // amostras que o decoder pode entregar nesta chamada de loop()
+int gSliceLeft = 0;
 
-void configureEqualizer() {
-  int maxBoost = 0;
+inline float fastTanh(float x) {
+  if (x > 3.0f) return 1.0f;
+  if (x < -3.0f) return -1.0f;
+  const float x2 = x * x;
+  return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+}
+
+void revAlloc(bool on) {
+  if (on && !gRevMem) {
+    gRevMem = (int16_t *)calloc(REV_TOTAL, sizeof(int16_t));
+    if (gRevMem) {
+      int o = 0;
+      for (int c = 0; c < 4; ++c) { gCombOff[c] = o; o += COMB_N[c]; gCombI[c] = 0; gCombLp[c] = 0; }
+      for (int a = 0; a < 2; ++a) { gApOff[a] = o; o += AP_N[a]; gApI[a] = 0; }
+    }
+  } else if (!on && gRevMem) {
+    free(gRevMem);
+    gRevMem = nullptr;
+  }
+}
+
+// So chamada com gRevMix > 0 (memoria garantida).
+inline float reverbProcess(float in) {
+  in *= 0.22f;
+  float acc = 0;
+  for (int c = 0; c < 4; ++c) {
+    int16_t &cell = gRevMem[gCombOff[c] + gCombI[c]];
+    const float y = (float)cell;
+    gCombLp[c] = y * 0.62f + gCombLp[c] * 0.38f;           // amortecimento dos agudos
+    const float w = in + gCombLp[c] * 0.80f;
+    cell = (int16_t)constrain(w, -32000.0f, 32000.0f);
+    acc += y;
+    if (++gCombI[c] >= COMB_N[c]) gCombI[c] = 0;
+  }
+  acc *= 0.25f;
+  for (int a = 0; a < 2; ++a) {
+    int16_t &cell = gRevMem[gApOff[a] + gApI[a]];
+    const float yb = (float)cell;
+    cell = (int16_t)constrain(acc + yb * 0.5f, -32000.0f, 32000.0f);
+    acc = yb - acc;
+    if (++gApI[a] >= AP_N[a]) gApI[a] = 0;
+  }
+  return acc;
+}
+
+void rebuildChain() {
+  Biquad *all[EQ_BANDS + 7] = {&spkHpf, &eq[0], &eq[1], &eq[2], &eq[3], &eq[4],
+                               &loudLow, &loudHigh, &vA, &vB, &outA, &outB};
+  gChainN = 0;
+  for (Biquad *b : all) if (b->active) gChain[gChainN++] = b;
+}
+
+void configureDsp() {
+  const float fs = (float)OUT_RATE;
+  const bool enh = opt.enhance > 0;
+  const bool spk = (outMode == 0);
   for (int i = 0; i < EQ_BANDS; ++i) {
     const int type = (i == 0) ? 1 : (i == EQ_BANDS - 1 ? 2 : 0);
     const float q = (type == 0) ? 1.0f : 0.707f;
-    eq[i].configure(type, gRate, EQ_FREQS[i], (float)eqGain[i], q);
-    if (eqGain[i] > maxBoost) maxBoost = eqGain[i];
+    eq[i].configure(type, fs, EQ_FREQS[i], (float)eqGain[i], q);
   }
-  gPreamp = powf(10.0f, (-0.55f * (float)maxBoost) / 20.0f);
+  const float v = (float)volumePercent / 100.0f;
+  const float lc = enh ? (opt.enhance == 2 ? 1.0f : 0.6f) : 0.0f;
+  loudLow.configure(1, fs, 110.0f, (1.0f - v) * 5.0f * lc, 0.6f);
+  loudHigh.configure(2, fs, 8000.0f, (1.0f - v) * 2.5f * lc, 0.6f);
+  if (enh && spk) spkHpf.configure(3, fs, opt.enhance == 2 ? 105.0f : 85.0f, 0, 0.707f);
+  else spkHpf.active = false;
+  // Perfil de saida: corrige a caixa do alto-falante ou suaviza o fone
+  if (enh && spk) {
+    outA.configure(0, fs, 320.0f, -2.5f, 1.0f);   // tira o "abafado"
+    outB.configure(0, fs, 2800.0f, 2.0f, 0.9f);   // presenca/vocal
+  } else if (enh) {
+    outA.configure(1, fs, 90.0f, 1.5f, 0.7f);     // corpo nos graves
+    outB.configure(2, fs, 9000.0f, -1.5f, 0.7f);  // agudo menos cansativo
+  } else { outA.active = outB.active = false; }
+  gAirMix = (enh && gResLevel == 0) ? (opt.enhance == 2 ? 0.14f : 0.07f) : 0.0f;
+  // Voicing por modo de reproducao
+  const bool nc = playbackSpeed > 1.5f, fast = playbackSpeed > 1.1f, slow = playbackSpeed < 0.9f;
+  if (nc)        { vA.configure(1, fs, 90.0f, 2.5f, 0.7f);  vB.configure(2, fs, 6500.0f, 3.0f, 0.7f); }
+  else if (fast) { vA.configure(1, fs, 90.0f, 1.5f, 0.7f);  vB.configure(2, fs, 6500.0f, 1.5f, 0.7f); }
+  else if (slow) { vA.configure(1, fs, 120.0f, 2.5f, 0.7f); vB.configure(2, fs, 6000.0f, -3.0f, 0.7f); }
+  else { vA.active = vB.active = false; }
+
+  // Reverb do SLOWED: a RAM so e reservada enquanto o modo esta ligado.
+  const bool wantRev = slow && gResLevel == 0;
+  gRevMix = 0.0f;                 // desliga antes de liberar a memoria
+  revAlloc(wantRev);
+  if (wantRev && gRevMem) gRevMix = (opt.enhance == 2) ? 0.24f : 0.17f;
+
+  if (nc && gResLevel == 0) gAirMix = max(gAirMix, 0.16f);
+  gVBassMix = (enh && spk) ? (opt.enhance == 2 ? 0.45f : 0.25f) : 0.0f;
+  gCompOn = enh || playbackSpeed > 1.5f;
+  gCompThr = (playbackSpeed > 1.5f) ? 8500.0f : (opt.enhance == 2) ? 9000.0f : 12000.0f;
+  gCompInvThr = 1.0f / gCompThr;
+  gCompMake = (opt.enhance == 2) ? 1.30f : 1.12f;
+
+  // headroom: preamp compensa o pico real da curva (EQ + loudness)
+  float peak = 0;
+  for (int k = 0; k < 48; ++k) {
+    const float f = 30.0f * powf(600.0f, (float)k / 47.0f);
+    float db = 0;
+    for (int i = 0; i < EQ_BANDS; ++i) if (eq[i].active) db += eq[i].magDb(f, fs);
+    if (loudLow.active) db += loudLow.magDb(f, fs);
+    if (loudHigh.active) db += loudHigh.magDb(f, fs);
+    if (vA.active) db += vA.magDb(f, fs);
+    if (vB.active) db += vB.magDb(f, fs);
+    if (outA.active) db += outA.magDb(f, fs);
+    if (outB.active) db += outB.magDb(f, fs);
+    if (db > peak) peak = db;
+  }
+  gPreamp = (peak > 0.1f) ? powf(10.0f, -(peak + 0.3f) / 20.0f) : 1.0f;
+  rebuildChain();
 }
 
-void resetEq() { for (int i = 0; i < EQ_BANDS; ++i) eq[i].reset(); }
+// Filtro anti-aliasing de 4a ordem (Butterworth) quando a saida "pula" amostras
+void configureAA() {
+  if (rsStep > 1.001f) {
+    float fc = 0.45f * gSrcRate / rsStep;
+    if (fc > gSrcRate * 0.45f) fc = gSrcRate * 0.45f;
+    aaA.configure(4, gSrcRate, fc, 0, 0.5412f);
+    aaB.configure(4, gSrcRate, fc, 0, 1.3066f);
+  } else { aaA.active = aaB.active = false; }
+}
+
+void resetDsp() {
+  for (int i = 0; i < EQ_BANDS; ++i) eq[i].reset();
+  loudLow.reset(); loudHigh.reset(); spkHpf.reset(); outA.reset(); outB.reset();
+  vA.reset(); vB.reset(); aaA.reset(); aaB.reset();
+  gAirLp = 0;
+  if (gRevMem) memset(gRevMem, 0, REV_TOTAL * sizeof(int16_t));
+  for (int c = 0; c < 4; ++c) { gCombI[c] = 0; gCombLp[c] = 0; }
+  gApI[0] = gApI[1] = 0;
+  gCompEnv = 0; gBassLp = 0; gBassHp = 0;
+  gDcX = gDcY = 0; gLimEnv = 0;
+}
 
 void configureSpectrum() {
   for (int i = 0; i < SPEC_BANDS; ++i) {
-    if (SPEC_FREQS[i] < gRate * 0.45f) {
-      gGoertzel[i] = 2.0f * cosf(2.0f * PI * SPEC_FREQS[i] / gRate);
+    if (SPEC_FREQS[i] < OUT_RATE * 0.45f) {
+      gGoertzel[i] = 2.0f * cosf(2.0f * PI * SPEC_FREQS[i] / (float)OUT_RATE);
       gGoertzelOk[i] = true;
     } else {
       gGoertzel[i] = 0;
@@ -401,11 +680,16 @@ void configureSpectrum() {
 
 void updateVolumeTarget() {
   const float v = (float)volumePercent / 100.0f;
-  gVolTarget = v * v * (outMode == 0 ? 1.6f : 1.0f);  // reforco no alto-falante (o limitador protege)
+  gVolTarget = v * v * (outMode == 0 ? 1.6f : 1.0f);
+  configureDsp();
 }
 
 void analyzeBlock(const int16_t *b, size_t n) {
   if (!n) return;
+  if (gResLevel >= 2) { for (int i = 0; i < SPEC_BANDS; ++i) gBand[i] *= 0.9f; return; }
+  const size_t lim = gResLevel ? 256 : 512;  // janela curta: leve e suficiente
+  if (n > lim) n = lim;
+  const float norm = 1.0f / fmaxf(gVolCur, 0.2f);
   for (int i = 0; i < SPEC_BANDS; ++i) {
     if (!gGoertzelOk[i]) { gBand[i] = 0; continue; }
     const float c = gGoertzel[i];
@@ -417,7 +701,7 @@ void analyzeBlock(const int16_t *b, size_t n) {
     }
     float p = s1 * s1 + s2 * s2 - c * s1 * s2;
     if (p < 0) p = 0;
-    const float amp = sqrtf(p) * 2.0f / (float)n;
+    const float amp = sqrtf(p) * 2.0f / (float)n * norm;
     const float db = 20.0f * log10f(amp / 32768.0f + 1e-6f) + (float)i * 0.9f;
     float lvl = (db + 54.0f) / 54.0f;
     if (lvl < 0) lvl = 0;
@@ -428,27 +712,92 @@ void analyzeBlock(const int16_t *b, size_t n) {
 
 bool submitBlock() {
   if (!gFill) return true;
-  // playRaw assincrono: nunca aguarda o fim do audio no loop principal.
-  // Se a fila interna estiver cheia, mantemos o bloco pendente e tentamos
-  // novamente na proxima iteracao, sem sobrescrever memoria em uso.
-  if (!M5Cardputer.Speaker.playRaw(gRing[gCur], gFill, (uint32_t)gRate,
-                                   false, 1, 0, true)) {
-    return false;  // fila cheia = contrapressao normal
-  }
+  // Fila do speaker: no maximo 2 blocos pendentes. NUNCA interrompe o que toca.
+  if (M5Cardputer.Speaker.isPlaying(0) >= 2) return false;
+  if (!M5Cardputer.Speaker.playRaw(gRing[gCur], gFill, OUT_RATE, false, 1, 0, false))
+    return false;
   analyzeBlock(gRing[gCur], gFill);
-  if (gFill >= BLOCK_SAMPLES) {
-    for (int k = 0; k < 128; ++k) gScope[k] = gRing[gCur][k * 8];
+  if (gFill >= 256) {
+    for (int k = 0; k < 128; ++k) gScope[k] = gRing[gCur][(size_t)k * gFill / 128];
   }
   gSamplesSubmitted += (uint32_t)gFill;
+  gPlayedSec += (float)gFill * playbackSpeed * (1.0f / (float)OUT_RATE);
   gCur = (gCur + 1) % RING_BLOCKS;
   gFill = 0;
   return true;
 }
 
-class Mp3AudioOutput final : public AudioOutput {
+inline float rnd01() {
+  gRng ^= gRng << 13; gRng ^= gRng >> 17; gRng ^= gRng << 5;
+  return (float)(gRng & 0xFFFF) * (1.0f / 65536.0f);
+}
+
+// Cadeia completa para UMA amostra mono a 44.1 kHz.
+inline int16_t processSample(float x) {
+  // bloqueador de DC (~10 Hz)
+  const float dcy = x - gDcX + 0.9985f * gDcY;
+  gDcX = x; gDcY = dcy; x = dcy;
+
+  for (int i = 0; i < gChainN; ++i) x = gChain[i]->process(x);   // HPF, EQ, loudness, voicing, perfil
+
+  if (gAirMix > 0.0f) {  // excitador de "ar": harmonicas suaves nos agudos
+    gAirLp += 0.45f * (x - gAirLp);
+    x += gAirMix * fastTanh((x - gAirLp) * (1.0f / 2500.0f)) * 2500.0f;
+  }
+  if (gRevMix > 0.0f) x += gRevMix * reverbProcess(x);
+  x *= gPreamp;
+
+  if (gCompOn) {  // compressor ~2:1 com joelho suave: ganho = (1 + r^4)^(-1/8)
+    const float a = fabsf(x);
+    gCompEnv += (a > gCompEnv ? 0.0113f : 0.00015f) * (a - gCompEnv);
+    const float r = gCompEnv * gCompInvThr;
+    const float r2 = r * r;
+    x *= gCompMake / sqrtf(sqrtf(sqrtf(1.0f + r2 * r2)));
+  }
+  if (gVBassMix > 0.0f) {  // graves virtuais: harmonicas dos graves
+    gBassLp += 0.0185f * (x - gBassLp);
+    const float h = fastTanh(gBassLp * (1.0f / 3000.0f)) * 3000.0f;
+    gBassHp += 0.0215f * (h - gBassHp);
+    x += gVBassMix * (h - gBassHp);
+  }
+
+  gVolCur += (gVolTarget - gVolCur) * 0.0015f;
+  if (gFadeGain < gFadeTarget) {
+    gFadeGain += gFadeStep;
+    if (gFadeGain > gFadeTarget) gFadeGain = gFadeTarget;
+  } else if (gFadeGain > gFadeTarget) {
+    gFadeGain -= gFadeStep;
+    if (gFadeGain < gFadeTarget) gFadeGain = gFadeTarget;
+  }
+  x *= gVolCur * gFadeGain;
+
+  // limitador de pico: ataque ~0,3 ms, soltura ~120 ms (so reduz ganho, sem estalar)
+  const float a2 = fabsf(x);
+  gLimEnv += (a2 > gLimEnv ? 0.07f : 0.00019f) * (a2 - gLimEnv);
+  if (gLimEnv > 24000.0f) x *= 24000.0f / gLimEnv;
+  // soft-clip final so para o que escapar do ataque do limitador
+  const float a3 = fabsf(x);
+  if (a3 > 26000.0f) x = copysignf(26000.0f + 6000.0f * fastTanh((a3 - 26000.0f) / 6000.0f), x);
+
+  if (gFadeGain > 0.001f) x += rnd01() - rnd01();  // dither TPDF
+  int v = (int)lrintf(x);
+  if (v > 32767) v = 32767;
+  if (v < -32767) v = -32767;
+  return (int16_t)v;
+}
+
+inline float cubic4(const float *h, float t) {
+  const float a = -0.5f * h[0] + 1.5f * h[1] - 1.5f * h[2] + 0.5f * h[3];
+  const float b = h[0] - 2.5f * h[1] + 2.0f * h[2] - 0.5f * h[3];
+  const float c = -0.5f * h[0] + 0.5f * h[2];
+  return ((a * t + b) * t + c) * t + h[1];
+}
+
+class AudioOut final : public AudioOutput {
 public:
   bool begin() override {
-    gFill = 0;
+    for (int i = 0; i < 4; ++i) rsH[i] = 0;
+    rsPhase = 0;
     applyRate();
     return true;
   }
@@ -459,38 +808,30 @@ public:
     return true;
   }
 
-  bool isFull() const { return gFill >= BLOCK_SAMPLES; }
+  // true = bloco quase cheio e o speaker ainda nao aceitou
+  bool isFull() const {
+    if (gFill + 8 <= BLOCK_SAMPLES) return false;
+    return !submitBlock();
+  }
 
   bool ConsumeSample(int16_t sample[2]) override {
-    // Se o bloco anterior ainda esta pendente e nao da para enviar, NAO
-    // consome a amostra: o decoder repete depois. Nunca passa do array.
     if (gSliceLeft <= 0) return false;  // fatia esgotada: devolve o controle ao loop()
-    if (gFill >= BLOCK_SAMPLES && !submitBlock()) return false;
+    if (gFill + 8 > BLOCK_SAMPLES && !submitBlock()) return false;  // contrapressao
     --gSliceLeft;
-
     float x = ((float)sample[0] + (float)sample[1]) * 0.5f;  // speaker mono
-    for (int i = 0; i < EQ_BANDS; ++i) {
-      if (eq[i].active) x = eq[i].process(x);
+    if (aaA.active) x = aaB.process(aaA.process(x));
+    if (!rsActive) {
+      gRing[gCur][gFill++] = processSample(x);
+    } else {
+      rsH[0] = rsH[1]; rsH[1] = rsH[2]; rsH[2] = rsH[3]; rsH[3] = x;
+      while (rsPhase < 1.0f && gFill < BLOCK_SAMPLES) {
+        gRing[gCur][gFill++] = processSample(cubic4(rsH, rsPhase));
+        rsPhase += rsStep;
+      }
+      rsPhase -= 1.0f;
+      if (rsPhase < 0) rsPhase = 0;
     }
-    gVolCur += (gVolTarget - gVolCur) * 0.0015f;
-    if (gFadeGain < gFadeTarget) {
-      gFadeGain += gFadeStep;
-      if (gFadeGain > gFadeTarget) gFadeGain = gFadeTarget;
-    } else if (gFadeGain > gFadeTarget) {
-      gFadeGain -= gFadeStep;
-      if (gFadeGain < gFadeTarget) gFadeGain = gFadeTarget;
-    }
-    x *= gPreamp * gVolCur * gFadeGain;
-
-    // Limitador suave acima de 22000 (sem estalo de clipping)
-    const float a = fabsf(x);
-    if (a > 22000.0f) {
-      const float over = (a - 22000.0f) / 10767.0f;
-      x = copysignf(22000.0f + 10767.0f * tanhf(over), x);
-    }
-
-    gRing[gCur][gFill++] = (int16_t)x;
-    if (gFill >= BLOCK_SAMPLES) submitBlock();  // se falhar, fica pendente
+    if (gFill + 8 > BLOCK_SAMPLES) submitBlock();
     return true;
   }
 
@@ -500,23 +841,86 @@ public:
   }
 
   bool stop() override {
-    flush();  // nunca corta o que ainda esta tocando
+    flush();
     return true;
   }
 
 private:
   void applyRate() {
-    gRate = (hertz >= 8000 && hertz <= 96000) ? (float)hertz : 44100.0f;
-    gFadeStep = 1.0f / (0.03f * gRate);
-    configureEqualizer();
-    configureSpectrum();
+    const int hz = (hertz >= 8000 && hertz <= 192000) ? hertz : 44100;
+    gSrcRate = (float)hz;
+    rsActive = (hz != (int)OUT_RATE) || fabsf(playbackSpeed - 1.0f) > 0.001f;
+    rsStep = ((float)hz / (float)OUT_RATE) * playbackSpeed;
+    configureAA();
   }
 };
 
-AudioFileSourceSD *source = nullptr;
+// ============================================================ SD resiliente
+bool mountSD();
+
+// Fonte de arquivo com recuperacao: se o SD falhar no meio da musica,
+// remonta o cartao, reabre o arquivo e retoma exatamente do mesmo byte.
+class SdStreamSource final : public AudioFileSource {
+public:
+  bool open(const char *path) override {
+    close();
+    safeCopy(path_, sizeof(path_), path);
+    f_ = activeFS().open(path_, FILE_READ);
+    if (!f_) return false;
+    size_ = (uint32_t)f_.size();
+    pos_ = 0;
+    return true;
+  }
+
+  uint32_t read(void *data, uint32_t len) override {
+    if (!f_ || !len) return 0;
+    uint8_t *d = (uint8_t *)data;
+    uint32_t got = 0;
+    int fails = 0;
+    while (got < len) {
+      const size_t r = f_.read(d + got, len - got);
+      if (r > 0) { got += (uint32_t)r; pos_ += (uint32_t)r; fails = 0; continue; }
+      if (pos_ >= size_) break;               // fim real do arquivo
+      if (++fails > 3 || !recover()) break;   // erro de SD: tenta recuperar
+    }
+    return got;
+  }
+
+  bool seek(int32_t pos, int dir) override {
+    int64_t t = pos;
+    if (dir == SEEK_CUR) t = (int64_t)pos_ + pos;
+    else if (dir == SEEK_END) t = (int64_t)size_ + pos;
+    if (t < 0 || t > (int64_t)size_) return false;
+    pos_ = (uint32_t)t;
+    if (f_ && f_.seek(pos_)) return true;
+    return recover();
+  }
+
+  bool close() override { if (f_) f_.close(); return true; }
+  bool isOpen() override { return (bool)f_; }
+  uint32_t getSize() override { return size_; }
+  uint32_t getPos() override { return pos_; }
+
+private:
+  bool recover() {
+    if (f_) f_.close();
+    if (storageKind != STORAGE_SD) return false;
+    sdRemount();
+    f_ = SD.open(path_, FILE_READ);
+    if (!f_) return false;
+    return f_.seek(pos_);
+  }
+
+  File f_;
+  char path_[PATH_SIZE] = {0};
+  uint32_t size_ = 0;
+  uint32_t pos_ = 0;
+};
+
+SdStreamSource *source = nullptr;
 AudioFileSourceBuffer *bufferedSource = nullptr;
-AudioGeneratorMP3 *decoder = nullptr;
-Mp3AudioOutput *audioOutput = nullptr;
+AudioGenerator *decoder = nullptr;
+AudioOut *audioOutput = nullptr;
 
 // ============================================================ configuracoes
 void applyBrightness() {
@@ -530,9 +934,11 @@ void markSettingsDirty() {
 
 void loadSettings() {
   prefs.begin("mp3player", true);
+  uiLanguage = constrain(prefs.getInt("lang", 0), 0, 8);
   volByMode[0] = constrain(prefs.getInt("vs", 80), 0, 100);
   volByMode[1] = constrain(prefs.getInt("vp", 30), 0, 100);
   outMode = constrain(prefs.getInt("om", 0), 0, 1);
+  autoOut = prefs.getInt("ao", 1) != 0;
   volumePercent = volByMode[outMode];
   opt.brightness = constrain(prefs.getInt("br", 70), 10, 100);
   opt.screenOffIdx = constrain(prefs.getInt("so", 0), 0, 3);
@@ -540,9 +946,10 @@ void loadSettings() {
   opt.repeat = constrain(prefs.getInt("rp", 0), 0, 2);
   opt.shuffle = constrain(prefs.getInt("sf", 0), 0, 1);
   opt.visual = constrain(prefs.getInt("vz", 0), 0, 3);
+  opt.enhance = constrain(prefs.getInt("en", 1), 0, 2);
   const int themeVersion = prefs.getInt("themeV", 0);
   themeIndex = constrain(prefs.getInt("th", 3), 0, THEME_COUNT - 1);
-  if (themeVersion < 1) themeIndex = 3; // migrate legacy installs to blue
+  if (themeVersion < 1) themeIndex = 3;
   for (int i = 0; i < EQ_BANDS; ++i) {
     char key[3] = {'g', (char)('0' + i), 0};
     eqGain[i] = constrain(prefs.getInt(key, eqGain[i]), -EQ_LIMIT, EQ_LIMIT);
@@ -560,15 +967,18 @@ void loadSettings() {
 void saveSettings() {
   prefs.begin("mp3player", false);
   volByMode[outMode] = volumePercent;
+  prefs.putInt("lang", uiLanguage);
   prefs.putInt("vs", volByMode[0]);
   prefs.putInt("vp", volByMode[1]);
   prefs.putInt("om", outMode);
+  prefs.putInt("ao", autoOut ? 1 : 0);
   prefs.putInt("br", opt.brightness);
   prefs.putInt("so", opt.screenOffIdx);
   prefs.putInt("sh", opt.shake);
   prefs.putInt("rp", opt.repeat);
   prefs.putInt("sf", opt.shuffle);
   prefs.putInt("vz", opt.visual);
+  prefs.putInt("en", opt.enhance);
   prefs.putInt("th", themeIndex);
   for (int i = 0; i < EQ_BANDS; ++i) {
     char key[3] = {'g', (char)('0' + i), 0};
@@ -591,8 +1001,7 @@ const char *currentPresetName() {
 
 void applyPreset(int p) {
   if (p < 0 || p >= NUM_PRESETS) return;
-  for (int i = 0; i < EQ_BANDS; ++i) eqGain[i] = PRESETS[p][i];
-  configureEqualizer();
+  for (int i = 0; i < EQ_BANDS; ++i) eqGain[i] = PRESETS[p][i];  configureDsp();
   markSettingsDirty();
 }
 
@@ -601,19 +1010,29 @@ struct Meta {
   char title[64];
   char artist[40];
   uint32_t durationSec;
-  uint32_t audioStart;
+  uint32_t audioStart;   // onde o decoder comeca (apos tags e cabecalho Xing)
+  uint32_t seekBase;     // base para calculo de busca (primeiro frame)
   uint32_t fileSize;
+  uint8_t toc[100];
+  bool hasToc;
+  Fmt fmt;
 };
 Meta meta;
 char currentTitle[110] = {0};
+char currentPath[PATH_SIZE] = {0};
 
-// Capa JPEG embutida em ID3/APIC. Limite intencional para proteger a RAM.
-constexpr size_t COVER_MAX_BYTES = 24 * 1024;
-static uint8_t gCoverBuf[COVER_MAX_BYTES];
-uint32_t gCoverLen = 0;
-bool coverReady = false;
-bool coverIsPng = false;
+struct CoverRef {
+  bool valid = false;
+  bool png = false;
+  uint16_t w = 0, h = 0;
+  uint32_t off = 0, len = 0;
+  char path[PATH_SIZE] = {0};
+};
+CoverRef coverRef;
 bool coverCanvasReady = false;
+bool coverLoaded = false;
+bool coverPending = false;
+char gProbePath[PATH_SIZE] = {0};
 
 static uint8_t gProbeBuf[2048];
 static uint8_t gTextBuf[200];
@@ -621,110 +1040,192 @@ static uint8_t gTextBuf[200];
 uint32_t be32(const uint8_t *p) {
   return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
 }
+uint32_t le32(const uint8_t *p) {
+  return ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | p[0];
+}
 uint32_t syncsafe(const uint8_t *p) {
   return ((uint32_t)(p[0] & 0x7F) << 21) | ((uint32_t)(p[1] & 0x7F) << 14) |
          ((uint32_t)(p[2] & 0x7F) << 7) | (p[3] & 0x7F);
 }
 
-// Extrai apenas JPEG de capa frontal (picture type 3); formatos/imagens grandes
-// ou inválidos são ignorados sem afetar a reprodução.
-bool extractJpegCover(File &f, uint32_t framePos, uint32_t frameSize) {
-  if (frameSize < 12 || !f.seek(framePos)) return false;
-  uint8_t encoding = 0;
-  if (f.read(&encoding, 1) != 1) return false;
-  uint32_t used = 1;
+// ---- MP3: cabecalhos de frame
+struct Mp3Hdr { uint32_t bitrate, sr, spf, frameLen; bool mpeg1, mono; };
+const uint16_t BR1[16] = {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0};
+const uint16_t BR2[16] = {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0};
+const uint32_t SR1[4] = {44100, 48000, 32000, 0};
+const uint32_t SR2[4] = {22050, 24000, 16000, 0};
+const uint32_t SR25[4] = {11025, 12000, 8000, 0};
 
-  // MIME string terminada em NUL.
-  bool mimeEnd = false;
-  while (used < frameSize) {
-    const int c = f.read();
-    if (c < 0) return false;
-    ++used;
-    if (c == 0) { mimeEnd = true; break; }
-  }
-  if (!mimeEnd || used >= frameSize) return false;
+bool parseMp3Hdr(const uint8_t *p, Mp3Hdr &h) {
+  if (p[0] != 0xFF || (p[1] & 0xE0) != 0xE0) return false;
+  const int verBits = (p[1] >> 3) & 3, layerBits = (p[1] >> 1) & 3;
+  const int brIdx = (p[2] >> 4) & 0xF, srIdx = (p[2] >> 2) & 3;
+  if (verBits == 1 || layerBits != 1 || brIdx == 0 || brIdx == 15 || srIdx == 3) return false;
+  h.mpeg1 = (verBits == 3);
+  h.bitrate = h.mpeg1 ? BR1[brIdx] : BR2[brIdx];
+  h.sr = h.mpeg1 ? SR1[srIdx] : (verBits == 2 ? SR2[srIdx] : SR25[srIdx]);
+  h.spf = h.mpeg1 ? 1152 : 576;
+  h.mono = ((p[3] >> 6) & 3) == 3;
+  const uint32_t pad = (p[2] >> 1) & 1;
+  h.frameLen = (h.mpeg1 ? 144UL : 72UL) * h.bitrate * 1000UL / h.sr + pad;
+  return h.frameLen >= 24;
+}
 
-  uint8_t pictureType = 0;
-  if (f.read(&pictureType, 1) != 1) return false;
-  ++used;
-  if (pictureType != 3) return false;
-
-  // Descricao termina em 1 byte (Latin-1/UTF-8) ou NUL UTF-16.
-  bool descEnd = false;
-  if (encoding == 1 || encoding == 2) {
-    while (used + 1 < frameSize) {
-      uint8_t a = 0, b = 0;
-      if (f.read(&a, 1) != 1 || f.read(&b, 1) != 1) return false;
-      used += 2;
-      if (a == 0 && b == 0) { descEnd = true; break; }
+// Acha um frame valido confirmado pelo frame seguinte.
+int findMp3Sync(const uint8_t *b, size_t got) {
+  for (size_t i = 0; i + 4 <= got; ++i) {
+    Mp3Hdr h;
+    if (!parseMp3Hdr(b + i, h)) continue;
+    const size_t nx = i + h.frameLen;
+    if (nx + 4 <= got) {
+      Mp3Hdr h2;
+      if (!parseMp3Hdr(b + nx, h2) || h2.sr != h.sr) continue;
     }
+    return (int)i;
+  }
+  return -1;
+}
+
+uint32_t alignMp3(const char *path, uint32_t pos) {
+  File f = activeFS().open(path, FILE_READ);
+  if (!f) return pos;
+  uint32_t r = pos;
+  if (f.seek(pos)) {
+    const size_t got = f.read(gProbeBuf, sizeof(gProbeBuf));
+    const int i = findMp3Sync(gProbeBuf, got);
+    if (i >= 0) r = pos + (uint32_t)i;
+  }
+  f.close();
+  return r;
+}
+
+// ---- imagens
+bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, bool &prog) {
+  uint32_t p = off + 2;
+  const uint32_t end = off + len;
+  uint8_t b[9];
+  for (int g = 0; g < 48 && p + 4 < end; ++g) {
+    if (!f.seek(p) || f.read(b, 4) != 4) return false;
+    if (b[0] != 0xFF) return false;
+    const uint8_t m = b[1];
+    if (m == 0xFF) { ++p; continue; }
+    if (m == 0xD8 || (m >= 0xD0 && m <= 0xD7) || m == 0x01) { p += 2; continue; }
+    const uint32_t seg = ((uint32_t)b[2] << 8) | b[3];
+    if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
+      if (f.read(b, 5) != 5) return false;
+      h = (uint16_t)((b[1] << 8) | b[2]);
+      w = (uint16_t)((b[3] << 8) | b[4]);
+      prog = (m == 0xC2);
+      return w > 0 && h > 0;
+    }
+    p += 2 + seg;
+  }
+  return false;
+}
+
+bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c) {
+  if (len < 32 || len > COVER_MAX_BYTES) return false;
+  uint8_t b[24];
+  if (!f.seek(off) || f.read(b, 24) != 24) return false;
+  if (b[0] == 0xFF && b[1] == 0xD8) {
+    bool prog = false;
+    uint16_t w = 0, h = 0;
+    if (!jpegInfo(f, off, len, w, h, prog) || prog) return false;
+    c.png = false; c.w = w; c.h = h;
+  } else if (!memcmp(b, "\x89PNG\r\n\x1a\n", 8)) {
+    const uint32_t w = be32(b + 16), h = be32(b + 20);
+    if (!w || !h || w > 2048 || h > 2048 || len > 400UL * 1024UL) return false;
+    c.png = true; c.w = (uint16_t)w; c.h = (uint16_t)h;
   } else {
-    while (used < frameSize) {
-      const int c = f.read();
-      if (c < 0) return false;
-      ++used;
-      if (c == 0) { descEnd = true; break; }
-    }
+    return false;
   }
-  if (!descEnd || used >= frameSize) return false;
-
-  const uint32_t imageSize = frameSize - used;
-  if (imageSize < 4 || imageSize > COVER_MAX_BYTES) return false;
-  if (f.read(gCoverBuf, imageSize) != imageSize) return false;
-  const bool jpeg = imageSize >= 4 && gCoverBuf[0] == 0xFF && gCoverBuf[1] == 0xD8;
-  const bool png = imageSize >= 8 && gCoverBuf[0] == 0x89 && gCoverBuf[1] == 'P' &&
-                   gCoverBuf[2] == 'N' && gCoverBuf[3] == 'G' &&
-                   gCoverBuf[4] == 0x0D && gCoverBuf[5] == 0x0A &&
-                   gCoverBuf[6] == 0x1A && gCoverBuf[7] == 0x0A;
-  if (!jpeg && !png) return false;
-  coverIsPng = png;
-  gCoverLen = imageSize;
-  coverReady = true;
+  c.off = off; c.len = len; c.valid = true;
+  safeCopy(c.path, sizeof(c.path), gProbePath);
   return true;
 }
 
-void probeMeta(const char *path, Meta &m) {
-  memset(&m, 0, sizeof(m));
-  coverReady = false;
-  gCoverLen = 0;
-  coverIsPng = false;
-  File f = SD.open(path, FILE_READ);
-  if (!f) return;
-  m.fileSize = (uint32_t)f.size();
+// Descobre onde esta a imagem dentro de um frame APIC/PIC (sem ler a imagem).
+bool locateApic(File &f, uint32_t framePos, uint32_t frameSize, int ver,
+                uint32_t &imgOff, uint32_t &imgLen, uint8_t &ptype) {
+  if (frameSize < 8 || !f.seek(framePos)) return false;
+  const size_t n = frameSize < sizeof(gTextBuf) ? frameSize : sizeof(gTextBuf);
+  if ((size_t)f.read(gTextBuf, n) != n) return false;
+  const uint8_t *b = gTextBuf;
+  size_t i = 0;
+  const uint8_t enc = b[i++];
+  if (ver == 2) i += 3;
+  else { while (i < n && b[i]) ++i; ++i; }
+  if (i >= n) return false;
+  ptype = b[i++];
+  if (enc == 1 || enc == 2) {
+    while (i + 1 < n && !(b[i] == 0 && b[i + 1] == 0)) i += 2;
+    i += 2;
+  } else {
+    while (i < n && b[i]) ++i;
+    ++i;
+  }
+  if (i > n || i >= frameSize) return false;
+  imgOff = framePos + (uint32_t)i;
+  imgLen = frameSize - (uint32_t)i;
+  return true;
+}
 
-  uint32_t audioStart = 0;
-  bool haveTitle = false, haveArtist = false;
-
+// ---- ID3v2 (MP3/AAC). Retorna o byte onde comeca o audio.
+uint32_t parseId3(File &f, Meta &m) {
   uint8_t h[10];
-  if (f.read(h, 10) == 10 && h[0] == 'I' && h[1] == 'D' && h[2] == '3') {
-    const uint8_t ver = h[3];
-    const uint32_t tagSize = syncsafe(h + 6);
-    const uint32_t tagEnd = 10 + tagSize;
-    audioStart = tagEnd + ((h[5] & 0x10) ? 10 : 0);
-    const size_t hdr = (ver == 2) ? 6 : 10;
-    uint32_t pos = 10;
-    for (int guard = 0; guard < 120 && pos + hdr <= tagEnd &&
-         !(haveTitle && haveArtist && coverReady); ++guard) {
-      if (!f.seek(pos)) break;
-      uint8_t fh[10];
-      if ((size_t)f.read(fh, hdr) != hdr) break;
-      char id[5] = {0};
-      uint32_t fsz;
-      if (ver == 2) {
-        memcpy(id, fh, 3);
-        fsz = ((uint32_t)fh[3] << 16) | ((uint32_t)fh[4] << 8) | fh[5];
-      } else {
-        memcpy(id, fh, 4);
-        fsz = (ver == 4) ? syncsafe(fh + 4) : be32(fh + 4);
-      }
-      if (id[0] == 0 || fsz == 0 || pos + hdr + fsz > tagEnd) break;
+  if (!f.seek(0) || f.read(h, 10) != 10 || memcmp(h, "ID3", 3) != 0) return 0;
+  const uint8_t ver = h[3];
+  const uint32_t tagEnd = 10 + syncsafe(h + 6);
+  const uint32_t audioStart = tagEnd + ((h[5] & 0x10) ? 10 : 0);
+  if (ver < 2 || ver > 4) return audioStart;
+  const bool unsync = (h[5] & 0x80) != 0;
+  const size_t hdr = (ver == 2) ? 6 : 10;
+  uint32_t pos = 10;
+  if ((h[5] & 0x40) && ver >= 3) {
+    uint8_t eh[4];
+    if (!f.seek(10) || f.read(eh, 4) != 4) return audioStart;
+    pos = (ver == 4) ? 10 + syncsafe(eh) : 14 + be32(eh);
+  }
+  bool haveTitle = false, haveArtist = false, haveFront = false;
+
+  for (int guard = 0; guard < 200 && pos + hdr <= tagEnd; ++guard) {
+    if (haveTitle && haveArtist && haveFront) break;
+    if (!f.seek(pos)) break;
+    uint8_t fh[10];
+    if ((size_t)f.read(fh, hdr) != hdr) break;
+    char id[5] = {0};
+    uint32_t fsz;
+    if (ver == 2) {
+      memcpy(id, fh, 3);
+      fsz = ((uint32_t)fh[3] << 16) | ((uint32_t)fh[4] << 8) | fh[5];
+    } else {
+      memcpy(id, fh, 4);
+      fsz = (ver == 4) ? syncsafe(fh + 4) : be32(fh + 4);
+    }
+    if (id[0] == 0 || fsz == 0 || pos + hdr + fsz > tagEnd) break;
+    const uint32_t next = pos + (uint32_t)hdr + fsz;
+
+    uint32_t dpos = pos + (uint32_t)hdr, dsz = fsz;
+    bool skip = false;
+    if (ver >= 3) {
+      const uint8_t ff = fh[9];
+      if ((ver == 3 && (ff & 0xC0)) || (ver == 4 && (ff & 0x0C))) skip = true;
+      if (ver == 4 && (ff & 0x01)) { if (dsz <= 4) skip = true; else { dpos += 4; dsz -= 4; } }
+    }
+    if (!skip) {
       const bool isT = (ver == 2) ? !strcmp(id, "TT2") : !strcmp(id, "TIT2");
       const bool isA = (ver == 2) ? !strcmp(id, "TP1") : !strcmp(id, "TPE1");
-      const bool isCover = (ver >= 3) && !strcmp(id, "APIC");
-      if (isCover && !coverReady) extractJpegCover(f, pos + hdr, fsz);
-      if ((isT && !haveTitle) || (isA && !haveArtist)) {
-        const size_t take = fsz < sizeof(gTextBuf) ? fsz : sizeof(gTextBuf);
-        if ((size_t)f.read(gTextBuf, take) == take && take > 1) {
+      const bool isCover = (ver == 2) ? !strcmp(id, "PIC") : !strcmp(id, "APIC");
+      if (isCover && !haveFront && !unsync) {
+        uint32_t io = 0, il = 0;
+        uint8_t pt = 0;
+        if (locateApic(f, dpos, dsz, ver, io, il, pt) && (pt == 3 || !coverRef.valid)) {
+          CoverRef c;
+          if (inspectImage(f, io, il, c)) { coverRef = c; haveFront = (pt == 3); }
+        }
+      } else if ((isT && !haveTitle) || (isA && !haveArtist)) {
+        const size_t take = dsz < sizeof(gTextBuf) ? dsz : sizeof(gTextBuf);
+        if (f.seek(dpos) && (size_t)f.read(gTextBuf, take) == take && take > 1) {
           if (isT) {
             decodeText(gTextBuf + 1, take - 1, gTextBuf[0], m.title, sizeof(m.title));
             haveTitle = m.title[0] != 0;
@@ -734,71 +1235,255 @@ void probeMeta(const char *path, Meta &m) {
           }
         }
       }
-      pos += hdr + fsz;
     }
+    pos = next;
   }
+  return audioStart;
+}
 
-  // Primeiro frame de audio e cabecalho Xing/VBRI
-  m.audioStart = audioStart;
+void probeMp3Audio(File &f, Meta &m) {
   uint32_t frames = 0, bitrate = 0, sr = 0, spf = 1152;
-  if (f.seek(audioStart)) {
-    const size_t got = f.read(gProbeBuf, sizeof(gProbeBuf));
-    static const uint16_t BR1[16] = {0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0};
-    static const uint16_t BR2[16] = {0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0};
-    static const uint32_t SR1[4] = {44100, 48000, 32000, 0};
-    static const uint32_t SR2[4] = {22050, 24000, 16000, 0};
-    static const uint32_t SR25[4] = {11025, 12000, 8000, 0};
-    for (size_t i = 0; i + 4 <= got; ++i) {
-      if (gProbeBuf[i] != 0xFF || (gProbeBuf[i + 1] & 0xE0) != 0xE0) continue;
-      const uint8_t b1 = gProbeBuf[i + 1], b2 = gProbeBuf[i + 2], b3 = gProbeBuf[i + 3];
-      const int verBits = (b1 >> 3) & 3, layerBits = (b1 >> 1) & 3;
-      const int brIdx = (b2 >> 4) & 0xF, srIdx = (b2 >> 2) & 3;
-      if (verBits == 1 || layerBits != 1 || brIdx == 0 || brIdx == 15 || srIdx == 3) continue;
-      const bool mpeg1 = (verBits == 3);
-      bitrate = mpeg1 ? BR1[brIdx] : BR2[brIdx];
-      sr = mpeg1 ? SR1[srIdx] : (verBits == 2 ? SR2[srIdx] : SR25[srIdx]);
-      spf = mpeg1 ? 1152 : 576;
-      const bool mono = ((b3 >> 6) & 3) == 3;
-      const bool crc = !(b1 & 1);
-      const size_t side = mpeg1 ? (mono ? 17 : 32) : (mono ? 9 : 17);
-      const size_t xoff = i + 4 + (crc ? 2 : 0) + side;
-      if (xoff + 12 <= got && (!memcmp(gProbeBuf + xoff, "Xing", 4) || !memcmp(gProbeBuf + xoff, "Info", 4))) {
-        if (be32(gProbeBuf + xoff + 4) & 1) frames = be32(gProbeBuf + xoff + 8);
-      } else if (i + 36 + 18 <= got && !memcmp(gProbeBuf + i + 36, "VBRI", 4)) {
-        frames = be32(gProbeBuf + i + 36 + 14);
-      }
-      m.audioStart = audioStart + (uint32_t)i;
-      break;
+  if (!f.seek(m.audioStart)) return;
+  const size_t got = f.read(gProbeBuf, sizeof(gProbeBuf));
+  int i = findMp3Sync(gProbeBuf, got);
+  if (i >= 0) {
+    Mp3Hdr h;
+    parseMp3Hdr(gProbeBuf + i, h);
+    bitrate = h.bitrate; sr = h.sr; spf = h.spf;
+    const bool crc = !(gProbeBuf[i + 1] & 1);
+    const size_t side = h.mpeg1 ? (h.mono ? 17 : 32) : (h.mono ? 9 : 17);
+    const size_t xoff = (size_t)i + 4 + (crc ? 2 : 0) + side;
+    bool tagFrame = false;
+    if (xoff + 8 <= got && (!memcmp(gProbeBuf + xoff, "Xing", 4) || !memcmp(gProbeBuf + xoff, "Info", 4))) {
+      tagFrame = true;
+      const uint32_t fl = be32(gProbeBuf + xoff + 4);
+      size_t o = xoff + 8;
+      if ((fl & 1) && o + 4 <= got) { frames = be32(gProbeBuf + o); o += 4; }
+      if (fl & 2) o += 4;
+      if ((fl & 4) && o + 100 <= got) { memcpy(m.toc, gProbeBuf + o, 100); m.hasToc = true; }
+    } else if ((size_t)i + 36 + 18 <= got && !memcmp(gProbeBuf + i + 36, "VBRI", 4)) {
+      tagFrame = true;
+      frames = be32(gProbeBuf + i + 36 + 14);
     }
+    m.seekBase = m.audioStart + (uint32_t)i;
+    m.audioStart = m.seekBase + (tagFrame ? h.frameLen : 0);  // pula o frame de cabecalho
   }
 
-  // ID3v1 (fallback de tags e fim real dos dados)
   uint32_t dataEnd = m.fileSize;
-  if (m.fileSize > 128 && f.seek(m.fileSize - 128)) {
+  if (m.fileSize > 128 && f.seek(m.fileSize - 128)) {  // ID3v1
     uint8_t t[128];
     if (f.read(t, 128) == 128 && t[0] == 'T' && t[1] == 'A' && t[2] == 'G') {
       dataEnd = m.fileSize - 128;
-      if (!haveTitle) decodeText(t + 3, 30, 0, m.title, sizeof(m.title));
-      if (!haveArtist) decodeText(t + 33, 30, 0, m.artist, sizeof(m.artist));
+      if (!m.title[0]) decodeText(t + 3, 30, 0, m.title, sizeof(m.title));
+      if (!m.artist[0]) decodeText(t + 33, 30, 0, m.artist, sizeof(m.artist));
     }
   }
-  f.close();
-
   uint32_t dur = 0;
   if (frames > 0 && sr > 0) dur = (uint32_t)((uint64_t)frames * spf / sr);
   else if (bitrate > 0 && dataEnd > m.audioStart)
     dur = (uint32_t)((uint64_t)(dataEnd - m.audioStart) * 8 / ((uint64_t)bitrate * 1000));
   if (dur > 36000) dur = 0;
   m.durationSec = dur;
-  if (dataEnd > m.audioStart) m.fileSize = dataEnd;  // para calculo de busca
+  if (dataEnd > m.audioStart) m.fileSize = dataEnd;
 }
 
-void renderCoverToCache() {
-  if (!coverCanvasReady) return;
-  coverCanvas.fillSprite(C_BG);
-  if (!coverReady) return;
-  if (coverIsPng) coverCanvas.drawPng(gCoverBuf, gCoverLen, 0, 0, 68, 46);
-  else coverCanvas.drawJpg(gCoverBuf, gCoverLen, 0, 0, 68, 46);
+void probeFlac(File &f, Meta &m) {
+  uint8_t h[4];
+  if (!f.seek(0) || f.read(h, 4) != 4 || memcmp(h, "fLaC", 4) != 0) return;
+  uint32_t pos = 4;
+  for (int g = 0; g < 24; ++g) {
+    uint8_t bh[4];
+    if (!f.seek(pos) || f.read(bh, 4) != 4) break;
+    const bool last = (bh[0] & 0x80) != 0;
+    const int type = bh[0] & 0x7F;
+    const uint32_t len = ((uint32_t)bh[1] << 16) | ((uint32_t)bh[2] << 8) | bh[3];
+    const uint32_t body = pos + 4;
+    if (type == 0 && len >= 18) {
+      uint8_t s[18];
+      if (f.read(s, 18) == 18) {
+        const uint32_t sr = ((uint32_t)s[10] << 12) | ((uint32_t)s[11] << 4) | (s[12] >> 4);
+        const uint64_t total = ((uint64_t)(s[13] & 0x0F) << 32) | ((uint64_t)s[14] << 24) |
+                               ((uint64_t)s[15] << 16) | ((uint64_t)s[16] << 8) | s[17];
+        if (sr > 0 && total > 0) {
+          const uint64_t d = total / sr;
+          m.durationSec = d > 36000 ? 0 : (uint32_t)d;
+        }
+      }
+    } else if (type == 4) {  // VORBIS_COMMENT
+      const size_t n = len < sizeof(gProbeBuf) ? len : sizeof(gProbeBuf);
+      if (n >= 8 && f.read(gProbeBuf, n) == n) {
+        size_t o = 4 + le32(gProbeBuf);
+        if (o + 4 <= n) {
+          const uint32_t cnt = le32(gProbeBuf + o);
+          o += 4;
+          for (uint32_t c = 0; c < cnt && o + 4 <= n; ++c) {
+            const uint32_t l = le32(gProbeBuf + o);
+            o += 4;
+            if (l > n - o) break;
+            const char *kv = (const char *)gProbeBuf + o;
+            if (l > 6 && !strncasecmp(kv, "TITLE=", 6))
+              decodeText((const uint8_t *)kv + 6, l - 6, 3, m.title, sizeof(m.title));
+            else if (l > 7 && !strncasecmp(kv, "ARTIST=", 7))
+              decodeText((const uint8_t *)kv + 7, l - 7, 3, m.artist, sizeof(m.artist));
+            o += l;
+          }
+        }
+      }
+    } else if (type == 6 && !coverRef.valid) {  // PICTURE
+      const size_t n = len < sizeof(gTextBuf) ? len : sizeof(gTextBuf);
+      if (n > 40 && f.read(gTextBuf, n) == n) {
+        size_t o = 8 + be32(gTextBuf + 4);
+        if (o + 4 <= n) {
+          o += 4 + be32(gTextBuf + o);
+          o += 16;
+          if (o + 4 <= n) {
+            const uint32_t dl = be32(gTextBuf + o);
+            o += 4;
+            if (o + dl <= len) {
+              CoverRef c;
+              if (inspectImage(f, body + (uint32_t)o, dl, c)) coverRef = c;
+            }
+          }
+        }
+      }
+    }
+    pos = body + len;
+    if (last) break;
+  }
+  m.audioStart = m.seekBase = pos;
+}
+
+void probeWav(File &f, Meta &m) {
+  uint8_t h[12];
+  if (!f.seek(0) || f.read(h, 12) != 12 || memcmp(h, "RIFF", 4) != 0 || memcmp(h + 8, "WAVE", 4) != 0) return;
+  uint32_t pos = 12, byteRate = 0, dataSize = 0;
+  for (int g = 0; g < 24; ++g) {
+    uint8_t ch[8];
+    if (!f.seek(pos) || f.read(ch, 8) != 8) break;
+    const uint32_t sz = le32(ch + 4);
+    if (!memcmp(ch, "fmt ", 4)) {
+      uint8_t b[16];
+      if (f.read(b, 16) == 16) byteRate = le32(b + 8);
+    } else if (!memcmp(ch, "data", 4)) {
+      dataSize = sz;
+      pos += 8;
+      break;
+    }
+    pos += 8 + sz + (sz & 1);
+  }
+  if (byteRate) {
+    if (!dataSize || dataSize > m.fileSize) dataSize = m.fileSize > pos ? m.fileSize - pos : 0;
+    const uint32_t d = dataSize / byteRate;
+    m.durationSec = d > 36000 ? 0 : d;
+  }
+}
+
+// cover.jpg / folder.jpg etc. na pasta (resultado em cache por pasta)
+void findFolderCover(const char *path) {
+  char dir[PATH_SIZE];
+  safeCopy(dir, sizeof(dir), path);
+  char *sl = strrchr(dir, '/');
+  if (!sl) return;
+  if (sl == dir) dir[1] = '\0'; else *sl = '\0';
+  static char cachedDir[PATH_SIZE] = "\x01";
+  static CoverRef cached;
+  if (strcmp(cachedDir, dir) == 0) { coverRef = cached; return; }
+  safeCopy(cachedDir, sizeof(cachedDir), dir);
+  cached = CoverRef();
+  static const char *const NAMES[] = {"cover", "folder", "front", "album", "albumart"};
+  static const char *const EXTS[] = {"jpg", "jpeg", "png"};
+  bool found = false;
+  for (int n = 0; n < 5 && !found; ++n) {
+    for (int e = 0; e < 3 && !found; ++e) {
+      char nm[24], p[PATH_SIZE];
+      snprintf(nm, sizeof(nm), "%s.%s", NAMES[n], EXTS[e]);
+      if (!buildPath(p, sizeof(p), dir, nm) || !activeFS().exists(p)) continue;
+      File f = activeFS().open(p, FILE_READ);
+      if (!f) continue;
+      const uint32_t sz = (uint32_t)f.size();
+      safeCopy(gProbePath, sizeof(gProbePath), p);
+      CoverRef c;
+      if (inspectImage(f, 0, sz, c)) { cached = c; found = true; }
+      f.close();
+    }
+  }
+  coverRef = cached;
+}
+
+void probeMeta(const char *path, Fmt fmt, Meta &m) {
+  memset(&m, 0, sizeof(m));
+  m.fmt = fmt;
+  coverRef = CoverRef();
+  safeCopy(gProbePath, sizeof(gProbePath), path);
+  File f = activeFS().open(path, FILE_READ);
+  if (!f) return;
+  m.fileSize = (uint32_t)f.size();
+  uint32_t audioStart = 0;
+  if (fmt == FMT_MP3 || fmt == FMT_AAC) audioStart = parseId3(f, m);
+  m.audioStart = m.seekBase = audioStart;
+  if (fmt == FMT_MP3) probeMp3Audio(f, m);
+  else if (fmt == FMT_FLAC) probeFlac(f, m);
+  else if (fmt == FMT_WAV) probeWav(f, m);
+  f.close();
+  if (!coverRef.valid) findFolderCover(path);
+}
+
+// Leitura da capa em streaming; mantem o audio rodando entre as leituras.
+class CoverStream : public lgfx::DataWrapper {
+public:
+  ~CoverStream() { close(); }
+  bool open(const CoverRef &c) {
+    f_ = activeFS().open(c.path, FILE_READ);
+    off_ = c.off; len_ = c.len; pos_ = 0;
+    return f_ && f_.seek(off_);
+  }
+  int read(uint8_t *buf, uint32_t n) override {
+    if (!f_ || pos_ >= len_) return 0;
+    if (n > len_ - pos_) n = len_ - pos_;
+    const int r = (int)f_.read(buf, n);
+    if (r <= 0) return 0;
+    pos_ += (uint32_t)r;
+    pumpAudio();
+    return r;
+  }
+  void skip(int32_t o) override {
+    int64_t np = (int64_t)pos_ + o;
+    if (np < 0) np = 0;
+    seek((uint32_t)np);
+  }
+  bool seek(uint32_t o) override {
+    if (!f_ || o > len_) return false;
+    pos_ = o;
+    return f_.seek(off_ + o);
+  }
+  void close() override { if (f_) f_.close(); }
+  int32_t tell() override { return (int32_t)pos_; }
+
+private:
+  File f_;
+  uint32_t off_ = 0, len_ = 0, pos_ = 0;
+};
+
+bool decodeCover() {
+  if (!coverCanvasReady || !coverRef.valid) return false;
+  coverCanvas.fillSprite(C_PANEL2);
+  CoverStream cs;
+  if (!cs.open(coverRef)) return false;
+  const int big = coverRef.w > coverRef.h ? coverRef.w : coverRef.h;
+  float sc = (float)COVER_PX / (float)big;
+  if (sc > 1.0f) sc = 1.0f;
+  const int dw = (int)(coverRef.w * sc), dh = (int)(coverRef.h * sc);
+  const int x = (COVER_PX - dw) / 2, y = (COVER_PX - dh) / 2;
+  bool ok;
+  if (coverRef.png) ok = coverCanvas.drawPng(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
+  else ok = coverCanvas.drawJpg(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
+  return ok;
+}
+
+void prepareCoverState() {
+  coverLoaded = false;
+  coverPending = coverRef.valid;
+  if (coverCanvasReady) coverCanvas.fillSprite(C_PANEL2);
 }
 
 // ============================================================ navegador
@@ -815,11 +1500,15 @@ bool scanning = false;
 bool validatingDirs = false;
 bool scanOverflow = false;
 bool scanFolderLimit = false;
+bool needRescan = false;
+uint32_t lastRemountAt = 0;
+uint32_t lastSdProbeAt = 0;
+constexpr uint32_t SD_AUTO_PROBE_INTERVAL_MS = 2500;
+constexpr uint32_t SD_AUTO_PROBE_MAX_MS = 20000;
+uint32_t sdProbeInterval = SD_AUTO_PROBE_INTERVAL_MS;
 File scanHandle;
 
-// DFS incremental para exibir apenas diretórios que contenham MP3, inclusive
-// em subpastas. O limite de profundidade/itens evita loops em cartões ruins.
-constexpr int DIR_WALK_DEPTH = 16;
+constexpr int DIR_WALK_DEPTH = 8;
 constexpr uint32_t DIR_WALK_MAX_ITEMS = 20000;
 struct WalkFrame { File dir; char path[PATH_SIZE]; };
 WalkFrame walkStack[DIR_WALK_DEPTH];
@@ -831,7 +1520,6 @@ bool dirProbeActive = false;
 char walkRootPath[PATH_SIZE] = "/";
 char reselectName[NAME_SIZE] = {0};
 
-// fila de reproducao (copia da pasta no momento do ENTER)
 char queueDir[DIR_SIZE] = "/";
 char queueNames[MAX_ENTRIES][NAME_SIZE];
 uint16_t order[MAX_ENTRIES];
@@ -857,7 +1545,7 @@ void addEntry(File &e) {
   const char *base = slash ? slash + 1 : raw;
   if (!base[0] || base[0] == '.') return;
   const bool dir = e.isDirectory();
-  if (!dir && !hasMp3Extension(base)) return;
+  if (!dir && !isAudioFile(base)) return;
   if (dir && strcasecmp(base, "System Volume Information") == 0) return;
   if (strlen(base) >= NAME_SIZE) return;
 
@@ -878,12 +1566,35 @@ void closeWalkStack() {
   }
 }
 
+void abortScan() {
+  if (scanHandle) scanHandle.close();
+  closeWalkStack();
+  scanning = false;
+  validatingDirs = false;
+  dirProbeActive = false;
+}
+
+// Chamada pela fonte de audio quando o SD falha durante a reproducao.
+// Cada falha em campo faz a proxima montagem comecar numa velocidade menor.
+void sdRemount() {
+  abortScan();
+  delay(30);
+  if (sdFreqIdx < SD_FREQ_DOWNGRADE_MAX) ++sdFreqIdx;
+  sdReady = mountSD();
+  lastRemountAt = millis();
+  lastSdProbeAt = lastRemountAt;
+  if (sdReady) storageKind = STORAGE_SD;
+  else if (internalReady) storageKind = STORAGE_INTERNAL;
+  needRescan = true;
+  showToast(sdReady ? "SD RECUPERADO" : "SD DESCONECTADO");
+}
+
 bool startDirValidation(size_t index) {
   dirProbeActive = false;
   if (index >= entryCount || !entries[index].isDir) return false;
   if (!buildPath(walkRootPath, sizeof(walkRootPath), browseDir, entries[index].name))
     return false;
-  File root = SD.open(walkRootPath);
+  File root = activeFS().open(walkRootPath);
   if (!root || !root.isDirectory()) { if (root) root.close(); return false; }
   safeCopy(walkStack[0].path, sizeof(walkStack[0].path), walkRootPath);
   walkStack[0].dir = root;
@@ -905,7 +1616,6 @@ void walkDirectoryStep() {
   }
 
   if (++walkItems > DIR_WALK_MAX_ITEMS) {
-    // Não marca como música uma pasta que não foi verificada por completo.
     child.close();
     scanFolderLimit = true;
     walkFoundSong = false;
@@ -919,7 +1629,7 @@ void walkDirectoryStep() {
   if (!base || !base[0] || base[0] == '.') { child.close(); return; }
 
   if (!child.isDirectory()) {
-    const bool found = hasMp3Extension(base);
+    const bool found = isAudioFile(base);
     child.close();
     if (found) {
       walkFoundSong = true;
@@ -944,7 +1654,7 @@ void walkDirectoryStep() {
     closeWalkStack();
     return;
   }
-  File next = SD.open(childPath);
+  File next = activeFS().open(childPath);
   if (!next || !next.isDirectory()) { if (next) next.close(); return; }
   safeCopy(walkStack[walkDepth].path, sizeof(walkStack[walkDepth].path), childPath);
   walkStack[walkDepth].dir = next;
@@ -975,10 +1685,7 @@ void finishScan() {
 }
 
 void beginScan(const char *path, const char *reselect = nullptr) {
-  if (scanning) { if (scanHandle) scanHandle.close(); scanning = false; }
-  closeWalkStack();
-  validatingDirs = false;
-  dirProbeActive = false;
+  abortScan();
   validationIndex = 0;
   entryCount = 0;
   selected = 0;
@@ -988,8 +1695,8 @@ void beginScan(const char *path, const char *reselect = nullptr) {
   if (strcmp(path, browseDir) != 0) safeCopy(browseDir, sizeof(browseDir), path);
   safeCopy(reselectName, sizeof(reselectName), reselect ? reselect : "");
 
-  if (!sdReady) { if (screen == SCR_BROWSER) drawBrowser(); return; }
-  scanHandle = SD.open(browseDir);
+  if (!storageReady()) { if (screen == SCR_BROWSER) drawBrowser(); return; }
+  scanHandle = activeFS().open(browseDir);
   if (!scanHandle || !scanHandle.isDirectory()) {
     if (scanHandle) scanHandle.close();
     showToast("PASTA INVALIDA");
@@ -1000,16 +1707,13 @@ void beginScan(const char *path, const char *reselect = nullptr) {
   if (screen == SCR_BROWSER) drawBrowser();
 }
 
-// Le poucos itens por chamada; a listagem e a busca recursiva cedem tempo ao audio.
 void scanStep(uint32_t budgetMs) {
   if (!scanning) return;
   const uint32_t t0 = millis();
-  while (millis() - t0 < budgetMs) {
+  while (scanning && millis() - t0 < budgetMs) {
     if (validatingDirs) {
       if (dirProbeActive) {
         if (walkDepth > 0) { walkDirectoryStep(); continue; }
-
-        // O probe terminou: conserva o diretório se achou MP3, senão remove.
         dirProbeActive = false;
         if (walkFoundSong) {
           ++validationIndex;
@@ -1025,7 +1729,6 @@ void scanStep(uint32_t budgetMs) {
         ++validationIndex;
       if (validationIndex >= entryCount) { finishScan(); return; }
       if (!startDirValidation(validationIndex)) {
-        // Se a pasta sumiu ou ficou inacessível, remove só ela e busca a próxima.
         memmove(&entries[validationIndex], &entries[validationIndex + 1],
                 (entryCount - validationIndex - 1) * sizeof(Entry));
         --entryCount;
@@ -1134,9 +1837,35 @@ int buildQueueFromBrowser(int entryIdx) {
 uint32_t startOffsetSec = 0;
 uint32_t lastProgress = 0;
 uint32_t lastSamples = 0;
+uint32_t trackStartedAt = 0;
+int stallRetries = 0;
+bool trackEndPending = false;
+int pendingSeek = 0;
+uint32_t seekDue = 0;
+int pendingSkip = 0;
+uint32_t skipDue = 0;
 
+// Posicao em segundos do ARQUIVO (considera os modos de velocidade).
 uint32_t elapsedSec() {
-  return startOffsetSec + (uint32_t)(gSamplesSubmitted / (uint32_t)gRate);
+  return startOffsetSec + (uint32_t)gPlayedSec;
+}
+
+bool canSeek() { return meta.fmt == FMT_MP3 && meta.durationSec >= 3; }
+
+AudioGenerator *makeDecoder(Fmt f) {
+  switch (f) {
+    case FMT_MP3: return new (std::nothrow) AudioGeneratorMP3();
+#ifdef HAVE_WAV
+    case FMT_WAV: return new (std::nothrow) AudioGeneratorWAV();
+#endif
+#ifdef HAVE_FLAC
+    case FMT_FLAC: return new (std::nothrow) AudioGeneratorFLAC();
+#endif
+#ifdef HAVE_AAC
+    case FMT_AAC: return new (std::nothrow) AudioGeneratorAAC();
+#endif
+    default: return nullptr;
+  }
 }
 
 void stopPlayback(bool cutAudio) {
@@ -1155,6 +1884,9 @@ void stopPlayback(bool cutAudio) {
   playing = false;
   paused = false;
   fadeAction = FA_NONE;
+  trackEndPending = false;
+  pendingSeek = 0;
+  pendingSkip = 0;
   memset(gBand, 0, sizeof(gBand));
   memset(gScope, 0, sizeof(gScope));
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
@@ -1162,55 +1894,80 @@ void stopPlayback(bool cutAudio) {
 #endif
 }
 
+uint32_t mp3SeekByte(uint32_t sec) {
+  const uint64_t span = (meta.fileSize > meta.seekBase) ? (meta.fileSize - meta.seekBase) : 0;
+  if (!span || !meta.durationSec) return meta.audioStart;
+  const float pct = 100.0f * (float)sec / (float)meta.durationSec;
+  uint32_t off256;
+  if (meta.hasToc) {
+    int i = (int)pct;
+    if (i > 99) i = 99;
+    const float fr = pct - (float)i;
+    const float a = meta.toc[i];
+    const float b = (i < 99) ? (float)meta.toc[i + 1] : 256.0f;
+    off256 = (uint32_t)(a + (b - a) * fr);
+  } else {
+    off256 = (uint32_t)(256.0f * pct / 100.0f);
+  }
+  return meta.seekBase + (uint32_t)(span * off256 / 256);
+}
+
 bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   if (qIdx >= queueCount) return false;
   char path[PATH_SIZE];
   if (!buildPath(path, sizeof(path), queueDir, queueNames[qIdx])) return false;
+  const Fmt fmt = formatOf(queueNames[qIdx]);
+  if (fmt == FMT_NONE) return false;
 
   stopPlayback(!natural);
 
   if (reprobe) {
-    probeMeta(path, meta);
-    renderCoverToCache();
+    probeMeta(path, fmt, meta);
+    prepareCoverState();
     char base[NAME_SIZE];
     toAscii(queueNames[qIdx], base, sizeof(base));
-    const size_t bl = strlen(base);
-    if (bl > 4) base[bl - 4] = '\0';
+    stripExt(base);
     if (meta.title[0] && meta.artist[0]) snprintf(currentTitle, sizeof(currentTitle), "%s - %s", meta.artist, meta.title);
     else if (meta.title[0]) safeCopy(currentTitle, sizeof(currentTitle), meta.title);
     else if (meta.artist[0]) snprintf(currentTitle, sizeof(currentTitle), "%s - %s", meta.artist, base);
     else safeCopy(currentTitle, sizeof(currentTitle), base);
   }
+  safeCopy(currentPath, sizeof(currentPath), path);
 
-  uint32_t startByte = meta.audioStart;  // pula tag ID3 (evita falso sincronismo)
-  uint32_t startedAt = 0;
-  if (startSec > 0 && meta.durationSec > 1 && meta.fileSize > meta.audioStart) {
-    if (startSec >= meta.durationSec) startSec = meta.durationSec - 1;
-    const uint64_t span = meta.fileSize - meta.audioStart;
-    startByte = meta.audioStart + (uint32_t)(span * startSec / meta.durationSec);
-    startedAt = startSec;
+  uint32_t startByte = 0, startedAt = 0;
+  if (fmt == FMT_MP3) {
+    startByte = meta.audioStart;  // pula ID3 e cabecalho Xing
+    if (startSec > 0 && canSeek()) {
+      if (startSec >= meta.durationSec) startSec = meta.durationSec - 1;
+      startByte = alignMp3(path, mp3SeekByte(startSec));
+      startedAt = startSec;
+    }
   }
 
-  source = new (std::nothrow) AudioFileSourceSD();
+  source = new (std::nothrow) SdStreamSource();
   if (!source || !source->open(path)) { stopPlayback(true); return false; }
   if (startByte > 0) source->seek((int32_t)startByte, SEEK_SET);
 
   bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sizeof(sdAudioBuffer));
-  audioOutput = new (std::nothrow) Mp3AudioOutput();
-  decoder = new (std::nothrow) AudioGeneratorMP3();
+  audioOutput = new (std::nothrow) AudioOut();
+  decoder = makeDecoder(fmt);
   if (!bufferedSource || !audioOutput || !decoder) { stopPlayback(true); return false; }
 
   audioOutput->SetGain(1.0f);
   gFadeTarget = 1.0f;
   gFadeGain = natural ? 1.0f : 0.0f;  // fade-in curto, exceto na troca gapless
-  if (!natural) { resetEq(); gVolCur = gVolTarget; }
+  if (!natural) { resetDsp(); gVolCur = gVolTarget; }
   gSamplesSubmitted = 0;
+  gPlayedSec = 0.0f;
 
   if (!decoder->begin(bufferedSource, audioOutput)) { stopPlayback(true); return false; }
 
   startOffsetSec = startedAt;
   lastProgress = millis();
+  trackStartedAt = millis();
   lastSamples = 0;
+  stallRetries = 0;
+  trackEndPending = false;
   playing = true;
   paused = false;
   fadeAction = FA_NONE;
@@ -1218,35 +1975,39 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
 }
 
 void finishQueue() {
-  stopPlayback(false);  // deixa o final da ultima faixa terminar
+  if (audioOutput) audioOutput->flush();   // nao corta a cauda da ultima faixa
+  stopPlayback(false);
   showToast("FIM DA LISTA");
   if (screen == SCR_PLAYER) { screen = SCR_BROWSER; }
   redrawCurrent();
 }
 
-// Avanca na ordem de reproducao. automatic=true: fim natural da faixa.
-bool advance(int dir, bool automatic) {
-  if (!queueCount) return false;
+bool stepOrder(int dir, bool automatic) {
   const int n = (int)queueCount;
-  int pos = (int)orderPos;
-  for (int tries = 0; tries < n; ++tries) {
-    int np = pos + dir;
-    if (np >= n) {
-      if (automatic && opt.repeat == 0) { finishQueue(); return false; }
-      np = 0;
-      if (opt.shuffle && n > 1) {
-        const uint16_t last = order[pos];
-        shuffleOrder(-1);
-        if (order[0] == last) { const uint16_t t = order[0]; order[0] = order[1]; order[1] = t; }
-      }
+  int np = (int)orderPos + dir;
+  if (np >= n) {
+    if (automatic && opt.repeat == 0) return false;
+    np = 0;
+    if (opt.shuffle && n > 1) {
+      const uint16_t last = order[orderPos];
+      shuffleOrder(-1);
+      if (order[0] == last) { const uint16_t t = order[0]; order[0] = order[1]; order[1] = t; }
     }
-    if (np < 0) np = n - 1;
-    pos = np;
-    orderPos = (size_t)pos;
-    if (startTrack(order[pos], 0, true, automatic)) { redrawCurrent(); return true; }
+  }
+  if (np < 0) np = n - 1;
+  orderPos = (size_t)np;
+  return true;
+}
+
+// Avanca "steps" faixas na ordem e toca apenas a final.
+bool advance(int dir, bool automatic, int steps = 1) {  if (!queueCount) return false;
+  for (int s = 1; s < steps; ++s) stepOrder(dir, false);
+  for (int tries = 0; tries < (int)queueCount; ++tries) {
+    if (!stepOrder(dir, automatic)) { finishQueue(); return false; }
+    if (startTrack(order[orderPos], 0, true, automatic)) { redrawCurrent(); return true; }
   }
   stopPlayback(true);
-  showToast("ERRO AO ABRIR MP3");
+  showToast("ERRO AO ABRIR ARQUIVO");
   if (screen == SCR_PLAYER) screen = SCR_BROWSER;
   redrawCurrent();
   return false;
@@ -1259,20 +2020,49 @@ void onTrackEnded() {
   advance(+1, true);
 }
 
+void requestSkip(int dir) {
+  if (!playing) return;
+  pendingSkip += dir;
+  skipDue = millis() + 200;
+  char t[24];
+  snprintf(t, sizeof(t), pendingSkip > 0 ? "PROXIMA +%d" : "ANTERIOR %d", pendingSkip);
+  showToast(t);
+}
+
+void skipStep() {
+  if (!pendingSkip || (int32_t)(millis() - skipDue) < 0) return;
+  const int n = pendingSkip;
+  pendingSkip = 0;
+  if (!playing) return;
+  advance(n > 0 ? +1 : -1, false, n > 0 ? n : -n);
+}
+
 void previousOrRestart() {
   if (!playing) return;
-  if (elapsedSec() > 3) {
+  if (pendingSkip == 0 && elapsedSec() > 3) {
     if (startTrack(order[orderPos], 0, false, false)) redrawCurrent();
     else advance(+1, true);
   } else {
-    advance(-1, false);
+    requestSkip(-1);
   }
 }
 
 void seekBy(int delta) {
   if (!playing) return;
-  if (meta.durationSec < 3) { showToast("BUSCA INDISPONIVEL"); return; }
-  int32_t target = (int32_t)elapsedSec() + delta;
+  if (!canSeek()) { showToast("BUSCA INDISPONIVEL"); return; }
+  pendingSeek += delta;
+  seekDue = millis() + 280;
+  char t[24];
+  snprintf(t, sizeof(t), "BUSCA %+ds", pendingSeek);
+  showToast(t);
+}
+
+void seekStep() {
+  if (!pendingSeek || (int32_t)(millis() - seekDue) < 0) return;
+  const int d = pendingSeek;
+  pendingSeek = 0;
+  if (!playing) return;
+  int32_t target = (int32_t)elapsedSec() + d;
   if (target < 0) target = 0;
   if (target >= (int32_t)meta.durationSec - 1) { advance(+1, false); return; }
   if (startTrack(order[orderPos], (uint32_t)target, false, false)) redrawCurrent();
@@ -1287,7 +2077,7 @@ void togglePause() {
     gFadeTarget = 1.0f;
     lastProgress = millis();
   } else if (fadeAction == FA_PAUSE) {
-    fadeAction = FA_NONE;  // cancela pausa em andamento
+    fadeAction = FA_NONE;
     gFadeTarget = 1.0f;
   } else {
     fadeAction = FA_PAUSE;
@@ -1314,6 +2104,81 @@ void changeVolume(int delta) {
   snprintf(t, sizeof(t), "VOLUME %d%%", volumePercent);
   showToast(t);
   redrawCurrent();
+}
+
+// ---- saida: fone / alto-falante
+void setOutput(int m, bool announce) {
+  m = m ? 1 : 0;
+  if (m == outMode) return;
+  volByMode[outMode] = volumePercent;
+  outMode = m;
+  volumePercent = volByMode[outMode];
+  updateVolumeTarget();
+  markSettingsDirty();
+  if (announce) {
+    char t[32];
+    snprintf(t, sizeof(t), "%s %d%%", outMode ? "FONE" : "ALTO-FALANTE", volumePercent);
+    showToast(t);
+    redrawCurrent();
+  }
+}
+
+void outputAutoStep() {
+  if (HP_DET_PIN < 0 || !autoOut) return;
+  static uint32_t last = 0, since = 0;
+  static int cand = -1;
+  const uint32_t now = millis();
+  if (now - last < 50) return;
+  last = now;
+  const int m = (digitalRead(HP_DET_PIN) == HP_DET_ACTIVE_LEVEL) ? 1 : 0;
+  if (m == outMode) { cand = -1; return; }
+  if (m != cand) { cand = m; since = now; return; }
+  if (now - since >= 200) { cand = -1; setOutput(m, true); }  // debounce 200 ms
+}
+
+// Gerenciador de recursos: vigia a RAM e reduz recursos opcionais antes de faltar memoria.
+void resourceStep() {
+  static uint32_t last = 0;
+  const uint32_t now = millis();
+  if (now - last < 2000) return;
+  last = now;
+  const uint32_t freeH = ESP.getFreeHeap(), maxB = ESP.getMaxAllocHeap();
+  int lvl = gResLevel;
+  if (freeH < 30000 || maxB < 16000) lvl = 2;
+  else if (freeH < 60000 || maxB < 30000) lvl = max(lvl, 1);
+  else if (freeH > 80000 && maxB > 45000) lvl = 0;      // histerese
+  else if (lvl == 2 && freeH > 45000) lvl = 1;
+  if (lvl != gResLevel) {
+    gResLevel = lvl;
+    Serial.printf("[RES] nivel %d heap=%u maxblk=%u min=%u\n", lvl, (unsigned)freeH, (unsigned)maxB, (unsigned)ESP.getMinFreeHeap());
+    if (lvl >= 1 && coverCanvasReady) {  // libera a capa (maior bloco opcional)
+      coverCanvas.deleteSprite();
+      coverCanvasReady = false;
+      coverLoaded = false;
+      coverPending = false;
+    }
+    configureDsp();   // em nivel >= 1 tambem libera o reverb
+    if (lvl) showToast("POUCA RAM: MODO LEVE");
+  }
+}
+
+// Decodifica por um tempo limitado. Nao chama onTrackEnded (seguro dentro de outras tarefas).
+void decodeSlice(uint32_t budgetMs) {
+  if (!playing || paused || !decoder || !audioOutput || trackEndPending) return;
+  const uint32_t t0 = millis();
+  while (millis() - t0 < budgetMs) {
+    gSliceLeft = 2304;
+    if (!decoder->loop()) { trackEndPending = true; break; }
+    if (audioOutput->isFull()) break;
+  }
+}
+
+void pumpAudio() {
+  static uint32_t last = 0;
+  const uint32_t now = millis();
+  if (now - last < 6) return;
+  last = now;
+  decodeSlice(4);
 }
 
 // ============================================================ desenho
@@ -1394,31 +2259,31 @@ void drawBrowser() {
   drawGrid(g);
 
   char title[NAME_SIZE];
-  if (browseDir[1] == '\0') safeCopy(title, sizeof(title), "SD CARD");
+  if (browseDir[1] == '\0') safeCopy(title, sizeof(title), storageKind == STORAGE_SD ? "SD CARD" : "MEMORIA INTERNA");
   else {
     const char *base = strrchr(browseDir, '/');
     toAscii(base ? base + 1 : browseDir, title, sizeof(title));
   }
   drawHeader(g, title, C_CYAN);
 
-  g.setFont(&fonts::Font2);
+  applyUiFont(g);
   g.setTextSize(1);
   constexpr int ROW_H = 17, Y0 = 24;
 
-  if (!sdReady) {
+  if (!storageReady()) {
     g.setTextColor(C_RED);
-    g.drawString("MICROSD NAO ENCONTRADO", 14, 40);
-    g.setFont(&fonts::Font0);
+    g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 14, 40);
+    applyUiFont(g);
     g.setTextColor(C_GREY);
-    g.drawString("COLOQUE O CARTAO E TECLE R", 14, 62);
+    g.drawString(uiText(UI_STORAGE_KEYS), 14, 62);
   } else if (scanning) {
     g.setTextColor(C_GREY);
     char s[32];
-    snprintf(s, sizeof(s), validatingDirs ? "FILTRANDO PASTAS %d" : "LENDO PASTA... %d", (int)entryCount);
+    snprintf(s, sizeof(s), validatingDirs ? uiText(UI_FILTERING) : uiText(UI_READING), (int)entryCount);
     g.drawString(s, 14, 44);
   } else if (!entryCount) {
     g.setTextColor(C_GREY);
-    g.drawString("PASTA VAZIA (SEM MP3)", 14, 44);
+    g.drawString(uiText(UI_EMPTY), 14, 44);
   }
 
   if (!scanning) {
@@ -1443,10 +2308,7 @@ void drawBrowser() {
       }
       char shown[NAME_SIZE], fit[NAME_SIZE];
       toAscii(e.name, shown, sizeof(shown));
-      if (!e.isDir) {
-        const size_t sl = strlen(shown);
-        if (sl > 4) shown[sl - 4] = '\0';
-      }
+      if (!e.isDir) stripExt(shown);
       g.setFont(&fonts::Font2);
       fitText(g, shown, 192, fit, sizeof(fit));
       g.setTextColor(active ? C_WHITE : C_GREY);
@@ -1462,7 +2324,6 @@ void drawBrowser() {
     }
   }
 
-  // painel inferior: mini player ou dicas
   g.fillRect(0, 94, 240, 41, C_PANEL2);
   g.fillRect(0, 94, 240, 1, C_DIM);
   if (playing) {
@@ -1480,14 +2341,14 @@ void drawBrowser() {
     else safeCopy(line, sizeof(line), t);
     g.setTextColor(C_CYAN);
     g.drawString(line, 8, 125);
-    const char *st = (paused || fadeAction == FA_PAUSE) ? "PAUSADO" : "TOCANDO";
+    const char *st = (paused || fadeAction == FA_PAUSE) ? uiText(UI_PAUSED) : uiText(UI_PLAYING);
     g.setTextColor((paused || fadeAction == FA_PAUSE) ? C_YELLOW : C_GREY);
     g.drawString(st, 232 - g.textWidth(st), 125);
   } else {
     g.setFont(&fonts::Font0);
     g.setTextColor(C_GREY);
-    g.drawString("ENTER ABRE/TOCA   DEL PASTA ACIMA", 8, 101);
-    g.drawString("S AJUSTES  E EQ  R ATUALIZA  H AJUDA", 8, 113);
+    g.drawString(uiText(UI_BROWSER_KEYS1), 8, 101);
+    g.drawString(uiText(UI_BROWSER_KEYS2), 8, 113);
     if (entryCount) {
       char c[20];
       snprintf(c, sizeof(c), "%d/%d", selected + 1, (int)entryCount);
@@ -1539,16 +2400,16 @@ void drawLive() {
     if (opt.repeat == 1) strcat(flags, "REP");
     else if (opt.repeat == 2) strcat(flags, "REP1");
     g.setTextColor(C_YELLOW);
-    g.drawString(flags, 86, 18);
+    g.drawString(flags, 80, 18);
     if (sleepDeadline) {
       const int32_t rem = (int32_t)(sleepDeadline - millis());
       char z[12];
       snprintf(z, sizeof(z), "ZZ %dM", (int)(rem > 0 ? rem / 60000 + 1 : 0));
       g.setTextColor(C_ORANGE);
-      g.drawString(z, 150, 18);
+      g.drawString(z, 138, 18);
     }
-    char rate[16];
-    snprintf(rate, sizeof(rate), "%.1fK", gRate / 1000.0f);
+    char rate[20];
+    snprintf(rate, sizeof(rate), "%s %.1f", FMT_NAMES[meta.fmt <= FMT_NONE ? meta.fmt : FMT_NONE], gSrcRate / 1000.0f);
     g.setTextColor(C_GREY);
     g.drawString(rate, 232 - g.textWidth(rate), 18);
   }
@@ -1558,14 +2419,28 @@ void drawLive() {
   constexpr int BAR_W = 14, BAR_GAP = 5, SEGS = 10, SEG_H = 3, TOP = 30;
   const bool active = playing && !paused;
 
+  for (int i = 0; i < SPEC_BANDS; ++i) {
+    const float lvl = active ? gBand[i] : 0.0f;
+    if (lvl > shown[i]) shown[i] = lvl;
+    else shown[i] = max(0.0f, shown[i] - 0.05f);
+    if (shown[i] > peak[i]) peak[i] = shown[i];
+    else peak[i] = max(0.0f, peak[i] - 0.012f);
+  }
+
   if (opt.visual == 3) {
-    g.drawRoundRect(83, 27, 74, 52, 5, C_DIM);
-    if (coverReady) {
-      g.fillRect(86, 30, 68, 46, C_PANEL2);
-    } else {
+    for (int i = 0; i < SPEC_BANDS; ++i) {  // barras laterais
+      const int xb = (i < 6) ? 8 + i * 14 : 152 + (i - 6) * 14;
+      const int h = (int)(shown[i] * 40.0f);
+      const uint16_t col = (i % 6) < 3 ? C_CYAN : C_BLUE;
+      g.fillRect(xb, 70 - h, 10, h, col);
+    }
+    g.fillRect(96, 26, 46, 46, C_PANEL2);
+    g.drawRect(96, 26, 46, 46, C_DIM);
+    if (!coverLoaded) {
       g.setFont(&fonts::Font0);
       g.setTextColor(C_GREY);
-      g.drawString("SEM CAPA", 91, 48);
+      const char *msg = coverPending ? "..." : "SEM CAPA";
+      g.drawString(msg, 119 - g.textWidth(msg) / 2, 46);
     }
   } else if (opt.visual == 2) {
     const int cy = 48;
@@ -1582,11 +2457,6 @@ void drawLive() {
     }
   } else {
     for (int i = 0; i < SPEC_BANDS; ++i) {
-      const float lvl = active ? gBand[i] : 0.0f;
-      if (lvl > shown[i]) shown[i] = lvl;
-      else shown[i] = max(0.0f, shown[i] - 0.05f);
-      if (shown[i] > peak[i]) peak[i] = shown[i];
-      else peak[i] = max(0.0f, peak[i] - 0.012f);
       const int x = 8 + i * (BAR_W + BAR_GAP);
       if (opt.visual == 0) {
         const int lit = (int)(shown[i] * SEGS + 0.5f);
@@ -1629,10 +2499,8 @@ void drawLive() {
   g.drawString(pct, 232 - g.textWidth(pct), 80);
 
   live.pushSprite(0, 22);
-  // Desenha por cima do sprite já composto; M5GFX decodifica da RAM sem
-  // abrir outro arquivo no cartão enquanto o decoder de MP3 está ativo.
-  if (opt.visual == 3 && coverReady && coverCanvasReady)
-    coverCanvas.pushSprite(86, 52);
+  if (opt.visual == 3 && coverLoaded && coverCanvasReady)
+    coverCanvas.pushSprite(97, 22 + 27);
 }
 
 void drawPlayer() {
@@ -1642,12 +2510,12 @@ void drawPlayer() {
   g.fillSprite(C_BG);
   drawGrid(g);
   const bool p = paused || fadeAction == FA_PAUSE;
-  drawHeader(g, p ? "PAUSADO" : "TOCANDO", p ? C_YELLOW : C_CYAN);
+  drawHeader(g, p ? uiText(UI_PLAYER_PAUSED) : uiText(UI_PLAYER_PLAYING), p ? C_YELLOW : C_CYAN);
 
-  g.setFont(&fonts::Font0);
+  applyUiFont(g);
   g.setTextSize(1);
   g.setTextColor(C_GREY);
-  g.drawString(outMode ? "FON" : "ALT", 8, 117);
+  g.drawString(outMode ? uiText(UI_OUTPUT_HEADPHONE) : uiText(UI_OUTPUT_SPEAKER), 8, 117);
   g.drawRect(32, 116, 102, 9, C_GREY);
   g.fillRect(33, 117, volumePercent, 7, C_RED);
   char v[8];
@@ -1661,7 +2529,7 @@ void drawPlayer() {
   g.drawString(e, 232 - g.textWidth(e), 117);
 
   g.setTextColor(C_GREY);
-  g.drawString("SPC PAUSA N/P FAIXA ,/ BUSCA TAB EQ", 8, 127);
+  g.drawString(uiText(UI_PLAYER_KEYS), 8, 127);
 
   ui.pushSprite(0, 0);
   drawLive();
@@ -1673,7 +2541,7 @@ void drawEq() {
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
-  drawHeader(g, "EQUALIZADOR", C_CYAN);
+  drawHeader(g, uiText(UI_EQ_TITLE), C_CYAN);
 
   constexpr int CENTER_Y = 66, HALF = 26;
   for (int i = 0; i < EQ_BANDS; ++i) {
@@ -1681,7 +2549,7 @@ void drawEq() {
     const bool sel = (i == eqSelected);
     if (sel) g.drawRoundRect(cx - 20, 24, 40, 92, 4, C_RED);
 
-    g.setFont(&fonts::Font0);
+    applyUiFont(g);
     g.setTextColor(sel ? C_WHITE : C_GREY);
     g.drawString(EQ_LABELS[i], cx - g.textWidth(EQ_LABELS[i]) / 2, 29);
 
@@ -1701,36 +2569,111 @@ void drawEq() {
 
   g.setFont(&fonts::Font0);
   g.setTextColor(C_GREY);
-  g.drawString("PRESET", 8, 119);
+  g.drawString(uiText(UI_EQ_PRESET), 8, 119);
   g.setTextColor(C_CYAN);
   g.drawString(currentPresetName(), 50, 119);
   g.setTextColor(C_GREY);
-  g.drawString("1-6 PRESET  0 ZERA  TAB VOLTA", 8, 127);
+  g.drawString(uiText(UI_EQ_KEYS), 8, 127);
   ui.pushSprite(0, 0);
 }
 
-constexpr int SETTINGS_COUNT = 9;
-const char *SETTING_LABELS[SETTINGS_COUNT] = {
-  "BRILHO", "TELA APAGA", "TIMER DE SONO", "AGITAR = PROXIMA",
-  "REPETIR", "ALEATORIO", "VISUALIZADOR", "TEMA", "RESTAURAR PADROES"
+constexpr int SETTINGS_COUNT = 11;
+const char *const LANGUAGE_NAMES[9] = {
+  "ENGLISH", "PORTUGUES (BR)", "ESPANOL", "中文", "日本語",
+  "FRANCAIS", "DEUTSCH", "РУССКИЙ", "ITALIANO"
 };
+const char *const SETTING_LABELS[9][SETTINGS_COUNT] = {
+  {"BRIGHTNESS","SCREEN TIMEOUT","SLEEP TIMER","SHAKE TO SKIP","REPEAT","SHUFFLE","VISUALIZER","THEME","SOUND ENHANCEMENT","LANGUAGE","RESTORE DEFAULTS"},
+  {"BRILHO","TELA APAGA","TIMER DE SONO","AGITAR = PROXIMA","REPETIR","ALEATORIO","VISUALIZADOR","TEMA","REALCE DE SOM","IDIOMA","RESTAURAR PADROES"},
+  {"BRILLO","APAGADO DE PANTALLA","TEMPORIZADOR","AGITAR PARA AVANZAR","REPETIR","ALEATORIO","VISUALIZADOR","TEMA","MEJORA DE SONIDO","IDIOMA","VALORES INICIALES"},
+  {"亮度","屏幕超时","睡眠定时器","摇动切歌","循环","随机播放","可视化","主题","声音增强","语言","恢复默认"},
+  {"明るさ","画面オフ","スリープタイマー","振って次の曲","リピート","シャッフル","ビジュアライザー","テーマ","サウンド強化","言語","初期設定に戻す"},
+  {"LUMINOSITE","VEILLE ECRAN","MINUTERIE","SECOUER POUR SUIVANT","REPETITION","ALEATOIRE","VISUALISEUR","THEME","AMPLIFICATION","LANGUE","REINITIALISER"},
+  {"HELLIGKEIT","BILDSCHIRM AUS","SLEEP-TIMER","SCHUETTELN = WEITER","WIEDERHOLEN","ZUFALL","VISUALISIERUNG","THEMA","KLANGVERBESSERUNG","SPRACHE","ZURUECKSETZEN"},
+  {"ЯРКОСТЬ","ТАЙМ-АУТ ЭКРАНА","ТАЙМЕР СНА","ВСТРЯХНУТЬ = ДАЛЕЕ","ПОВТОР","ПЕРЕМЕШАТЬ","ВИЗУАЛИЗАТОР","ТЕМА","УЛУЧШЕНИЕ ЗВУКА","ЯЗЫК","СБРОСИТЬ"},
+  {"LUMINOSITA","SPEGNIMENTO SCHERMO","SPEGNIMENTO MUSICA","SCUOTI PER AVANTI","RIPETI","CASUALE","VISUALIZZATORE","TEMA","MIGLIORIA AUDIO","LINGUA","RIPRISTINA"}
+};
+
+const char *uiLanguageName() { return LANGUAGE_NAMES[constrain(uiLanguage, 0, 8)]; }
+// Compact on-device UI dictionary. Audio, filesystem and decoder paths are not affected.
+const char *const UI_TEXT[9][UI_TEXT_COUNT] = {
+  {"microSD card not found","Internal storage unavailable","M: storage  |  R: refresh","Filtering folders %d","Reading folder... %d","Empty folder (no audio)","PAUSED","PLAYING","ENTER open/play  DEL parent","S settings  E EQ  R refresh  H help","PAUSED","PLAYING","HEADPHONES","SPEAKER","SPACE pause  N/P track  ,/ seek  TAB EQ","EQUALIZER","PRESET","1-6 presets  0 reset  TAB back"},
+  {"Cartao microSD nao encontrado","Memoria interna indisponivel","M: armazenamento  |  R: atualizar","Filtrando pastas %d","Lendo pasta... %d","Pasta vazia (sem audio)","PAUSADO","TOCANDO","ENTER abre/toca  DEL pasta acima","S ajustes  E EQ  R atualizar  H ajuda","PAUSADO","TOCANDO","FONE","ALTO-FALANTE","SPACE pausa  N/P faixa  ,/ busca  TAB EQ","EQUALIZADOR","PRESET","1-6 presets  0 zera  TAB voltar"},
+  {"Tarjeta microSD no encontrada","Almacenamiento interno no disponible","M: almacenamiento  |  R: actualizar","Filtrando carpetas %d","Leyendo carpeta... %d","Carpeta vacia (sin audio)","PAUSADO","REPRODUCIENDO","ENTER abrir/reproducir  DEL subir","S ajustes  E EQ  R actualizar  H ayuda","PAUSADO","REPRODUCIENDO","AURICULARES","ALTAVOZ","SPACE pausa  N/P pista  ,/ buscar  TAB EQ","ECUALIZADOR","PREAJUSTE","1-6 presets  0 reiniciar  TAB volver"},
+  {"未找到 microSD 卡","内部存储不可用","M：存储  |  R：刷新","正在筛选文件夹 %d","正在读取文件夹... %d","文件夹为空（无音频）","已暂停","正在播放","ENTER 打开/播放  DEL 返回上级","S 设置  E 均衡器  R 刷新  H 帮助","已暂停","正在播放","耳机","扬声器","SPACE 暂停  N/P 切歌  ,/ 搜索  TAB 均衡器","均衡器","预设","1-6 预设  0 重置  TAB 返回"},
+  {"microSDカードが見つかりません","内部ストレージを利用できません","M: ストレージ  |  R: 更新","フォルダーを確認中 %d","フォルダーを読み込み中... %d","フォルダーは空です","一時停止","再生中","ENTER 開く/再生  DEL 上へ","S 設定  E EQ  R 更新  H ヘルプ","一時停止","再生中","ヘッドホン","スピーカー","SPACE 一時停止  N/P 曲  ,/ 検索  TAB EQ","イコライザー","プリセット","1-6 プリセット  0 リセット  TAB 戻る"},
+  {"Carte microSD introuvable","Stockage interne indisponible","M : stockage  |  R : actualiser","Filtrage des dossiers %d","Lecture du dossier... %d","Dossier vide (aucun audio)","EN PAUSE","LECTURE","ENTER ouvrir/lire  DEL dossier parent","S reglages  E EQ  R actualiser  H aide","EN PAUSE","LECTURE","CASQUE","HAUT-PARLEUR","SPACE pause  N/P piste  ,/ recherche  TAB EQ","EGALISEUR","PRESELECTION","1-6 presets  0 reset  TAB retour"},
+  {"microSD-Karte nicht gefunden","Interner Speicher nicht verfuegbar","M: Speicher  |  R: aktualisieren","Ordner werden gefiltert %d","Lese Ordner... %d","Ordner leer (keine Audiodateien)","PAUSE","WIEDERGABE","ENTER spielen  DEL zurueck","S Setup  E EQ  R neu  H Hilfe","PAUSE","WIEDERGABE","KOPFHOERER","LAUTSPRECHER","SPACE Pause  N/P Titel  ,/ Suche  TAB EQ","EQUALIZER","VOREINSTELLUNG","1-6 Presets  0 reset  TAB zurueck"},
+  {"Карта microSD не найдена","Внутренняя память недоступна","M: память  |  R: обновить","Фильтрация папок %d","Чтение папки... %d","Папка пуста (нет аудио)","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","ENTER открыть/играть  DEL выше","S настройки  E EQ  R обновить  H помощь","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","НАУШНИКИ","ДИНАМИК","SPACE пауза  N/P трек  ,/ поиск  TAB EQ","ЭКВАЛАЙЗЕР","ПРЕСЕТ","1-6 пресеты  0 сброс  TAB назад"},
+  {"Scheda microSD non trovata","Memoria interna non disponibile","M: memoria  |  R: aggiorna","Filtro cartelle %d","Lettura cartella... %d","Cartella vuota (nessun audio)","IN PAUSA","IN RIPRODUZIONE","ENTER apri/suona  DEL indietro","S opzioni  E EQ  R aggiorna  H aiuto","IN PAUSA","IN RIPRODUZIONE","CUFFIE","ALTOPARLANTE","SPACE pausa  N/P brano  ,/ cerca  TAB EQ","EQUALIZZATORE","PRESET","1-6 preset  0 reset  TAB indietro"}
+};
+const char *uiText(UiTextId id) {
+  return UI_TEXT[constrain(uiLanguage, 0, 8)][id];
+}
+
+void applyUiFont(LovyanGFX &g, bool small) {
+  (void)small;
+  if (uiLanguage == 3) g.setFont(&fonts::efontCN_10);
+  else if (uiLanguage == 4 || uiLanguage == 7) g.setFont(&fonts::efontJA_10);  // JA inclui cirilico
+  else g.setFont(&fonts::Font0);
+}
+
+
+const char *localizedOn() {
+  static const char *v[9] = {"ON","LIGADO","ACTIVADO","开启","オン","ACTIVE","EIN","ВКЛ","ATTIVO"};
+  return v[constrain(uiLanguage, 0, 8)];
+}
+const char *localizedOff() {
+  static const char *v[9] = {"OFF","DESLIGADO","DESACTIVADO","关闭","オフ","DESACTIVE","AUS","ВЫКЛ","DISATTIVO"};
+  return v[constrain(uiLanguage, 0, 8)];
+}
+const char *localizedNever() {
+  static const char *v[9] = {"NEVER","NUNCA","NUNCA","永不","なし","JAMAIS","NIE","НИКОГДА","MAI"};
+  return v[constrain(uiLanguage, 0, 8)];
+}
+const char *localizedRepeat(int v) {
+  static const char *names[9][3] = {
+    {"OFF","ALL","ONE"},{"DESLIGADO","TODAS","UMA"},{"DESACTIVADO","TODAS","UNA"},
+    {"关闭","全部","单曲"},{"オフ","全曲","1曲"},{"DESACTIVE","TOUT","UN"},
+    {"AUS","ALLE","EINZELN"},{"ВЫКЛ","ВСЕ","ОДИН"},{"DISATTIVO","TUTTE","UNA"}
+  };
+  return names[constrain(uiLanguage,0,8)][constrain(v,0,2)];
+}
+const char *localizedVisual(int v) {
+  static const char *names[9][4] = {
+    {"BARS","MIRROR","WAVE","COVER"},{"BARRAS","ESPELHO","ONDA","CAPA"},{"BARRAS","ESPEJO","ONDA","PORTADA"},
+    {"柱状","镜像","波形","封面"},{"バー","ミラー","波形","カバー"},{"BARRES","MIROIR","ONDE","POCHETTE"},
+    {"BALKEN","SPIEGEL","WELLE","COVER"},{"СТОЛБЦЫ","ЗЕРКАЛО","ВОЛНА","ОБЛОЖКА"},{"BARRE","SPECCHIO","ONDA","COPERTINA"}
+  };
+  return names[constrain(uiLanguage,0,8)][constrain(v,0,3)];
+}
+const char *localizedEnhance(int v) {
+  static const char *names[9][3] = {
+    {"OFF","SOFT","STRONG"},{"DESLIGADO","SUAVE","FORTE"},{"DESACTIVADO","SUAVE","FUERTE"},
+    {"关闭","柔和","强劲"},{"オフ","弱","強"},{"DESACTIVE","DOUX","FORT"},
+    {"AUS","SANFT","STARK"},{"ВЫКЛ","МЯГКО","СИЛЬНО"},{"DISATTIVO","MORBIDO","FORTE"}
+  };
+  return names[constrain(uiLanguage,0,8)][constrain(v,0,2)];
+}
 
 void settingValue(int i, char *out, size_t n) {
   switch (i) {
     case 0: snprintf(out, n, "%d%%", opt.brightness); break;
     case 1:
       if (SCREEN_OFF_SEC[opt.screenOffIdx]) snprintf(out, n, "%ds", SCREEN_OFF_SEC[opt.screenOffIdx]);
-      else safeCopy(out, n, "NUNCA");
+      else safeCopy(out, n, localizedNever());
       break;
     case 2:
       if (SLEEP_MIN[sleepIdx]) snprintf(out, n, "%d MIN", SLEEP_MIN[sleepIdx]);
-      else safeCopy(out, n, "DESLIGADO");
+      else safeCopy(out, n, localizedOff());
       break;
-    case 3: safeCopy(out, n, imuOk ? (opt.shake ? "LIGADO" : "DESLIGADO") : "N/D"); break;
-    case 4: safeCopy(out, n, REPEAT_NAMES[opt.repeat]); break;
-    case 5: safeCopy(out, n, opt.shuffle ? "LIGADO" : "DESLIGADO"); break;
-    case 6: safeCopy(out, n, VISUAL_NAMES[opt.visual]); break;
+    case 3: safeCopy(out, n, imuOk ? (opt.shake ? localizedOn() : localizedOff()) : "N/A"); break;
+    case 4: safeCopy(out, n, localizedRepeat(opt.repeat)); break;
+    case 5: safeCopy(out, n, opt.shuffle ? localizedOn() : localizedOff()); break;
+    case 6: safeCopy(out, n, localizedVisual(opt.visual)); break;
     case 7: safeCopy(out, n, THEMES[themeIndex].name); break;
+    case 8: safeCopy(out, n, localizedEnhance(opt.enhance)); break;
+    case 9: safeCopy(out, n, uiLanguageName()); break;
     default: safeCopy(out, n, "ENTER"); break;
   }
 }
@@ -1741,24 +2684,28 @@ void drawSettings() {
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
-  drawHeader(g, "AJUSTES", C_CYAN);
-  g.setFont(&fonts::Font0);
+  drawHeader(g, SETTING_LABELS[constrain(uiLanguage, 0, 8)][9], C_CYAN);
+  applyUiFont(g, true);
   g.setTextSize(1);
   for (int i = 0; i < SETTINGS_COUNT; ++i) {
-    const int y = 24 + i * 11;
+    const int y = 22 + i * 9;
     const bool sel = (i == settingsSel);
-    if (sel) g.fillRoundRect(6, y - 2, 228, 11, 3, C_PANEL);
+    if (sel) g.fillRoundRect(6, y - 1, 228, 10, 3, C_PANEL);
     g.setTextColor(sel ? C_WHITE : C_GREY);
-    g.drawString(SETTING_LABELS[i], 12, y);
+    char label[28];
+    fitText(g, SETTING_LABELS[constrain(uiLanguage, 0, 8)][i], 128, label, sizeof(label));
+    g.drawString(label, 12, y);
     char v[24], shown[32];
     settingValue(i, v, sizeof(v));
     if (sel && i < SETTINGS_COUNT - 1) snprintf(shown, sizeof(shown), "< %s >", v);
     else safeCopy(shown, sizeof(shown), v);
     g.setTextColor(sel ? C_CYAN : C_GREY);
-    g.drawString(shown, 228 - g.textWidth(shown), y);
+    char valueFit[24];
+    fitText(g, shown, 82, valueFit, sizeof(valueFit));
+    g.drawString(valueFit, 228 - g.textWidth(valueFit), y);
   }
   g.setTextColor(C_GREY);
-  g.drawString("; . ESCOLHE   , / MUDA   ESC VOLTA", 8, 126);
+  g.drawString(uiLanguage == 1 ? "; . ESCOLHE  , / MUDA  ESC VOLTA" : uiLanguage == 2 ? "; . ELEGIR  , / CAMBIAR  ESC VOLVER" : uiLanguage == 3 ? "; . 选择  , / 更改  ESC 返回" : uiLanguage == 4 ? "; . 選択  , / 変更  ESC 戻る" : uiLanguage == 5 ? "; . CHOISIR  , / MODIFIER  ESC RETOUR" : uiLanguage == 6 ? "; . WAEHLEN  , / AENDERN  ESC ZURUECK" : uiLanguage == 7 ? "; . ВЫБРАТЬ  , / ИЗМЕНИТЬ  ESC НАЗАД" : uiLanguage == 8 ? "; . SCEGLI  , / CAMBIA  ESC INDIETRO" : "; . SELECT  , / CHANGE  ESC BACK", 8, 127);
   ui.pushSprite(0, 0);
 }
 
@@ -1767,40 +2714,40 @@ void drawHelp() {
   if (screenOff) return;
   static const char *const pages[3][10] = {
     {
-      "BIBLIOTECA / GERAL",
-      ";/. move item   ,// pagina",
-      "ENTER pasta ou comeca a fila",
-      "DEL sobe pasta  TAB abre player",
-      "SPACE pausa  N/P muda faixa",
-      "- / = volume  1-6 preset EQ",
-      "S ajustes  E equalizador",
-      "R atualiza SD  X para audio",
-      "H avanca o tutorial",
-      "Atalhos gerais valem em todas telas",
+      "LIBRARY / GENERAL",
+      ";/. move item   ,// page",
+      "ENTER open folder or play queue",
+      "DEL parent folder  TAB player",
+      "SPACE pause  N/P track",
+      "- / = volume  1-6 EQ preset",
+      "S settings  E equalizer",
+      "R refresh  X stop  U USB drive",
+      "M SD/FLASH  C copy SD->FLASH",
+      "G enhancement  Formats: MP3 WAV FLAC AAC",
     },
     {
       "PLAYER",
-      "SPACE pausa | N proxima",
-      "P anterior / reinicia (>3s)",
-      ", / / busca -10s / +10s",
+      "SPACE pause | N next track",
+      "P previous / restart (>3s)",
+      ", / / seek -10s / +10s (MP3)",
       "; / . volume +/- 5%",
-      "S aleatorio | R off/todas/uma",
-      "V barras/espelho/onda/capa",
-      "T timer sono | O perfil volume",
-      "TAB/E equalizador",
-      "DEL ou ` volta a lista; X para",
+      "S shuffle | R repeat off/all/one",
+      "V bars/mirror/wave/cover",
+      "T sleep timer | O speaker/headphones",
+      "7 slowed 8 sped up 9 nightcore 0 normal",
+      "DEL or ` back to library; X stop",
     },
     {
-      "EQ / AJUSTES",
-      "EQ: , / troca banda",
-      "EQ: ; / . ganho +/-",
+      "EQ / SETTINGS",
+      "EQ: , / select band",
+      "EQ: ; / . gain +/-",
       "EQ: 0 FLAT | 1-6 presets",
-      "AJUSTES: ; / . escolhe item",
-      "AJUSTES: , / / muda valor",
-      "ENTER muda / restaura padroes",
-      "TAB/DEL/` volta a tela anterior",
-      "Tela apagada: qualquer tecla acorda",
-      "H reinicia | TAB/DEL fecha ajuda",
+      "SETTINGS: ; / . select item",
+      "SETTINGS: , / / change value",
+      "ENTER change / restore defaults",
+      "TAB/DEL/` return to previous screen",
+      "Display off: press any key to wake",
+      "H restarts | TAB/DEL closes help",
     },
   };
 
@@ -1808,7 +2755,7 @@ void drawHelp() {
   g.fillSprite(C_BG);
   drawGrid(g);
   char title[24];
-  snprintf(title, sizeof(title), "TUTORIAL %d/3", helpPage + 1);
+  snprintf(title, sizeof(title), "HELP %d/3", helpPage + 1);
   drawHeader(g, title, C_CYAN);
   g.setFont(&fonts::Font0);
   g.setTextSize(1);
@@ -1817,7 +2764,7 @@ void drawHelp() {
     g.drawString(pages[helpPage][i], i == 0 ? 8 : 12, 26 + i * 10);
   }
   g.setTextColor(C_CYAN);
-  g.drawString("H PROXIMA  TAB/DEL/` FECHA", 8, 127);
+  g.drawString("H NEXT  TAB/DEL/` CLOSE", 8, 127);
   ui.pushSprite(0, 0);
 }
 
@@ -1845,20 +2792,30 @@ void stopAll() {
 bool mediaKey(int k) {
   switch (k) {
     case ' ': togglePause(); return true;
-    case 'n': if (playing) advance(+1, false); return true;
+    case 'n': requestSkip(+1); return true;
     case 'p': previousOrRestart(); return true;
     case '=': case '+': changeVolume(+5); return true;
     case '-': case '_': changeVolume(-5); return true;
-    case 'o': {  // alterna alto-falante / fone (cada um com seu volume)
-      volByMode[outMode] = volumePercent;
-      outMode = !outMode;
-      volumePercent = volByMode[outMode];
-      updateVolumeTarget();
+    case 'g': {
+      opt.enhance = (opt.enhance + 1) % 3;
+      configureDsp();
       markSettingsDirty();
       char t[28];
-      snprintf(t, sizeof(t), "%s %d%%", outMode ? "SAIDA: FONE" : "SAIDA: ALTO-FALANTE", volumePercent);
+      snprintf(t, sizeof(t), "REALCE: %s", ENHANCE_NAMES[opt.enhance]);
       showToast(t);
       redrawCurrent();
+      return true;
+    }
+    case 'o': {  // alterna alto-falante / fone (cada um com seu volume)
+      if (HP_DET_PIN >= 0) {  // AUTO -> ALTO-FALANTE -> FONE
+        if (autoOut) { autoOut = false; setOutput(0, false); showToast("SAIDA: ALTO-FALANTE"); }
+        else if (outMode == 0) { setOutput(1, false); showToast("SAIDA: FONE"); }
+        else { autoOut = true; showToast("SAIDA: AUTO"); }
+        markSettingsDirty();
+        redrawCurrent();
+      } else {
+        setOutput(!outMode, true);
+      }
       return true;
     }
     case 'x': if (playing) stopAll(); return true;
@@ -1872,22 +2829,101 @@ bool mediaKey(int k) {
   return false;
 }
 
-bool mountSD() {
+// Reinicia o controlador SPI dedicado ao microSD antes de cada tentativa.
+void resetSdBus() {
+  SD.end();
+  sdSPI.end();
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(SD_CS, HIGH);
+  pinMode(SD_SCK, INPUT_PULLUP);
+  pinMode(SD_MISO, INPUT_PULLUP);
+  pinMode(SD_MOSI, INPUT_PULLUP);
+  delay(20);
+  digitalWrite(SD_CS, HIGH);
   sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  const uint32_t freqs[] = {20000000, 10000000, 4000000};
-  for (uint32_t f : freqs) {
-    if (SD.begin(SD_CS, sdSPI, f)) return true;
+  delay(20);
+}
+
+// Monta o SD na maior velocidade que funcionar, a partir de sdFreqIdx.
+bool mountSD() {
+  for (int i = sdFreqIdx; i < SD_FREQ_COUNT; ++i) {
+    const uint32_t f = SD_FREQS[i];
+    resetSdBus();
+    if (SD.begin(SD_CS, sdSPI, f, "/sd", SD_MAX_FILES, false)) {
+      File root = SD.open("/");
+      const bool usable = root && root.isDirectory() && SD.cardSize() > 0;
+      if (root) root.close();
+      if (usable) {
+        sdFreqIdx = i;   // nao volta a tentar velocidades que ja falharam
+        Serial.printf("SD montado: freq=%lu Hz, tipo=%u, bytes=%llu\n", (unsigned long)f, (unsigned)SD.cardType(), (unsigned long long)SD.cardSize());
+        return true;
+      }
+      Serial.printf("SD montou mas nao passou na verificacao em %lu Hz\n", (unsigned long)f);
+    } else {
+      Serial.printf("Falha SD.begin em %lu Hz\n", (unsigned long)f);
+    }
     SD.end();
-    delay(50);
+    delay(60);
   }
   return false;
 }
 
-void refreshBrowser() {
-  if (!playing) {  // remonta o cartao apenas se nada esta tocando
-    if (scanning) { if (scanHandle) scanHandle.close(); scanning = false; }
+// Teste barato de presenca do cartao (uma unica tentativa a 400 kHz).
+bool sdCardPresent() {
+  resetSdBus();
+  const bool ok = SD.begin(SD_CS, sdSPI, 400000, "/sd", SD_MAX_FILES, false);
+  SD.end();
+  return ok;
+}
+
+// Procura o cartao continuamente sem interromper musica ou varredura.
+// Sem cartao, o intervalo cresce (2,5 s -> 20 s) para nao pesar na interface.
+void sdAutoDetectStep() {
+  const uint32_t now = millis();
+  if (playing || scanning || now - lastSdProbeAt < sdProbeInterval) return;
+  lastSdProbeAt = now;
+
+  if (sdReady) {
+    File root = SD.open("/");
+    const bool healthy = root && root.isDirectory();
+    if (root) root.close();
+    if (healthy) { sdProbeInterval = SD_AUTO_PROBE_INTERVAL_MS; return; }
+
+    Serial.println("SD deixou de responder; reiniciando controlador");
+    sdReady = false;
     SD.end();
+    sdSPI.end();
+    sdProbeInterval = SD_AUTO_PROBE_INTERVAL_MS;
+    if (internalReady) {
+      storageKind = STORAGE_INTERNAL;
+      safeCopy(browseDir, sizeof(browseDir), "/");
+      beginScan(browseDir);
+    }
+    showToast("SD DESCONECTADO - BUSCANDO");
+    return;
+  }
+
+  if (!sdCardPresent() || !mountSD()) {
+    if (storageKind == STORAGE_SD && internalReady) storageKind = STORAGE_INTERNAL;
+    sdProbeInterval = min(sdProbeInterval * 2, SD_AUTO_PROBE_MAX_MS);
+    return;
+  }
+
+  sdProbeInterval = SD_AUTO_PROBE_INTERVAL_MS;
+  sdReady = true;
+  storageKind = STORAGE_SD;
+  safeCopy(browseDir, sizeof(browseDir), SD.exists("/music") ? "/music" : "/");
+  selected = 0;
+  firstVisible = 0;
+  showToast("SD RECONECTADO");
+  beginScan(browseDir);
+}
+
+void refreshBrowser() {
+  if (!playing && storageKind == STORAGE_SD) {
+    abortScan();
     sdReady = mountSD();
+    if (!sdReady && internalReady) storageKind = STORAGE_INTERNAL;
   }
   char dir[DIR_SIZE];
   safeCopy(dir, sizeof(dir), browseDir);
@@ -1920,6 +2956,7 @@ void activateSelection() {
 }
 
 void resetDefaults() {
+  uiLanguage = 0;
   opt = Options();
   themeIndex = 3;
   applyTheme();
@@ -1932,7 +2969,7 @@ void resetDefaults() {
   sleepDeadline = 0;
   applyShuffleChange();
   markSettingsDirty();
-  showToast("PADROES RESTAURADOS");
+  showToast("DEFAULTS RESTORED");
   drawSettings();
 }
 
@@ -1946,19 +2983,255 @@ void changeSetting(int item, int dir) {
     case 5: opt.shuffle = !opt.shuffle; applyShuffleChange(); break;
     case 6: opt.visual = (opt.visual + dir + 4) % 4; break;
     case 7: themeIndex = (themeIndex + dir + THEME_COUNT) % THEME_COUNT; applyTheme(); break;
+    case 8: opt.enhance = (opt.enhance + dir + 3) % 3; configureDsp(); break;
+    case 9: uiLanguage = (uiLanguage + dir + 9) % 9; break;
     default: break;
   }
   markSettingsDirty();
   drawSettings();
 }
 
+// ============================================================ copia SD -> FLASH
+// Copia o arquivo selecionado para a memoria interna. So com a musica parada
+// (nao disputa o SD com o decodificador), confere espaco e limpa se falhar.
+void copySelectedToFlash() {
+  if (playing) { showToast("PARE A MUSICA PARA COPIAR"); return; }
+  if (storageKind != STORAGE_SD || !sdReady || !internalReady || entryCount == 0 ||
+      entries[selected].isDir) {
+    showToast("SELECIONE ARQUIVO NO SD");
+    return;  }
+  char src[PATH_SIZE], dst[PATH_SIZE];
+  if (!buildPath(src, sizeof(src), browseDir, entries[selected].name)) { showToast("CAMINHO INVALIDO"); return; }
+  safeCopy(dst, sizeof(dst), src);
+
+  File in = SD.open(src, FILE_READ);
+  if (!in) { showToast("FALHA AO COPIAR"); return; }
+  const uint32_t total = (uint32_t)in.size();
+  if (LittleFS.exists(dst)) LittleFS.remove(dst);
+  const uint64_t freeB = (uint64_t)LittleFS.totalBytes() - (uint64_t)LittleFS.usedBytes();
+  if ((uint64_t)total + 8192ULL > freeB) {
+    in.close();
+    showToast("MEMORIA INTERNA CHEIA");
+    return;
+  }
+
+  char parent[PATH_SIZE];
+  safeCopy(parent, sizeof(parent), dst);
+  for (char *q = parent + 1; *q; ++q) {
+    if (*q == '/') { *q = 0; LittleFS.mkdir(parent); *q = '/'; }
+  }
+  File out = LittleFS.open(dst, FILE_WRITE);
+  uint8_t *buf = (uint8_t *)malloc(4096);
+  if (!out || !buf) {
+    if (buf) free(buf);
+    if (out) out.close();
+    in.close();
+    showToast("FALHA AO COPIAR");
+    return;
+  }
+
+  bool ok = true;
+  uint32_t done = 0, lastUi = 0;
+  while (done < total) {
+    const size_t n = in.read(buf, 4096);
+    if (!n || out.write(buf, n) != n) { ok = false; break; }
+    done += (uint32_t)n;
+    const uint32_t now = millis();
+    if (now - lastUi > 400) {
+      lastUi = now;
+      char t[32];
+      snprintf(t, sizeof(t), "COPIANDO %d%%", (int)((uint64_t)done * 100 / (total ? total : 1)));
+      showToast(t);
+      drawBrowser();
+    }
+    yield();
+  }
+  free(buf);
+  in.close();
+  out.close();
+  if (!ok) LittleFS.remove(dst);   // nunca deixa arquivo pela metade
+  showToast(ok ? "COPIADO PARA MEMORIA INTERNA" : "ERRO NA COPIA");
+  drawBrowser();
+}
+
+// ============================================================ USB (pendrive)
+#ifdef HAVE_USB_MSC
+USBMSC usbMsc;
+bool usbStarted = false;
+#endif
+bool usbActive = false;
+
+#ifdef HAVE_USB_MSC
+// USBMSC fornece o deslocamento em bytes dentro do primeiro setor.
+// Transferencias parciais usam read-modify-write; blocos completos vao direto
+// ao cartao. O Cardputer ADV usa setores SD de 512 bytes.
+int32_t mscRead(uint32_t lba, uint32_t off, void *buf, uint32_t len) {
+  if (!sdReady || !buf || !len || SD.sectorSize() != 512 || off >= 512) return -1;
+  const uint32_t sectors = SD.numSectors();
+  uint8_t *dst = static_cast<uint8_t *>(buf);
+  uint8_t sector[512];
+  uint32_t done = 0;
+  while (done < len) {
+    if (lba >= sectors) return -1;
+    const uint32_t count = min(len - done, 512u - off);
+    if (off == 0 && count == 512) {
+      if (!SD.readRAW(dst + done, lba)) return -1;
+    } else {
+      if (!SD.readRAW(sector, lba)) return -1;
+      memcpy(dst + done, sector + off, count);
+    }
+    done += count;
+    ++lba;
+    off = 0;
+  }
+  return (int32_t)done;
+}
+
+int32_t mscWrite(uint32_t lba, uint32_t off, uint8_t *buf, uint32_t len) {
+  if (!sdReady || !buf || !len || SD.sectorSize() != 512 || off >= 512) return -1;
+  const uint32_t sectors = SD.numSectors();
+  uint8_t *src = buf;
+  uint8_t sector[512];
+  uint32_t done = 0;
+  while (done < len) {
+    if (lba >= sectors) return -1;
+    const uint32_t count = min(len - done, 512u - off);
+    if (off == 0 && count == 512) {
+      if (!SD.writeRAW(src + done, lba)) return -1;
+    } else {
+      if (!SD.readRAW(sector, lba)) return -1;
+      memcpy(sector + off, src + done, count);
+      if (!SD.writeRAW(sector, lba)) return -1;
+    }
+    done += count;
+    ++lba;
+    off = 0;
+  }
+  return (int32_t)done;
+}
+
+bool mscStartStop(uint8_t, bool start, bool eject) {
+  if (eject) usbMsc.mediaPresent(start && sdReady);
+  return true;
+}
+
+void usbInit() {
+  if (usbStarted || !sdReady) return;
+  if (SD.sectorSize() != 512 || SD.numSectors() == 0) {
+    showToast("SD INCOMPATIVEL COM USB");
+    return;
+  }
+  usbMsc.vendorID("M5");
+  usbMsc.productID("CardputerMP3");
+  usbMsc.productRevision(MP3_PLAYER_VERSION);
+  usbMsc.onRead(mscRead);
+  usbMsc.onWrite(mscWrite);
+  usbMsc.onStartStop(mscStartStop);
+  usbMsc.mediaPresent(false);       // PC so enxerga o disco no modo USB
+  usbMsc.begin(SD.numSectors(), SD.sectorSize());
+  USB.begin();
+  usbStarted = true;
+}
+#endif
+
+void drawUsb() {
+  ui.fillSprite(C_BG);
+  drawHeader(ui, "USB", C_CYAN);
+  ui.setFont(&fonts::Font2);
+  ui.setTextColor(C_WHITE);
+#ifdef HAVE_USB_MSC
+  ui.drawString("MODO PENDRIVE ATIVO", 14, 34);
+  ui.setFont(&fonts::Font0);
+  ui.setTextColor(C_GREY);
+  char b[40];
+  snprintf(b, sizeof(b), "microSD: %llu MB", (unsigned long long)(SD.cardSize() >> 20));
+  ui.drawString(b, 14, 60);
+  ui.drawString("Copie as musicas pelo computador.", 14, 74);
+  ui.drawString("Ejete no PC antes de sair.", 14, 86);
+  ui.setTextColor(C_CYAN);
+  ui.drawString("U / X / DEL  SAIR", 14, 112);
+#else
+  ui.drawString("USB INDISPONIVEL", 14, 34);
+  ui.setFont(&fonts::Font0);
+  ui.setTextColor(C_GREY);
+  ui.drawString("Arduino IDE: Tools > USB Mode >", 14, 62);
+  ui.drawString("USB-OTG (TinyUSB) e regrave.", 14, 74);
+  ui.setTextColor(C_CYAN);
+  ui.drawString("QUALQUER TECLA VOLTA", 14, 112);
+#endif
+  ui.pushSprite(0, 0);
+}
+
+void enterUsb() {
+  if (!sdReady) { showToast("SEM microSD"); return; }
+  stopPlayback(true);
+  abortScan();
+  usbActive = true;
+#ifdef HAVE_USB_MSC
+  usbInit();
+  if (!usbStarted) { usbActive = false; showToast("USB ERRO"); return; }
+  usbMsc.mediaPresent(true);
+#endif
+  drawUsb();
+}
+
+void exitUsb() {
+#ifdef HAVE_USB_MSC
+  usbMsc.mediaPresent(false);
+  delay(50);
+  SD.end();                         // FS do PC pode ter mudado: remonta limpo
+  sdReady = mountSD();
+#endif
+  usbActive = false;
+  storageKind = sdReady ? STORAGE_SD : STORAGE_INTERNAL;
+  safeCopy(browseDir, sizeof(browseDir), "/");
+  selected = firstVisible = 0;
+  screen = SCR_BROWSER;
+  beginScan((storageReady() && activeFS().exists("/music")) ? "/music" : "/");
+}
+
+// Ao ligar o cabo em um PC, entra sozinho no modo pendrive (se nao estiver
+// tocando); ao desligar, volta. Tocando, use a tecla U.
+bool usbManualExit = false;
+void usbAutoStep() {
+#ifdef HAVE_USB_MSC
+  static uint32_t last = 0, since = 0;
+  const uint32_t now = millis();
+  if (now - last < 250) return;
+  last = now;
+  if (!usbStarted) { if (sdReady && !usbActive) usbInit(); return; }
+  const bool host = tud_mounted();
+  if (!host) {
+    usbManualExit = false;
+    if (usbActive) { if (!since) since = now; else if (now - since > 1500) { since = 0; exitUsb(); } }
+    else since = 0;
+    return;
+  }
+  since = 0;
+  if (!usbActive && !usbManualExit && sdReady && !playing) {
+    screenOff = false;
+    lastActivity = now;
+    applyBrightness();
+    enterUsb();
+  }
+#endif
+}
+
 void browserKey(int k) {
+  if (k == 'u') { enterUsb(); return; }
   if (k == K_TAB) { if (playing) drawPlayer(); return; }
   if (mediaKey(k)) return;
   switch (k) {
     case 's': returnScreen = SCR_BROWSER; drawSettings(); return;
     case 'e': returnScreen = SCR_BROWSER; drawEq(); return;
     case 'r': refreshBrowser(); return;
+    case 'm':
+      if (playing) { showToast("PARE A MUSICA PARA TROCAR"); return; }
+      abortScan(); storageKind = (storageKind == STORAGE_SD) ? STORAGE_INTERNAL : STORAGE_SD;
+      safeCopy(browseDir, sizeof(browseDir), "/"); selected = firstVisible = 0;
+      showToast(storageReady() ? (storageKind == STORAGE_SD ? "ARMAZENAMENTO: SD" : "ARMAZENAMENTO: INTERNO") : "ARMAZENAMENTO INDISPONIVEL");
+      beginScan("/"); return;
+    case 'c': copySelectedToFlash(); return;
     default: break;
   }
   if (scanning) return;
@@ -1970,6 +3243,25 @@ void browserKey(int k) {
   else if (k == K_DEL) parentDir();
 }
 
+void setPlaybackSpeed(float speed) {
+  playbackSpeed = constrain(speed, 0.75f, 1.75f);
+  // Reconfigura apenas a etapa do reamostrador. Nao reinicia decoder,
+  // arquivo ou fila do speaker; evita corte ao mudar velocidade.
+  rsActive = (fabsf(gSrcRate - (float)OUT_RATE) > 0.5f) ||
+             (fabsf(playbackSpeed - 1.0f) > 0.001f);
+  rsStep = (gSrcRate / (float)OUT_RATE) * playbackSpeed;
+  rsPhase = 0.0f;
+  configureAA();
+  configureDsp();
+  const char *mode = "NORMAL";
+  if (fabsf(playbackSpeed - 0.75f) < 0.001f) mode = "SLOWED";
+  else if (fabsf(playbackSpeed - 1.25f) < 0.001f) mode = "SPED UP";
+  else if (fabsf(playbackSpeed - 1.75f) < 0.001f) mode = "Nightcore";
+  char msg[28];
+  snprintf(msg, sizeof(msg), "%s", mode);
+  showToast(msg);
+}
+
 void playerKey(int k) {
   if (mediaKey(k)) return;
   char t[28];
@@ -1978,6 +3270,10 @@ void playerKey(int k) {
     case 'e': returnScreen = SCR_PLAYER; drawEq(); break;
     case K_DEL:
     case '`': drawBrowser(); break;
+    case '7': setPlaybackSpeed(0.75f); break;
+    case '8': setPlaybackSpeed(1.25f); break;
+    case '9': setPlaybackSpeed(1.75f); break;
+    case '0': setPlaybackSpeed(1.00f); break;
     case ',': seekBy(-10); break;
     case '/': seekBy(+10); break;
     case ';': changeVolume(+5); break;
@@ -2019,7 +3315,7 @@ void eqKey(int k) {
   else if (k == '/') { eqSelected = (eqSelected + 1) % EQ_BANDS; drawEq(); }
   else if (k == ';' || k == '.') {
     eqGain[eqSelected] = constrain(eqGain[eqSelected] + (k == ';' ? 1 : -1), -EQ_LIMIT, EQ_LIMIT);
-    configureEqualizer();
+    configureDsp();
     markSettingsDirty();
     drawEq();
   } else if (k == '0') {
@@ -2046,8 +3342,15 @@ void settingsKey(int k) {
 
 void onKey(int k) {
   if (k >= 'A' && k <= 'Z') k += 32;
+  if (usbActive) {
+#ifdef HAVE_USB_MSC
+    if (k == 'u' || k == 'x' || k == K_DEL || k == '`') { usbManualExit = true; exitUsb(); }
+#else
+    exitUsb();
+#endif
+    return;
+  }
 
-  // H abre a ajuda global; na ajuda, H percorre as tres paginas.
   if (screen == SCR_HELP) {
     if (k == 'h') {
       helpPage = (helpPage + 1) % 3;
@@ -2081,9 +3384,14 @@ bool isRepeatable(int k) {
   return false;
 }
 
-// Retorna true se a tela estava apagada (a tecla so acorda a tela).
+// Sobe a CPU na hora quando o usuario interage (powerStep() desce no ocioso).
+void cpuBoost() {
+  if (getCpuFrequencyMhz() < 240) setCpuFrequencyMhz(240);
+}
+
 bool wakeIfScreenOff() {
   lastActivity = millis();
+  cpuBoost();
   if (!screenOff) return false;
   screenOff = false;
   applyBrightness();
@@ -2138,31 +3446,39 @@ void pollShake() {
   const float m = sqrtf(d.accel.x * d.accel.x + d.accel.y * d.accel.y + d.accel.z * d.accel.z);
   if (m > SHAKE_G && now - lastShake > 1500) {
     lastShake = now;
-    advance(+1, false);
+    requestSkip(+1);
   }
 }
 
 void decodeStep() {
   if (!playing || paused || !decoder) return;
-  bool ended = false;
-  const uint32_t t0 = millis();
-  while (millis() - t0 < 8) {  // fatia curta: UI e teclado nunca ficam presos
-    gSliceLeft = 2304;           // ~2 frames por chamada
-    if (!decoder->loop()) { ended = true; break; }
-    if (audioOutput && audioOutput->isFull()) break;
-  }
-  if (ended) { onTrackEnded(); return; }
-  if (audioOutput && audioOutput->isFull()) delay(2);  // fila do speaker cheia
+  if (!trackEndPending) decodeSlice(8);  // fatia curta: UI e teclado nunca ficam presos
+  if (trackEndPending) { trackEndPending = false; onTrackEnded(); return; }
+  if (audioOutput && audioOutput->isFull()) delay(2);
 
-  // anti-travamento: sem progresso por 4 s = arquivo ruim/SD com problema
+  // anti-travamento: sem progresso = arquivo ruim/SD com problema
   if (gSamplesSubmitted != lastSamples) {
     lastSamples = gSamplesSubmitted;
     lastProgress = millis();
+    stallRetries = 0;
   } else if (millis() - lastProgress > 4000) {
     lastProgress = millis();
+    if (stallRetries == 0 && canSeek()) {  // 1a tentativa: reabre no mesmo ponto
+      stallRetries = 1;
+      showToast("RECUPERANDO...");
+      if (startTrack(order[orderPos], elapsedSec(), false, false)) { redrawCurrent(); return; }
+    }
     showToast("ERRO DE LEITURA");
     advance(+1, true);
   }
+}
+
+void coverStep() {
+  if (!coverPending || !playing || screenOff) return;
+  if (screen != SCR_PLAYER || opt.visual != 3) return;
+  if (millis() - trackStartedAt < 500) return;  // deixa o buffer de audio encher antes
+  coverPending = false;
+  coverLoaded = decodeCover();
 }
 
 void fadeStep() {
@@ -2181,24 +3497,37 @@ void fadeStep() {
   }
 }
 
-// RGB LED do ADV (GPIO21): segue o tema e reage ao audio.
+// RGB LED do ADV (GPIO21): cor do tema, pulsa nos graves, flash na batida,
+// agudos puxam a cor para um tom vizinho; respira quando pausado.
 void ledUpdate() {
-  static uint32_t last = 0;
+  static uint32_t last = 0, lastBeat = 0;
   static int lastR = -1, lastG = -1, lastB = -1;
-  static float level = 0.10f;
+  static float level = 0.10f, bassAvg = 0.2f, flash = 0, hi = 0;
   const uint32_t now = millis();
-  if (now - last < 40) return;
+  if (now - last < 30) return;
   last = now;
-  const ThemePalette &theme = THEMES[themeIndex];
-  const float audio = (playing && !paused)
-      ? (gBand[0] + gBand[1] + gBand[2]) / 3.0f : 0.0f;
-  const float target = (playing && !paused)
-      ? constrain(0.10f + audio * 1.15f, 0.10f, 1.0f)
-      : (paused ? 0.055f : 0.12f);
-  level = target > level ? target : level * 0.78f;
-  const int r = (int)(theme.r * level);
-  const int g = (int)(theme.g * level);
-  const int b = (int)(theme.b * level);
+  const ThemePalette &th = THEMES[themeIndex];
+  float target;
+  if (playing && !paused) {
+    const float bass = (gBand[0] * 1.2f + gBand[1] + gBand[2] * 0.8f) / 3.0f;
+    const float high = (gBand[8] + gBand[9] + gBand[10] + gBand[11]) * 0.25f;
+    bassAvg += 0.04f * (bass - bassAvg);
+    if (bass > bassAvg * 1.35f + 0.08f && now - lastBeat > 170) { lastBeat = now; flash = 1.0f; }
+    flash *= 0.80f;
+    hi += 0.25f * (high - hi);
+    target = constrain(0.08f + bass * 0.75f + flash * 0.35f, 0.08f, 1.0f);
+  } else {
+    flash = 0; hi *= 0.8f;
+    target = paused ? 0.03f + 0.03f * (0.5f + 0.5f * sinf(now * 0.0025f)) : 0.06f + 0.05f * (0.5f + 0.5f * sinf(now * 0.002f));
+  }
+  level = target > level ? level + (target - level) * 0.7f : level * 0.86f;
+  const float L = level * level * 0.6f + level * 0.4f;     // curva perceptual
+  const float t = constrain(hi * 1.4f, 0.0f, 0.6f);          // mistura com tom vizinho
+  const float fr = th.r * (1 - t) + th.g * t, fg = th.g * (1 - t) + th.b * t, fb = th.b * (1 - t) + th.r * t;
+  const float w = flash * 0.25f;                              // clareia na batida
+  const int r = (int)constrain((fr + (255 - fr) * w) * L, 0.0f, 255.0f);
+  const int g = (int)constrain((fg + (255 - fg) * w) * L, 0.0f, 255.0f);
+  const int b = (int)constrain((fb + (255 - fb) * w) * L, 0.0f, 255.0f);
   if (r != lastR || g != lastG || b != lastB) {
     lastR = r; lastG = g; lastB = b;
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
@@ -2207,12 +3536,25 @@ void ledUpdate() {
   }
 }
 
+// Economia de energia: 240 MHz so quando necessario (tocando, varrendo, USB);
+// 160 MHz parado ou ocioso. A tecla pressionada sobe para 240 na hora.
+void powerStep() {
+  static uint32_t last = 0;
+  const uint32_t now = millis();
+  if (now - last < 1000) return;
+  last = now;
+  const bool busy = (playing && !paused) || scanning || usbActive || fadeAction != FA_NONE;
+  const bool idle = !busy && (now - lastActivity > 8000);
+  const uint32_t want = idle ? 160 : 240;
+  if (getCpuFrequencyMhz() != want) setCpuFrequencyMhz(want);
+}
+
 void housekeeping() {
   const uint32_t now = millis();
   static uint32_t lastLive = 0, lastBrowser = 0, lastScanDraw = 0;
 
   if (!screenOff) {
-    if (screen == SCR_PLAYER && playing && now - lastLive >= 50) {
+    if (screen == SCR_PLAYER && playing && now - lastLive >= (gResLevel ? 100u : 66u)) {
       lastLive = now;
       drawLive();
     }
@@ -2230,6 +3572,15 @@ void housekeeping() {
     toastActive = false;
     if (screen == SCR_BROWSER) drawBrowser();
   }
+
+  // apos uma recuperacao de SD, refaz a listagem da pasta atual
+  if (needRescan && !scanning && now - lastRemountAt > 1500) {
+    needRescan = false;
+    if (storageReady()) beginScan(browseDir);
+  }
+
+  // Busca o cartao em segundo plano e volta para SD quando ele reaparecer.
+  sdAutoDetectStep();
 
   if (sleepDeadline && (int32_t)(now - sleepDeadline) >= 0) {
     sleepDeadline = 0;
@@ -2279,47 +3630,58 @@ void setup() {
   live.setColorDepth(16);
   if (!live.createSprite(240, 90)) Serial.println("ERRO: sprite live sem memoria");
   coverCanvas.setColorDepth(16);
-  coverCanvasReady = coverCanvas.createSprite(68, 46);
+  coverCanvasReady = coverCanvas.createSprite(COVER_PX, COVER_PX);
   if (!coverCanvasReady) Serial.println("AVISO: capa indisponivel (sem memoria)");
 
   // Speaker: 44.1 kHz nativo, mais DMA, tarefa de audio no core 0
   M5Cardputer.Speaker.end();
   auto spk = M5Cardputer.Speaker.config();
-  spk.sample_rate = 44100;
-  spk.dma_buf_count = 6;
+  spk.sample_rate = OUT_RATE;
+  spk.dma_buf_count = 8;
   spk.dma_buf_len = 512;
   spk.task_pinned_core = 0;
   M5Cardputer.Speaker.config(spk);
   M5Cardputer.Speaker.begin();
-  M5Cardputer.Speaker.setVolume(220);  // ganho moderado; volume final controlado no player
+  M5Cardputer.Speaker.setVolume(220);
 
+  gVolTarget = 0.5f;
   updateVolumeTarget();
   gVolCur = gVolTarget;
-  configureEqualizer();
   configureSpectrum();
 
   imuOk = M5.Imu.isEnabled();
   batteryPercent = M5Cardputer.Power.getBatteryLevel();
   lastActivity = millis();
 
+  if (HP_DET_PIN >= 0) pinMode(HP_DET_PIN, INPUT_PULLUP);
+  internalReady = LittleFS.begin(false);
   sdReady = mountSD();
+  storageKind = sdReady ? STORAGE_SD : STORAGE_INTERNAL;
   screen = SCR_BROWSER;
   while (millis() - splashStart < 900) delay(10);
-  beginScan((sdReady && SD.exists("/music")) ? "/music" : "/");
+  beginScan((storageReady() && activeFS().exists("/music")) ? "/music" : "/");
 
-  Serial.printf("MP3 PLAYER %s | SD=%s | IMU=%s | heap=%u\n", MP3_PLAYER_VERSION,
-                sdReady ? "OK" : "FAIL", imuOk ? "OK" : "N/D",
-                (unsigned)ESP.getFreeHeap());
+  Serial.printf("MP3 PLAYER %s | SD=%s | INTERNAL=%s | IMU=%s | heap=%u maxblk=%u\n", MP3_PLAYER_VERSION,
+                sdReady ? "OK" : "FAIL", internalReady ? "OK" : "FAIL", imuOk ? "OK" : "N/D",
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
 
 void loop() {
   M5Cardputer.update();
+  usbAutoStep();
+  if (usbActive) { handleKeyboard(); delay(5); return; }  // SD exclusivo do PC
   decodeStep();
   fadeStep();
-  scanStep(5);
+  seekStep();
+  skipStep();
+  scanStep(4);
   handleKeyboard();
+  coverStep();
   pollShake();
   housekeeping();
+  resourceStep();
+  outputAutoStep();
   ledUpdate();
+  powerStep();
   delay(1);
 }

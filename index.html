@@ -5,15 +5,15 @@
 <main>
 <section class="hero"><div class="eyebrow">MUSIC FIRMWARE <span>v@MP3_PLAYER_VERSION@</span></div><h1 class="hero-title" data-text="MP3 PLAYER">MP3 PLAYER</h1><p class="tagline">YOUR MUSIC. YOUR CARDPUTER.</p><p class="intro">A dedicated MP3 music player for the M5Stack Cardputer ADV.<br>Play music from microSD or internal flash storage.</p><esp-web-install-button manifest="firmware/manifest.json?v=@MP3_PLAYER_VERSION@"><button slot="activate">FLASH FIRMWARE <span>↗</span></button></esp-web-install-button><p class="install-note">USB CONNECTION REQUIRED · CHROME / EDGE</p><div class="firmware-version" aria-label="Firmware version"><span>AVAILABLE FIRMWARE</span><strong>v@MP3_PLAYER_VERSION@</strong><small>BUILT FOR M5STACK CARDPUTER ADV · ESP32-S3</small></div><div class="terminal-line"><span>SYS</span> MP3 PLAYER READY <b>●</b></div></section>
 <section class="section"><div class="section-head"><span>01 / PLAYER</span><h2>MUSIC PLAYBACK</h2></div><div class="modules">
-<article><span>01</span><div><h3>MP3 LIBRARY</h3><p>Browse audio folders on microSD and internal flash, including nested folders. Copy tracks from SD to internal storage.</p></div><b>♫</b></article>
-<article><span>02</span><div><h3>PLAYBACK CONTROLS</h3><p>Play, pause, stop, next/previous track, automatic advance, seek and adjustable playback speed (0.75x–1.50x).</p></div><b>▶</b></article>
-<article><span>03</span><div><h3>METADATA & COVER ART</h3><p>Read ID3 title and artist tags and display embedded JPEG/PNG album covers.</p></div><b>▧</b></article>
-<article><span>04</span><div><h3>5-BAND EQUALIZER</h3><p>Five-band equalizer, six presets, independent band adjustment, audio enhancement and soft limiter.</p></div><b>≋</b></article>
-<article><span>05</span><div><h3>AUDIO VISUALIZER</h3><p>Bars, mirror, waveform and album-cover display modes.</p></div><b>◉</b></article>
-<article><span>06</span><div><h3>THEMES & RGB LED</h3><p>Ice Blue (default), Dark Red, Matrix, Cyberpunk and Amber. The Cardputer LED follows the selected palette and reacts to music.</p></div><b>✦</b></article>
+<article><span>01</span><div><h3>MP3 LIBRARY</h3><p>Browse microSD and internal-flash folders, including nested directories. Build a playback queue and safely copy selected tracks to internal storage.</p></div><b>♫</b></article>
+<article><span>02</span><div><h3>PLAYBACK MODES</h3><p>Play, pause, stop, seek, repeat and shuffle, with grouped next/previous requests. Speeds: SLOWED 0.75x, SPED UP 1.25x, Nightcore 1.75x and normal.</p></div><b>▶</b></article>
+<article><span>03</span><div><h3>METADATA, COVERS & FORMATS</h3><p>Read ID3 metadata and display embedded or folder-based album art. MP3 is built in; WAV, FLAC and AAC are enabled when the installed decoder library provides them.</p></div><b>▧</b></article>
+<article><span>04</span><div><h3>5-BAND AUDIO DSP</h3><p>Five-band EQ with six presets, independent speaker/headphone levels, output voicing, DC blocking, smooth compression and peak limiting.</p></div><b>≋</b></article>
+<article><span>05</span><div><h3>VISUALIZER MODES & RGB LED</h3><p>Live frequency bars, mirror, waveform and album-cover modes. Five themes and the RGB LED follow the selected palette and playback activity.</p></div><b>◉</b></article>
+<article><span>06</span><div><h3>SD RECOVERY & USB STORAGE</h3><p>Buffered audio, automatic SD recovery with slower SPI fallback, safe SD-to-flash copies, USB mass-storage mode and adaptive memory/CPU management.</p></div><b>✦</b></article>
 </div></section>
 <section class="section"><div class="section-head"><span>02 / INSTALLATION</span><h2>FLASH THE CARDPUTER</h2></div><div class="steps"><article><small>STEP 01</small><strong>CONNECT</strong><p>Connect the Cardputer ADV to your computer with a USB cable.</p></article><article><small>STEP 02</small><strong>BOOT MODE</strong><p>Hold G0 while connecting the USB cable to enter download mode.</p></article><article><small>STEP 03</small><strong>INSTALL</strong><p>Click the install button, select the serial port and confirm.</p></article></div></section>
-<section class="section transfer"><div><small>MP3 PLAYER / CARDPUTER ADV</small><h2>MADE FOR<br><em>YOUR MUSIC.</em></h2><p>MP3 playback firmware focused on local music, efficient audio decoding and a responsive interface on the Cardputer ADV.</p></div><div class="source-links"><a href="https://raw.githubusercontent.com/otavio-dias-leite/mp3player/main/src/main.cpp">ARDUINO SOURCE CODE ↓</a><a href="https://github.com/otavio-dias-leite/mp3player/releases/tag/v8.0.0">FIRMWARE v8.0.0 RELEASE ↗</a></div></section>
+<section class="section transfer"><div><small>MP3 PLAYER / CARDPUTER ADV</small><h2>MADE FOR<br><em>YOUR MUSIC.</em></h2><p>Version 12 combines buffered local playback, adaptive audio DSP, SD recovery and USB mass storage in a focused Cardputer ADV player.</p></div><div class="source-links"><a href="https://raw.githubusercontent.com/otavio-dias-leite/mp3player/main/src/main.cpp">ARDUINO SOURCE CODE ↓</a><a href="https://github.com/otavio-dias-leite/mp3player/releases/latest">FIRMWARE RELEASES ↗</a></div></section>
 <footer><span>MP3 PLAYER</span><span>M5STACK CARDPUTER ADV</span><span>© 2026</span></footer></main>
 <script>
 (() => {
@@ -38,16 +38,16 @@
       ".section:nth-of-type(2) .section-head h2": "REPRODUÇÃO DE MÚSICA",
       ".section:nth-of-type(2) article:nth-child(1) h3": "BIBLIOTECA MP3",
       ".section:nth-of-type(2) article:nth-child(1) p": "Navegue por pastas de áudio no microSD e na memória flash interna, incluindo subpastas. Copie faixas do SD para a memória interna.",
-      ".section:nth-of-type(2) article:nth-child(2) h3": "CONTROLES DE REPRODUÇÃO",
-      ".section:nth-of-type(2) article:nth-child(2) p": "Reproduzir, pausar, parar, avançar/voltar faixa, avanço automático, busca e velocidade ajustável (0,75x–1,50x).",
-      ".section:nth-of-type(2) article:nth-child(3) h3": "METADADOS E CAPAS",
-      ".section:nth-of-type(2) article:nth-child(3) p": "Leia título e artista pelas tags ID3 e exiba capas JPEG/PNG incorporadas.",
-      ".section:nth-of-type(2) article:nth-child(4) h3": "EQUALIZADOR DE 5 BANDAS",
-      ".section:nth-of-type(2) article:nth-child(4) p": "Equalizador de cinco bandas, seis predefinições, ajuste independente por banda, aprimoramento de áudio e limitador suave.",
-      ".section:nth-of-type(2) article:nth-child(5) h3": "VISUALIZADOR DE ÁUDIO",
-      ".section:nth-of-type(2) article:nth-child(5) p": "Modos de visualização em barras, espelho, forma de onda e capa do álbum.",
-      ".section:nth-of-type(2) article:nth-child(6) h3": "TEMAS E LED RGB",
-      ".section:nth-of-type(2) article:nth-child(6) p": "Ice Blue (padrão), Dark Red, Matrix, Cyberpunk e Amber. O LED do Cardputer acompanha a paleta selecionada e reage à música.",
+      ".section:nth-of-type(2) article:nth-child(2) h3": "MODOS DE REPRODUÇÃO",
+      ".section:nth-of-type(2) article:nth-child(2) p": "Reproduza, pause, pare, busque, repita e embaralhe faixas, com avanço/retorno agrupado. Velocidades: SLOWED 0,75x, SPED UP 1,25x, Nightcore 1,75x e normal.",
+      ".section:nth-of-type(2) article:nth-child(3) h3": "METADADOS, CAPAS E FORMATOS",
+      ".section:nth-of-type(2) article:nth-child(3) p": "Leia metadados ID3 e exiba capas incorporadas ou encontradas na pasta. MP3 é nativo; WAV, FLAC e AAC dependem dos decodificadores disponíveis na biblioteca.",
+      ".section:nth-of-type(2) article:nth-child(4) h3": "DSP DE ÁUDIO (5 BANDAS)",
+      ".section:nth-of-type(2) article:nth-child(4) p": "EQ de cinco bandas e seis presets, volumes independentes para alto-falante/fone, perfil de saída, bloqueio DC, compressão suave e limitador de pico.",
+      ".section:nth-of-type(2) article:nth-child(5) h3": "MODOS VISUAIS E LED RGB",
+      ".section:nth-of-type(2) article:nth-child(5) p": "Barras de frequência em tempo real, espelho, forma de onda e capas. O LED RGB acompanha o tema selecionado e reage à reprodução.",
+      ".section:nth-of-type(2) article:nth-child(6) h3": "RECUPERAÇÃO DO SD E USB",
+      ".section:nth-of-type(2) article:nth-child(6) p": "Áudio em buffer, recuperação automática do SD com redução da frequência SPI, cópia segura SD→Flash, modo USB pendrive e gestão adaptativa de memória/CPU.",
       ".section:nth-of-type(3) .section-head h2": "INSTALAR NO CARDPUTER",
       ".section:nth-of-type(3) article:nth-child(1) strong": "CONECTAR",
       ".section:nth-of-type(3) article:nth-child(1) p": "Conecte o Cardputer ADV ao computador com um cabo USB.",
@@ -71,16 +71,16 @@
       ".section:nth-of-type(2) .section-head h2": "音乐播放",
       ".section:nth-of-type(2) article:nth-child(1) h3": "MP3 音乐库",
       ".section:nth-of-type(2) article:nth-child(1) p": "浏览 microSD 和内部闪存中的音频文件夹，包括嵌套文件夹。可将曲目从 SD 卡复制到内部存储。",
-      ".section:nth-of-type(2) article:nth-child(2) h3": "播放控制",
-      ".section:nth-of-type(2) article:nth-child(2) p": "播放、暂停、停止、上一曲/下一曲、自动切换、定位及速度调节（0.75x–1.50x）。",
-      ".section:nth-of-type(2) article:nth-child(3) h3": "元数据与封面",
-      ".section:nth-of-type(2) article:nth-child(3) p": "读取 ID3 标题和艺术家标签，并显示嵌入的 JPEG/PNG 专辑封面。",
-      ".section:nth-of-type(2) article:nth-child(4) h3": "五段均衡器",
-      ".section:nth-of-type(2) article:nth-child(4) p": "五段均衡器、六种预设、独立频段调节、音频增强和软限制器。",
-      ".section:nth-of-type(2) article:nth-child(5) h3": "音频可视化",
-      ".section:nth-of-type(2) article:nth-child(5) p": "支持柱状图、镜像、波形和专辑封面显示模式。",
-      ".section:nth-of-type(2) article:nth-child(6) h3": "主题与 RGB LED",
-      ".section:nth-of-type(2) article:nth-child(6) p": "Ice Blue（默认）、Dark Red、Matrix、Cyberpunk 和 Amber。Cardputer LED 会跟随所选配色并随音乐律动。",
+      ".section:nth-of-type(2) article:nth-child(2) h3": "播放模式",
+      ".section:nth-of-type(2) article:nth-child(2) p": "播放、暂停、停止、定位、重复和随机播放，并合并快速上一曲/下一曲操作。速度：SLOWED 0.75x、SPED UP 1.25x、Nightcore 1.75x 和正常速度。",
+      ".section:nth-of-type(2) article:nth-child(3) h3": "元数据、封面与格式",
+      ".section:nth-of-type(2) article:nth-child(3) p": "读取 ID3 元数据，并显示嵌入封面或文件夹封面。内置 MP3；WAV、FLAC 和 AAC 取决于所安装的解码库。",
+      ".section:nth-of-type(2) article:nth-child(4) h3": "五段音频 DSP",
+      ".section:nth-of-type(2) article:nth-child(4) p": "五段均衡器和六种预设，扬声器/耳机独立音量、输出音色、直流阻断、平滑压缩和峰值限制。",
+      ".section:nth-of-type(2) article:nth-child(5) h3": "可视化模式与 RGB LED",
+      ".section:nth-of-type(2) article:nth-child(5) p": "实时频谱柱、镜像、波形和专辑封面模式。RGB LED 跟随主题并响应播放。",
+      ".section:nth-of-type(2) article:nth-child(6) h3": "SD 恢复与 USB 存储",
+      ".section:nth-of-type(2) article:nth-child(6) p": "音频缓冲、SD 自动恢复与 SPI 降速回退、安全 SD 到闪存复制、USB 大容量存储模式及自适应内存/CPU 管理。",
       ".section:nth-of-type(3) .section-head h2": "刷写 Cardputer",
       ".section:nth-of-type(3) article:nth-child(1) strong": "连接设备",
       ".section:nth-of-type(3) article:nth-child(1) p": "使用 USB 数据线将 Cardputer ADV 连接到电脑。",
