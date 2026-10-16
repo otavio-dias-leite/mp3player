@@ -543,7 +543,7 @@ void loadSettings() {
   const int themeVersion = prefs.getInt("themeV", 0);
   themeIndex = constrain(prefs.getInt("th", 3), 0, THEME_COUNT - 1);
   if (themeVersion < 1) themeIndex = 3; // migrate legacy installs to blue
-  for (int i = i < EQ_BANDS; ++i) {
+  for (int i = 0; i < EQ_BANDS; ++i) {
     char key[3] = {'g', (char)('0' + i), 0};
     eqGain[i] = constrain(prefs.getInt(key, eqGain[i]), -EQ_LIMIT, EQ_LIMIT);
   }
