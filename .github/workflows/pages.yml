@@ -93,7 +93,7 @@ jobs:
           import json, os
           from pathlib import Path
           version = os.environ["RELEASE_VERSION"]
-          for name in ("index.html", "transfer.html"):
+          for name in ("index.html",):
               page = Path("_site") / name
               page.write_text(page.read_text().replace("@MP3 PLAYER_VERSION@", version))
           manifest = Path("_site/firmware/manifest.json")
