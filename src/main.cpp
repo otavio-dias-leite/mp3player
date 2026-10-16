@@ -76,7 +76,7 @@
 #define HAVE_AAC 1
 #endif
 
-#define MP3_PLAYER_VERSION "8.1.0"
+#define MP3_PLAYER_VERSION "8.1.1"
 
 namespace {
 
@@ -1317,6 +1317,8 @@ bool scanOverflow = false;
 bool scanFolderLimit = false;
 bool needRescan = false;
 uint32_t lastRemountAt = 0;
+uint32_t lastSdProbeAt = 0;
+constexpr uint32_t SD_AUTO_PROBE_INTERVAL_MS = 2500;
 File scanHandle;
 
 constexpr int DIR_WALK_DEPTH = 8;
@@ -1388,12 +1390,16 @@ void abortScan() {
 // Chamada pela fonte de audio quando o SD falha durante a reproducao.
 void sdRemount() {
   abortScan();
-  SD.end();
-  delay(60);
+  delay(30);
   sdReady = mountSD();
   lastRemountAt = millis();
+  lastSdProbeAt = lastRemountAt;
+  if (sdReady) storageKind = STORAGE_SD;
+  else if (internalReady) storageKind = STORAGE_INTERNAL;
   needRescan = true;
   showToast(sdReady ? "SD RECUPERADO" : "SD DESCONECTADO");
+}
+
 }
 
 bool startDirValidation(size_t index) {
@@ -2584,28 +2590,88 @@ bool mediaKey(int k) {
   return false;
 }
 
-bool mountSD() {
+// Reinicia o controlador SPI dedicado ao microSD antes de cada tentativa.
+void resetSdBus() {
+  SD.end();
+  sdSPI.end();
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
+  pinMode(SD_SCK, INPUT_PULLUP);
+  pinMode(SD_MISO, INPUT_PULLUP);
+  pinMode(SD_MOSI, INPUT_PULLUP);
+  delay(20);
+  digitalWrite(SD_CS, HIGH);
   sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  const uint32_t freqs[] = {4000000, 2000000, 1000000};
+  delay(20);
+}
+
+bool mountSD() {
+  const uint32_t freqs[] = {400000, 800000, 1600000, 4000000};
   for (uint32_t f : freqs) {
+    resetSdBus();
     if (SD.begin(SD_CS, sdSPI, f, "/sd", 8, false)) {
-      Serial.printf("SD montado: freq=%lu Hz, tipo=%u, bytes=%llu\n", (unsigned long)f, (unsigned)SD.cardType(), (unsigned long long)SD.cardSize());
-      return true;
+      File root = SD.open("/");
+      const bool usable = root && root.isDirectory() && SD.cardSize() > 0;
+      if (root) root.close();
+      if (usable) {
+        Serial.printf("SD montado: freq=%lu Hz, tipo=%u, bytes=%llu\\n", (unsigned long)f, (unsigned)SD.cardType(), (unsigned long long)SD.cardSize());
+        return true;
+      }
+      Serial.printf("SD montou mas nao passou na verificacao em %lu Hz\\n", (unsigned long)f);
+    } else {
+      Serial.printf("Falha SD.begin em %lu Hz\\n", (unsigned long)f);
     }
-    Serial.printf("Falha SD.begin em %lu Hz\n", (unsigned long)f);
     SD.end();
-    delay(50);
+    delay(80);
   }
   return false;
 }
 
-void refreshBrowser() {
-  if (!playing && storageKind == STORAGE_SD) {  // remonta o cartao apenas se nada esta tocando
-    abortScan();
+// Procura o cartao continuamente sem interromper musica ou varredura.
+void sdAutoDetectStep() {
+  const uint32_t now = millis();
+  if (playing || scanning || now - lastSdProbeAt < SD_AUTO_PROBE_INTERVAL_MS) return;
+  lastSdProbeAt = now;
+
+  if (sdReady) {
+    File root = SD.open("/");
+    const bool healthy = root && root.isDirectory();
+    if (root) root.close();
+    if (healthy) return;
+
+    Serial.println("SD deixou de responder; reiniciando controlador");
+    sdReady = false;
     SD.end();
+    sdSPI.end();
+    if (internalReady) {
+      storageKind = STORAGE_INTERNAL;
+      safeCopy(browseDir, sizeof(browseDir), "/");
+      beginScan(browseDir);
+    }
+    showToast("SD DESCONECTADO - BUSCANDO");
+    return;
+  }
+
+  Serial.println("Busca automatica pelo cartao SD...");
+  if (!mountSD()) {
+    if (storageKind == STORAGE_SD && internalReady) storageKind = STORAGE_INTERNAL;
+    return;
+  }
+
+  sdReady = true;
+  storageKind = STORAGE_SD;
+  safeCopy(browseDir, sizeof(browseDir), SD.exists("/music") ? "/music" : "/");
+  selected = 0;
+  firstVisible = 0;
+  showToast("SD RECONECTADO");
+  beginScan(browseDir);
+}
+
+void refreshBrowser() {
+  if (!playing && storageKind == STORAGE_SD) {
+    abortScan();
     sdReady = mountSD();
+    if (!sdReady && internalReady) storageKind = STORAGE_INTERNAL;
   }
   char dir[DIR_SIZE];
   safeCopy(dir, sizeof(dir), browseDir);
@@ -3006,6 +3072,9 @@ void housekeeping() {
     needRescan = false;
     if (storageReady()) beginScan(browseDir);
   }
+
+  // Busca o cartao em segundo plano e volta para SD quando ele reaparecer.
+  sdAutoDetectStep();
 
   if (sleepDeadline && (int32_t)(now - sleepDeadline) >= 0) {
     sleepDeadline = 0;
