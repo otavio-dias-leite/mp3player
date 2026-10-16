@@ -449,7 +449,8 @@ float gFadeGain = 0.0f;
 float gFadeTarget = 1.0f;
 float gFadeStep = 1.0f / (0.03f * 44100.0f);
 uint32_t gSamplesSubmitted = 0;
-double gMediaTimeSamples = 0.0;
+double mediaClockSeconds = 0.0;
+uint32_t mediaClockLastMs = 0;
 
 // realce de som
 bool gCompOn = false;
@@ -1924,8 +1925,23 @@ uint32_t seekDue = 0;
 int pendingSkip = 0;
 uint32_t skipDue = 0;
 
+void updateMediaClock() {
+  const uint32_t now = millis();
+  if (mediaClockLastMs == 0) {
+    mediaClockLastMs = now;
+    return;
+  }
+  const uint32_t delta = now - mediaClockLastMs;
+  mediaClockLastMs = now;
+  if (playing && !paused && fadeAction != FA_PAUSE) {
+    mediaClockSeconds += ((double)delta / 1000.0) * (double)playbackSpeed;
+  }
+}
+
 uint32_t elapsedSec() {
-  return (uint32_t)(gMediaTimeSamples / (double)OUT_RATE);
+  updateMediaClock();
+  if (mediaClockSeconds < 0.0) return 0;
+  return (uint32_t)mediaClockSeconds;
 }
 
 bool canSeek() { return meta.fmt == FMT_MP3 && meta.durationSec >= 3; }
@@ -2037,7 +2053,8 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   gFadeGain = natural ? 1.0f : 0.0f;  // fade-in curto, exceto na troca gapless
   if (!natural) { resetDsp(); gVolCur = gVolTarget; }
   gSamplesSubmitted = 0;
-  gMediaTimeSamples = (double)startedAt * (double)OUT_RATE;
+  mediaClockSeconds = (double)startedAt;
+  mediaClockLastMs = millis();
 
   if (!decoder->begin(bufferedSource, audioOutput)) { stopPlayback(true); return false; }
 
@@ -2150,6 +2167,7 @@ void seekStep() {
 
 void togglePause() {
   if (!playing) return;
+  updateMediaClock();
   if (paused) {
     paused = false;
     fadeAction = FA_NONE;
@@ -3199,6 +3217,7 @@ void browserKey(int k) {
 }
 
 void setPlaybackSpeed(float speed) {
+  updateMediaClock();
   playbackSpeed = constrain(speed, 0.75f, 1.75f);
   // Mantem a posicao/fase do fluxo e transiciona a taxa em 83 ms.
   // O filtro anti-aliasing tambem muda por crossfade entre duas tabelas FIR.
