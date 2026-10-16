@@ -2499,8 +2499,14 @@ void thumbnailStep() {
     safeCopy(cache.detail, sizeof(cache.detail), image.valid ? (image.png ? uiText(UI_IMAGE_PNG) : uiText(UI_IMAGE_JPEG)) : uiText(UI_IMAGE_UNSUPPORTED));
   } else {
     Meta preview;
+    // A busca de miniaturas nunca pode substituir a capa da faixa que ja esta tocando.
+    const CoverRef savedCover = coverRef;
+    char savedProbePath[PATH_SIZE];
+    safeCopy(savedProbePath, sizeof(savedProbePath), gProbePath);
     probeMeta(path, formatOf(entry.name), preview);
     image = coverRef;
+    coverRef = savedCover;
+    safeCopy(gProbePath, sizeof(gProbePath), savedProbePath);
     if (preview.title[0]) safeCopy(cache.title, sizeof(cache.title), preview.title);
     else {
       safeCopy(cache.title, sizeof(cache.title), entry.name);
