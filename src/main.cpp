@@ -134,6 +134,10 @@ size_t sdAudioBufferSize = 0;
 
 // ============================================================ estado geral
 enum Screen { SCR_BROWSER, SCR_PLAYER, SCR_EQ, SCR_SETTINGS, SCR_HELP, SCR_IMAGE };
+
+constexpr int K_ENTER = 256;
+constexpr int K_TAB = 257;
+constexpr int K_DEL = 258;
 Screen screen = SCR_BROWSER;
 Screen returnScreen = SCR_BROWSER;
 int helpPage = 0;
@@ -2958,10 +2962,6 @@ void redrawCurrent() {
 }
 
 // ============================================================ entrada
-constexpr int K_ENTER = 256;
-constexpr int K_TAB = 257;
-constexpr int K_DEL = 258;
-
 void stopAll() {
   stopPlayback(true);
   if (screen == SCR_PLAYER) screen = SCR_BROWSER;
