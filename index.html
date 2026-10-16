@@ -1,108 +1,22 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#05080d"><meta name="description" content="MP3 Player — dedicated MP3 music playback firmware for the M5Stack Cardputer ADV"><title>MP3 Player // Cardputer ADV</title><link rel="stylesheet" href="style.css?v=@MP3_PLAYER_VERSION@"><script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=Orbitron:wght@600;700;800;900&display=swap" rel="stylesheet"></head>
-<body><header class="topbar"><a class="brand" href="#">MP3 PLAYER<span>_</span></a><div class="device-state"><i></i> CARDPUTER ADV <b>ESP32-S3</b></div></header>
-<nav class="site-tabs" aria-label="Site sections"><a class="active" href="index.html">FIRMWARE</a><span>MP3 PLAYER v@MP3_PLAYER_VERSION@</span></nav>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#07111f"><meta name="description" content="JOHNNY MP3 — player de música local para M5Stack Cardputer ADV."><title>JOHNNY MP3 — Cardputer ADV</title><link rel="stylesheet" href="style.css?v=@MP3_PLAYER_VERSION@"><script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script></head>
+<body>
+<header class="topbar"><a class="brand" href="#" aria-label="JOHNNY MP3 início"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M18.5 2 7 18h8l-1.5 12L26 13h-8z"/></svg><span>JOHNNY<span class="brand-sub"> / MP3</span></span></a><div class="device">M5STACK CARDPUTER ADV <span>ESP32-S3</span></div></header>
 <main>
-<section class="hero"><div class="eyebrow">MUSIC FIRMWARE <span>v@MP3_PLAYER_VERSION@</span></div><h1 class="hero-title" data-text="MP3 PLAYER">MP3 PLAYER</h1><p class="tagline">YOUR MUSIC. YOUR CARDPUTER.</p><p class="intro">A dedicated MP3 music player for the M5Stack Cardputer ADV.<br>Play music from microSD or internal flash storage.</p><esp-web-install-button manifest="firmware/manifest.json?v=@MP3_PLAYER_VERSION@"><button slot="activate">FLASH FIRMWARE <span>↗</span></button></esp-web-install-button><p class="install-note">USB CONNECTION REQUIRED · CHROME / EDGE</p><div class="firmware-version" aria-label="Firmware version"><span>AVAILABLE FIRMWARE</span><strong>v@MP3_PLAYER_VERSION@</strong><small>BUILT FOR M5STACK CARDPUTER ADV · ESP32-S3</small></div><div class="terminal-line"><span>SYS</span> MP3 PLAYER READY <b>●</b></div></section>
-<section class="section"><div class="section-head"><span>01 / PLAYER</span><h2>MUSIC PLAYBACK</h2></div><div class="modules">
-<article><span>01</span><div><h3>MP3 LIBRARY</h3><p>Browse microSD and internal-flash folders, including nested directories. Build a playback queue and safely copy selected tracks to internal storage.</p></div><b>♫</b></article>
-<article><span>02</span><div><h3>PLAYBACK MODES</h3><p>Play, pause, stop, seek, repeat and shuffle, with grouped next/previous requests. Speeds: SLOWED 0.75x, SPED UP 1.25x, Nightcore 1.75x and normal.</p></div><b>▶</b></article>
-<article><span>03</span><div><h3>METADATA, COVERS & FORMATS</h3><p>Read ID3 metadata and display embedded or folder-based album art. MP3 is built in; WAV, FLAC and AAC are enabled when the installed decoder library provides them.</p></div><b>▧</b></article>
-<article><span>04</span><div><h3>5-BAND AUDIO DSP</h3><p>Five-band EQ with six presets, independent speaker/headphone levels, output voicing, DC blocking, smooth compression and peak limiting.</p></div><b>≋</b></article>
-<article><span>05</span><div><h3>VISUALIZER MODES & RGB LED</h3><p>Live frequency bars, mirror, waveform and album-cover modes. Five themes and the RGB LED follow the selected palette and playback activity.</p></div><b>◉</b></article>
-<article><span>06</span><div><h3>SD RECOVERY & USB STORAGE</h3><p>Buffered audio, automatic SD recovery with slower SPI fallback, safe SD-to-flash copies, USB mass-storage mode and adaptive memory/CPU management.</p></div><b>✦</b></article>
+<section class="hero"><div class="eyebrow"><span class="pulse"></span> FIRMWARE INDEPENDENTE <b>V@MP3_PLAYER_VERSION@</b></div><h1>JOHNNY <span>MP3</span></h1><p class="lead">Sua música. Seu Cardputer.</p><p class="intro">Reprodutor de áudio local para o M5Stack Cardputer ADV. Feito para tocar arquivos do microSD com controles diretos, buffer de leitura e uma arquitetura de áudio focada em estabilidade.</p>
+<div class="actions"><esp-web-install-button manifest="firmware/manifest.json?v=@MP3_PLAYER_VERSION@"><button slot="activate" class="button button-primary">INSTALAR POR USB <span>↗</span></button></esp-web-install-button><a class="button button-secondary" href="https://github.com/otavio-dias-leite/mp3player/releases/download/v@MP3_PLAYER_VERSION@/johnny-mp3-cardputer-adv-@MP3_PLAYER_VERSION@.bin">BINÁRIO M5LAUNCHER ↓</a></div><p class="compat">USB · CHROME / EDGE · ESP32-S3</p><div class="version-strip"><span>VERSÃO ESTÁVEL</span><strong>@MP3_PLAYER_VERSION@</strong><span>MICROSD · MP3 · CARDPUTER ADV</span></div></section>
+<section class="section"><div class="section-title"><small>01 / RECURSOS</small><h2>PLAYER LOCAL. SEM DISTRAÇÕES.</h2></div><div class="feature-grid">
+<article><i>01</i><h3>Biblioteca microSD</h3><p>Navegue por pastas e subpastas, monte uma fila e continue usando a interface enquanto o decoder avança em blocos curtos.</p></article>
+<article><i>02</i><h3>Controle de reprodução</h3><p>Play, pausa, parar, próxima/anterior, busca de 10 segundos, repetição, aleatório e temporizador.</p></article>
+<article><i>03</i><h3>Áudio ajustável</h3><p>Equalizador de cinco bandas, seis presets, realce configurável e perfis independentes de volume para alto-falante e fone.</p></article>
+<article><i>04</i><h3>Leitura resiliente</h3><p>Buffer dedicado para o áudio, tentativas de montagem do SD em velocidades SPI alternativas e recuperação após falhas.</p></article>
+<article><i>05</i><h3>Informações da faixa</h3><p>Leitura de título e artista em tags ID3. MP3 é o formato principal; WAV, FLAC e AAC dependem dos decodificadores disponíveis.</p></article>
+<article><i>06</i><h3>Preferências persistentes</h3><p>Nove idiomas, temas, brilho, volume, equalização e demais configurações salvas no dispositivo.</p></article>
 </div></section>
-<section class="section"><div class="section-head"><span>02 / INSTALLATION</span><h2>FLASH THE CARDPUTER</h2></div><div class="steps"><article><small>STEP 01</small><strong>CONNECT</strong><p>Connect the Cardputer ADV to your computer with a USB cable.</p></article><article><small>STEP 02</small><strong>BOOT MODE</strong><p>Hold G0 while connecting the USB cable to enter download mode.</p></article><article><small>STEP 03</small><strong>INSTALL</strong><p>Click the install button, select the serial port and confirm.</p></article></div></section>
-<section class="section transfer"><div><small>MP3 PLAYER / CARDPUTER ADV</small><h2>MADE FOR<br><em>YOUR MUSIC.</em></h2><p>Version 12 combines buffered local playback, adaptive audio DSP, SD recovery and USB mass storage in a focused Cardputer ADV player.</p></div><div class="source-links"><a href="https://raw.githubusercontent.com/otavio-dias-leite/mp3player/main/src/main.cpp">ARDUINO SOURCE CODE ↓</a><a href="https://github.com/otavio-dias-leite/mp3player/releases/latest">FIRMWARE RELEASES ↗</a></div></section>
-<footer><span>MP3 PLAYER</span><span>M5STACK CARDPUTER ADV</span><span>© 2026</span></footer></main>
-<script>
-(() => {
-  const language = (() => {
-    const locales = [...(navigator.languages || []), navigator.language || ""]
-      .map(value => String(value).toLowerCase());
-    if (locales.some(value => value.startsWith("pt"))) return "pt";
-    if (locales.some(value => value.startsWith("zh"))) return "zh";
-    return "en";
-  })();
-
-  const translations = {
-    pt: {
-      "nav[aria-label='Site sections'] a": "FIRMWARE",
-      ".tagline": "SUA MÚSICA. SEU CARDPUTER.",
-      ".intro": "Um reprodutor MP3 dedicado ao M5Stack Cardputer ADV.<br>Reproduza músicas do microSD ou da memória flash interna.",
-      "esp-web-install-button button": "INSTALAR FIRMWARE ↗",
-      ".install-note": "CONEXÃO USB NECESSÁRIA · CHROME / EDGE",
-      ".firmware-version span": "FIRMWARE DISPONÍVEL",
-      ".firmware-version small": "DESENVOLVIDO PARA M5STACK CARDPUTER ADV · ESP32-S3",
-      ".terminal-line": "<span>SYS</span> MP3 PLAYER PRONTO <b>●</b>",
-      ".section:nth-of-type(2) .section-head h2": "REPRODUÇÃO DE MÚSICA",
-      ".section:nth-of-type(2) article:nth-child(1) h3": "BIBLIOTECA MP3",
-      ".section:nth-of-type(2) article:nth-child(1) p": "Navegue por pastas de áudio no microSD e na memória flash interna, incluindo subpastas. Copie faixas do SD para a memória interna.",
-      ".section:nth-of-type(2) article:nth-child(2) h3": "MODOS DE REPRODUÇÃO",
-      ".section:nth-of-type(2) article:nth-child(2) p": "Reproduza, pause, pare, busque, repita e embaralhe faixas, com avanço/retorno agrupado. Velocidades: SLOWED 0,75x, SPED UP 1,25x, Nightcore 1,75x e normal.",
-      ".section:nth-of-type(2) article:nth-child(3) h3": "METADADOS, CAPAS E FORMATOS",
-      ".section:nth-of-type(2) article:nth-child(3) p": "Leia metadados ID3 e exiba capas incorporadas ou encontradas na pasta. MP3 é nativo; WAV, FLAC e AAC dependem dos decodificadores disponíveis na biblioteca.",
-      ".section:nth-of-type(2) article:nth-child(4) h3": "DSP DE ÁUDIO (5 BANDAS)",
-      ".section:nth-of-type(2) article:nth-child(4) p": "EQ de cinco bandas e seis presets, volumes independentes para alto-falante/fone, perfil de saída, bloqueio DC, compressão suave e limitador de pico.",
-      ".section:nth-of-type(2) article:nth-child(5) h3": "MODOS VISUAIS E LED RGB",
-      ".section:nth-of-type(2) article:nth-child(5) p": "Barras de frequência em tempo real, espelho, forma de onda e capas. O LED RGB acompanha o tema selecionado e reage à reprodução.",
-      ".section:nth-of-type(2) article:nth-child(6) h3": "RECUPERAÇÃO DO SD E USB",
-      ".section:nth-of-type(2) article:nth-child(6) p": "Áudio em buffer, recuperação automática do SD com redução da frequência SPI, cópia segura SD→Flash, modo USB pendrive e gestão adaptativa de memória/CPU.",
-      ".section:nth-of-type(3) .section-head h2": "INSTALAR NO CARDPUTER",
-      ".section:nth-of-type(3) article:nth-child(1) strong": "CONECTAR",
-      ".section:nth-of-type(3) article:nth-child(1) p": "Conecte o Cardputer ADV ao computador com um cabo USB.",
-      ".section:nth-of-type(3) article:nth-child(2) strong": "MODO DE INICIALIZAÇÃO",
-      ".section:nth-of-type(3) article:nth-child(2) p": "Mantenha G0 pressionado enquanto conecta o cabo USB para entrar no modo de download.",
-      ".section:nth-of-type(3) article:nth-child(3) strong": "INSTALAR",
-      ".section:nth-of-type(3) article:nth-child(3) p": "Clique no botão de instalação, selecione a porta serial e confirme.",
-      ".transfer h2": "FEITO PARA<br><em>SUA MÚSICA.</em>",
-      ".transfer p": "Firmware de reprodução MP3 focado em música local, decodificação de áudio eficiente e interface responsiva no Cardputer ADV.",
-      ".source-links a:nth-child(1)": "CÓDIGO-FONTE ARDUINO ↓",
-      ".source-links a:nth-child(2)": "VERSÕES DO FIRMWARE ↗"
-    },
-    zh: {
-      ".tagline": "你的音乐。你的 Cardputer。",
-      ".intro": "专为 M5Stack Cardputer ADV 打造的 MP3 音乐播放器。<br>从 microSD 卡或内部闪存播放音乐。",
-      "esp-web-install-button button": "刷写固件 ↗",
-      ".install-note": "需要 USB 连接 · CHROME / EDGE",
-      ".firmware-version span": "可用固件",
-      ".firmware-version small": "适用于 M5STACK CARDPUTER ADV · ESP32-S3",
-      ".terminal-line": "<span>SYS</span> MP3 PLAYER 已就绪 <b>●</b>",
-      ".section:nth-of-type(2) .section-head h2": "音乐播放",
-      ".section:nth-of-type(2) article:nth-child(1) h3": "MP3 音乐库",
-      ".section:nth-of-type(2) article:nth-child(1) p": "浏览 microSD 和内部闪存中的音频文件夹，包括嵌套文件夹。可将曲目从 SD 卡复制到内部存储。",
-      ".section:nth-of-type(2) article:nth-child(2) h3": "播放模式",
-      ".section:nth-of-type(2) article:nth-child(2) p": "播放、暂停、停止、定位、重复和随机播放，并合并快速上一曲/下一曲操作。速度：SLOWED 0.75x、SPED UP 1.25x、Nightcore 1.75x 和正常速度。",
-      ".section:nth-of-type(2) article:nth-child(3) h3": "元数据、封面与格式",
-      ".section:nth-of-type(2) article:nth-child(3) p": "读取 ID3 元数据，并显示嵌入封面或文件夹封面。内置 MP3；WAV、FLAC 和 AAC 取决于所安装的解码库。",
-      ".section:nth-of-type(2) article:nth-child(4) h3": "五段音频 DSP",
-      ".section:nth-of-type(2) article:nth-child(4) p": "五段均衡器和六种预设，扬声器/耳机独立音量、输出音色、直流阻断、平滑压缩和峰值限制。",
-      ".section:nth-of-type(2) article:nth-child(5) h3": "可视化模式与 RGB LED",
-      ".section:nth-of-type(2) article:nth-child(5) p": "实时频谱柱、镜像、波形和专辑封面模式。RGB LED 跟随主题并响应播放。",
-      ".section:nth-of-type(2) article:nth-child(6) h3": "SD 恢复与 USB 存储",
-      ".section:nth-of-type(2) article:nth-child(6) p": "音频缓冲、SD 自动恢复与 SPI 降速回退、安全 SD 到闪存复制、USB 大容量存储模式及自适应内存/CPU 管理。",
-      ".section:nth-of-type(3) .section-head h2": "刷写 Cardputer",
-      ".section:nth-of-type(3) article:nth-child(1) strong": "连接设备",
-      ".section:nth-of-type(3) article:nth-child(1) p": "使用 USB 数据线将 Cardputer ADV 连接到电脑。",
-      ".section:nth-of-type(3) article:nth-child(2) strong": "下载模式",
-      ".section:nth-of-type(3) article:nth-child(2) p": "连接 USB 线时按住 G0，进入下载模式。",
-      ".section:nth-of-type(3) article:nth-child(3) strong": "安装",
-      ".section:nth-of-type(3) article:nth-child(3) p": "点击安装按钮，选择串口并确认。",
-      ".transfer h2": "为你的<br><em>音乐而造。</em>",
-      ".transfer p": "专注本地音乐播放、高效音频解码，并为 Cardputer ADV 提供响应迅速的界面。",
-      ".source-links a:nth-child(1)": "ARDUINO 源代码 ↓",
-      ".source-links a:nth-child(2)": "固件版本 ↗"
-    }
-  };
-
-  const dict = translations[language] || {};
-  for (const [selector, value] of Object.entries(dict)) {
-    const node = document.querySelector(selector);
-    if (node) node.innerHTML = value;
-  }
-  document.documentElement.lang = language === "pt" ? "pt-BR" : language === "zh" ? "zh-CN" : "en-US";
-  document.title = language === "pt" ? "MP3 Player // Cardputer ADV" :
-    language === "zh" ? "MP3播放器 // Cardputer ADV" : "MP3 Player // Cardputer ADV";
-})();
-</script>
-</body></html>
+<section class="section install"><div class="section-title"><small>02 / INSTALAÇÃO</small><h2>ESCOLHA COMO GRAVAR</h2></div><div class="install-grid">
+<article><span class="tag">IMAGEM COMPLETA</span><h3>Instalador USB</h3><p>Use o botão de instalação desta página. Conecte o Cardputer ADV mantendo G0 pressionado, escolha a porta serial e confirme.</p><p class="note">Chrome ou Edge · cabo USB de dados</p></article>
+<article><span class="tag tag-yellow">APLICAÇÃO ESP32-S3</span><h3>M5Launcher</h3><p>Baixe o arquivo de aplicação versionado para usar pelo microSD ou como Favorite/URL no M5Launcher.</p><a class="text-link" href="https://github.com/otavio-dias-leite/mp3player/releases/download/v@MP3_PLAYER_VERSION@/johnny-mp3-cardputer-adv-@MP3_PLAYER_VERSION@.bin">BAIXAR JOHNNY MP3 BIN ↗</a><p class="note">Não selecione a imagem full.bin como aplicação M5Launcher.</p></article>
+</div></section>
+<section class="callout"><div><small>JOHNNY MP3 / OPEN SOURCE</small><h2>WAKE UP.<br><em>SAMURAI.</em></h2><p>Primeiro lançamento público para o M5Stack Cardputer ADV.</p></div><div class="links"><a href="https://github.com/otavio-dias-leite/mp3player">CÓDIGO-FONTE ↗</a><a href="https://github.com/otavio-dias-leite/mp3player/releases/tag/v@MP3_PLAYER_VERSION@">RELEASE v@MP3_PLAYER_VERSION@ ↗</a><a href="docs/M5LAUNCHER.md">GUIA M5LAUNCHER ↗</a><a href="docs/RELEASE-1.0.0.md">NOTAS DE LANÇAMENTO ↗</a></div></section>
+</main><footer><span>© 2026 JOHNNY MP3</span><span>M5STACK CARDPUTER ADV / ESP32-S3</span><span>MIT + THIRD-PARTY LICENSES</span></footer></body></html>

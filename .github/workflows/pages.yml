@@ -7,6 +7,8 @@ on:
       - "index.html"
       - "style.css"
       - "firmware/manifest.json"
+      - "docs/M5LAUNCHER.md"
+      - "docs/RELEASE-1.0.0.md"
       - ".github/workflows/pages.yml"
   workflow_run:
     workflows: ["Build and publish MP3 PLAYER firmware"]
@@ -73,8 +75,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p _site/firmware
+          mkdir -p _site/firmware _site/docs
           cp index.html style.css _site/
+          cp docs/M5LAUNCHER.md docs/RELEASE-1.0.0.md _site/docs/
           curl --fail --location --retry 5 --retry-delay 3 \
             "$RELEASE_ASSET_URL" -o _site/firmware/mp3-player-cardputer-adv-full.bin
           test "$(stat -c %s _site/firmware/mp3-player-cardputer-adv-full.bin)" -gt 100000

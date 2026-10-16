@@ -45,6 +45,7 @@ jobs:
           test -n "$BOOT_APP0"
           test -n "$ESPTOOL"
           cp "$BUILD/firmware.bin" "$OUT/firmware.bin"
+          cp "$BUILD/firmware.bin" "$OUT/johnny-mp3-cardputer-adv-${VERSION}.bin"
           cp "$BUILD/bootloader.bin" "$OUT/bootloader.bin"
           cp "$BUILD/partitions.bin" "$OUT/partitions.bin"
           cp "$BOOT_APP0" "$OUT/boot_app0.bin"
@@ -56,7 +57,7 @@ jobs:
             0xe000 "$OUT/boot_app0.bin" \
             0x10000 "$OUT/firmware.bin"
           cat > "$OUT/LEIA-PRIMEIRO.txt" <<EOF
-          MP3 PLAYER v${VERSION} — M5STACK CARDPUTER ADV (ESP32-S3)
+          JOHNNY MP3 v${VERSION} — M5STACK CARDPUTER ADV (ESP32-S3)
 
           firmware.bin: atualização OTA.
           mp3-player-cardputer-adv-full.bin: instalação completa por USB.
@@ -77,6 +78,7 @@ jobs:
           Se houver erro de permissão na porta serial, adicione seu usuário ao grupo uucp
           e entre novamente na sessão. Não remova o cartão durante operações.
           EOF
+          (cd "$OUT" && sha256sum firmware.bin mp3-player-cardputer-adv-full.bin "johnny-mp3-cardputer-adv-${VERSION}.bin" > SHA256SUMS.txt)
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -98,6 +100,8 @@ jobs:
           name: MP3 PLAYER v${{ steps.version.outputs.value }}
           files: |
             release/firmware.bin
+            release/johnny-mp3-cardputer-adv-${{ steps.version.outputs.value }}.bin
+            release/SHA256SUMS.txt
             release/mp3-player-cardputer-adv-full.bin
             release/LEIA-PRIMEIRO.txt
             release/bootloader.bin

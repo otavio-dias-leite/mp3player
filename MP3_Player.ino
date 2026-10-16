@@ -1,63 +1,20 @@
 /*
- * MP3 PLAYER - player de audio para M5Stack Cardputer ADV
- * Versao 12.0
+ * JOHNNY MP3 PLAYER — M5Stack Cardputer ADV (ESP32-S3)
+ * Release 1.0.0 — primeiro lançamento público
  *
- * NOVIDADES DA v12.0
- *  SOM
- *   - Limitador de pico suave (envoltoria rapida/lenta) antes do soft-clip:
- *     volume alto no alto-falante nao "estala" mais; so cai o ganho.
- *   - Compressor com joelho suave (sem degrau no limiar).
- *   - Bloqueador de DC (10 Hz) na entrada da cadeia.
- *   - Cadeia de filtros montada uma vez (so os filtros ativos), menos CPU.
- *   - Fim da fila nao corta mais a cauda da ultima musica.
- *  TEMPO
- *   - Tempo/barra de progresso corretos nos modos SLOWED/SPED UP/Nightcore
- *     (antes o relogio andava na velocidade da saida, nao do arquivo).
- *  SD / TRAVAMENTOS
- *   - SD monta na MAIOR velocidade que funcionar (16 MHz -> 400 kHz). Antes
- *     o 1o teste era 400 kHz, lento demais para MP3 de 320 kbps/FLAC.
- *   - Se o SD falhar tocando, remonta e RETOMA ja numa velocidade menor.
- *   - Ate 12 arquivos abertos; busca automatica do cartao com backoff
- *     (nao trava mais a interface de 2,5 em 2,5 s quando nao ha cartao).
- *   - Copia SD->FLASH: so parado, confere espaco, mostra progresso e apaga
- *     arquivo incompleto.
- *  MEMORIA / ENERGIA
- *   - Reverb do SLOWED so ocupa RAM (14 KB) enquanto esse modo esta ligado.
- *   - CPU a 160 MHz quando parado/ocioso, 240 MHz tocando (sobe na hora ao
- *     apertar uma tecla).
- *  USB
- *   - Cabecalhos USB fora do namespace (compila de forma confiavel).
- *   - Modo pendrive automatico nao interrompe mais a musica que esta tocando.
- *  CORRECOES
- *   - Log do SD imprimia "\\n" literal.
+ * Base consolidada: reprodução local, navegador microSD, fila de faixas,
+ * metadados, busca, recuperação de leitura, perfis de saída, EQ de cinco
+ * bandas e configurações persistentes.
  *
- * Modos de velocidade: 7=SLOWED (0.75x) 8=SPED UP (1.25x) 9=Nightcore (1.75x) 0=NORMAL.
+ * Áudio: decoder em fatias curtas no loop principal; PCM enviado em blocos
+ * para a fila assíncrona do Speaker. A UI não cria outra tarefa de decoder
+ * concorrente pelo mesmo microSD. Buffer de leitura e recuperação do SD.
  *
- * Arquitetura de audio: arquivo -> decodificador (ESP8266Audio) -> mono ->
- * anti-alias (se acelerado) -> reamostrador cubico para 44.1 kHz -> DC block ->
- * HPF do alto-falante -> EQ 5 bandas -> loudness -> voicing do modo -> perfil
- * da saida -> ar/reverb -> preamp -> compressor -> graves virtuais -> volume
- * e fade -> limitador -> soft-clip -> dither TPDF -> speaker.
- *
- * Formatos: MP3, WAV (PCM), FLAC e AAC (ADTS .aac), conforme a sua versao
- * do ESP8266Audio (__has_include). M4A/OGG/OPUS nao sao suportados.
- *
- * Dependencias: M5Cardputer (M5Unified/M5GFX) e ESP8266Audio (earlephilhower)
- * Pasta do sketch: MP3_Player/MP3_Player.ino
- * Modo USB: Tools > USB Mode = "USB-OTG (TinyUSB)".
- *
- * TECLAS (H abre o tutorial em qualquer tela)
- *  LISTA   ; . sobe/desce   , / pagina   ENTER abre/toca   DEL pasta acima   U modo USB (pendrive)
- *          M troca SD/FLASH  C copia SD->FLASH   TAB player   S ajustes   E equalizador   R atualiza
- *          ESPACO pausa  N P faixa  - = volume  1-6 preset  G realce  X para
- *  PLAYER  ESPACO pausa  N proxima  P anterior/reinicia  , / busca 10 s
- *          ; . volume    - = volume  1-6 preset  TAB equalizador  G realce
- *          S aleatorio   R repetir   V visual    T timer de sono   O saida
- *          7 SLOWED  8 SPED UP  9 Nightcore  0 NORMAL
- *          X para        DEL/` volta a lista (musica continua)
- *  EQ      , / banda     ; . ganho   0 zera      TAB/DEL/` volta
+ * Hardware: Cardputer ADV / ESP32-S3; microSD CS=12, SCK=40, MISO=39, MOSI=14.
+ * Dependências: M5Cardputer e ESP8266Audio 1.9.7.
+ * Build: pio run -e cardputer-adv
+ * Splash: "WAKE UP" / "SAMURAI". Ajuda integrada: tecla H.
  */
-
 #include <Arduino.h>
 #include <M5Cardputer.h>
 #include <SPI.h>
@@ -96,7 +53,7 @@ extern "C" bool tud_mounted(void);   // TinyUSB: true quando um PC enumerou o di
 #if __has_include("mp3_player_version.h")
 #include "mp3_player_version.h"
 #else
-#define MP3_PLAYER_VERSION "12.0.0"
+#define MP3_PLAYER_VERSION "1.0.0"
 #endif
 
 // Deteccao de fone: o Cardputer ADV corta o amplificador por hardware quando o
@@ -202,7 +159,7 @@ int outMode = 0;
 int eqGain[EQ_BANDS] = {3, 1, 0, 2, 3};
 int eqSelected = 0;
 int settingsSel = 0;
-int uiLanguage = 0;  // 0 English, 1 Portuguese, 2 Spanish, 3 Chinese, 4 Japanese, 5 French, 6 German, 7 Russian, 8 Italian
+int uiLanguage = 1;  // 0 English, 1 Portuguese, 2 Spanish, 3 Chinese, 4 Japanese, 5 French, 6 German, 7 Russian, 8 Italian
 int sleepIdx = 0;
 uint32_t sleepDeadline = 0;
 
@@ -934,7 +891,7 @@ void markSettingsDirty() {
 
 void loadSettings() {
   prefs.begin("mp3player", true);
-  uiLanguage = constrain(prefs.getInt("lang", 0), 0, 8);
+  uiLanguage = constrain(prefs.getInt("lang", 1), 0, 8);
   volByMode[0] = constrain(prefs.getInt("vs", 80), 0, 100);
   volByMode[1] = constrain(prefs.getInt("vp", 30), 0, 100);
   outMode = constrain(prefs.getInt("om", 0), 0, 1);
@@ -2197,7 +2154,7 @@ void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
   g.setTextSize(1);
   g.setFont(&fonts::Font2);
   g.setTextColor(C_RED);
-  g.drawString("MP3 PLAYER", 8, 2);
+  g.drawString("JOHNNY", 8, 2);
 
   g.setFont(&fonts::Font0);
   if (batteryPercent >= 0 && batteryPercent <= 100) {
@@ -2223,16 +2180,19 @@ void drawSplash() {
     d.drawFastHLine(0, y, 240, (y % 32 == 8) ? gridMajor : gridMinor);
   d.setFont(&fonts::Font2);
   d.setTextSize(2);
+  d.setTextColor(C_YELLOW);
+  const char *top = "WAKE UP";
+  d.drawString(top, (240 - d.textWidth(top)) / 2, 22);
   d.setTextColor(C_RED);
-  const char *l1 = "MP3 PLAYER";
-  d.drawString(l1, (240 - d.textWidth(l1)) / 2, 35);
+  const char *bottom = "SAMURAI";
+  d.drawString(bottom, (240 - d.textWidth(bottom)) / 2, 53);
   d.setTextSize(1);
-  d.drawFastHLine(18, 82, 204, C_RED);
+  d.drawFastHLine(18, 96, 204, C_CYAN);
   d.setFont(&fonts::Font0);
   d.setTextColor(C_GREY);
-  char v[28];
-  snprintf(v, sizeof(v), "CARDPUTER ADV  |  %s", MP3_PLAYER_VERSION);
-  d.drawString(v, (240 - d.textWidth(v)) / 2, 94);
+  char v[32];
+  snprintf(v, sizeof(v), "JOHNNY MP3  |  v%s", MP3_PLAYER_VERSION);
+  d.drawString(v, (240 - d.textWidth(v)) / 2, 108);
 }
 
 void formatTime(char *out, size_t n, uint32_t secs) {
@@ -2956,7 +2916,7 @@ void activateSelection() {
 }
 
 void resetDefaults() {
-  uiLanguage = 0;
+  uiLanguage = 1;
   opt = Options();
   themeIndex = 3;
   applyTheme();
@@ -3658,7 +3618,7 @@ void setup() {
   sdReady = mountSD();
   storageKind = sdReady ? STORAGE_SD : STORAGE_INTERNAL;
   screen = SCR_BROWSER;
-  while (millis() - splashStart < 900) delay(10);
+  while (millis() - splashStart < 1000) delay(10)
   beginScan((storageReady() && activeFS().exists("/music")) ? "/music" : "/");
 
   Serial.printf("MP3 PLAYER %s | SD=%s | INTERNAL=%s | IMU=%s | heap=%u maxblk=%u\n", MP3_PLAYER_VERSION,
