@@ -541,7 +541,7 @@ void loadSettings() {
   opt.shuffle = constrain(prefs.getInt("sf", 0), 0, 1);
   opt.visual = constrain(prefs.getInt("vz", 0), 0, 3);
   themeIndex = constrain(prefs.getInt("th", 0), 0, THEME_COUNT - 1);
-  for (int i = i < EQ_BANDS; ++i) {
+  for (int i = 0; i < EQ_BANDS; ++i) {
     char key[3] = {'g', (char)('0' + i), 0};
     eqGain[i] = constrain(prefs.getInt(key, eqGain[i]), -EQ_LIMIT, EQ_LIMIT);
   }
