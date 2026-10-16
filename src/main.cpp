@@ -57,6 +57,7 @@
 #include <Preferences.h>
 #include <math.h>
 #include <new>
+#include <utility>
 
 #include <AudioOutput.h>
 #include <AudioFileSource.h>
@@ -76,10 +77,11 @@
 #define HAVE_AAC 1
 #endif
 
-#define MP3_PLAYER_VERSION "8.1.1"
+#define MP3_PLAYER_VERSION "8.2.0"
 
 namespace {
 #include "ui_text_fwd.h"
+#include "ui_translations.h"
 
 
 // ============================================================ hardware
@@ -108,7 +110,7 @@ constexpr uint16_t C_YELLOW  = rgb(255, 230, 60);
 
 // ============================================================ constantes
 constexpr uint32_t OUT_RATE = 44100;               // taxa fixa da saida
-constexpr size_t SD_AUDIO_BUFFER_SIZE = 48 * 1024; // readahead na RAM interna
+constexpr size_t SD_AUDIO_BUFFER_TARGET = 48 * 1024; // alvo adaptativo em RAM interna
 constexpr size_t BLOCK_SAMPLES = 2048;             // amostras por bloco no speaker
 constexpr size_t RING_BLOCKS   = 4;                // speaker segura no maximo 2
 constexpr size_t MAX_ENTRIES   = 200;
@@ -119,15 +121,23 @@ constexpr int    EQ_BANDS      = 5;
 constexpr int    SPEC_BANDS    = 12;
 constexpr int    EQ_LIMIT      = 12;
 constexpr int    NUM_PRESETS   = 6;
-constexpr int    ROWS          = 4;
+constexpr int    ROWS          = 2;
 constexpr float  SHAKE_G       = 2.6f;
 constexpr int    COVER_PX      = 44;
-constexpr uint32_t COVER_MAX_BYTES = 900UL * 1024UL;
+constexpr uint32_t COVER_MAX_BYTES = 3UL * 1024UL * 1024UL;
+constexpr uint32_t IMAGE_MAX_BYTES = 6UL * 1024UL * 1024UL;
+constexpr uint16_t THUMB_PX = 32;
+constexpr uint32_t SD_STREAM_RETRY_MS = 1200;
 
-static uint8_t sdAudioBuffer[SD_AUDIO_BUFFER_SIZE];
+uint8_t *sdAudioBuffer = nullptr;
+size_t sdAudioBufferSize = 0;
 
 // ============================================================ estado geral
-enum Screen { SCR_BROWSER, SCR_PLAYER, SCR_EQ, SCR_SETTINGS, SCR_HELP };
+enum Screen { SCR_BROWSER, SCR_PLAYER, SCR_EQ, SCR_SETTINGS, SCR_HELP, SCR_IMAGE };
+
+constexpr int K_ENTER = 256;
+constexpr int K_TAB = 257;
+constexpr int K_DEL = 258;
 Screen screen = SCR_BROWSER;
 Screen returnScreen = SCR_BROWSER;
 int helpPage = 0;
@@ -142,6 +152,7 @@ bool sdReady = false;
 bool internalReady = false;
 enum StorageKind : uint8_t { STORAGE_SD, STORAGE_INTERNAL };
 StorageKind storageKind = STORAGE_SD;
+uint32_t sdMediaEpoch = 1;
 fs::FS &activeFS() { return storageKind == STORAGE_SD ? (fs::FS &)SD : (fs::FS &)LittleFS; }
 bool storageReady() { return storageKind == STORAGE_SD ? sdReady : internalReady; }
 bool playing = false;   // decoder ativo (inclui pausado)
@@ -170,13 +181,9 @@ struct Options {
 
 const int SCREEN_OFF_SEC[4] = {0, 15, 30, 60};
 const int SLEEP_MIN[5] = {0, 15, 30, 60, 90};
-const char *REPEAT_NAMES[3] = {"OFF", "ALL", "ONE"};
-const char *VISUAL_NAMES[4] = {"BARS", "MIRROR", "WAVE", "COVER"};
-const char *ENHANCE_NAMES[3] = {"OFF", "SOFT", "STRONG"};
 
 const char *EQ_LABELS[EQ_BANDS] = {"60", "250", "1K", "4K", "12K"};
 const float EQ_FREQS[EQ_BANDS] = {60.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
-const char *PRESET_NAMES[NUM_PRESETS] = {"BALANCE", "FLAT", "BASS", "ROCK", "VOCAL", "ELETRO"};
 const int8_t PRESETS[NUM_PRESETS][EQ_BANDS] = {
   { 3,  1,  0,  2,  3},
   { 0,  0,  0,  0,  0},
@@ -186,7 +193,7 @@ const int8_t PRESETS[NUM_PRESETS][EQ_BANDS] = {
   { 6,  3, -1,  2,  5},
 };
 
-char toastText[40] = {0};
+char toastText[80] = {0};
 uint32_t toastUntil = 0;
 bool toastActive = false;
 
@@ -230,6 +237,10 @@ uint32_t lastActivity = 0;
 M5Canvas ui(&M5Cardputer.Display);
 M5Canvas live(&M5Cardputer.Display);
 M5Canvas coverCanvas(&M5Cardputer.Display);
+M5Canvas thumbCanvas0(&M5Cardputer.Display);
+M5Canvas thumbCanvas1(&M5Cardputer.Display);
+M5Canvas *thumbCanvases[2] = {&thumbCanvas0, &thumbCanvas1};
+bool thumbCanvasReady[2] = {false, false};
 SPIClass sdSPI(FSPI);
 
 void drawBrowser();
@@ -237,6 +248,7 @@ void drawPlayer();
 void drawEq();
 void drawSettings();
 void drawHelp();
+void drawImageViewer();
 void redrawCurrent();
 void sdRemount();
 void pumpAudio();
@@ -333,6 +345,12 @@ Fmt formatOf(const char *name) {
   return FMT_NONE;
 }
 bool isAudioFile(const char *name) { return formatOf(name) != FMT_NONE; }
+bool isImageFile(const char *name) {
+  const char *dot = name ? strrchr(name, '.') : nullptr;
+  return dot && (!strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg") ||
+                 !strcasecmp(dot, ".png"));
+}
+bool isBrowserMedia(const char *name) { return isAudioFile(name) || isImageFile(name); }
 
 void fitText(LovyanGFX &g, const char *src, int maxW, char *out, size_t n) {
   safeCopy(out, n, src);
@@ -431,6 +449,8 @@ float gFadeGain = 0.0f;
 float gFadeTarget = 1.0f;
 float gFadeStep = 1.0f / (0.03f * 44100.0f);
 uint32_t gSamplesSubmitted = 0;
+double mediaClockSeconds = 0.0;
+uint32_t mediaClockLastMs = 0;
 
 // realce de som
 bool gCompOn = false;
@@ -438,11 +458,23 @@ float gCompEnv = 0, gCompThr = 12000.0f, gCompMake = 1.1f;
 float gVBassMix = 0, gBassLp = 0, gBassHp = 0;
 uint32_t gRng = 0x1234ABCDu;
 
-// reamostrador (arquivo -> 44.1 kHz)
-bool rsActive = false;
-float rsStep = 1.0f, rsPhase = 0.0f;
-float rsH[4] = {0, 0, 0, 0};
-float playbackSpeed = 1.0f;  // SLOWED 0.75x, NORMAL 1.00x, SPED UP 1.25x, Nightcore 1.75x
+// Reamostrador polifasico FIR: 9 taps, 32 fases + interpolacao de fase.
+// A tabela e criada fora do caminho de audio; o loop de amostras so faz MACs.
+constexpr int RS_TAPS = 16;
+constexpr int RS_PHASES = 64;
+constexpr int RS_HISTORY = 32;
+constexpr int RS_MAX_OUTPUTS_PER_INPUT = 16;
+float rsCoeff[2][RS_PHASES + 1][RS_TAPS] = {};
+float rsHistory[RS_HISTORY] = {};
+uint8_t rsFilterActive = 0, rsFilterTarget = 0;
+float rsFilterMix = 1.0f;
+float rsFilterMixStep = 1.0f;
+float rsStep = 1.0f, rsTargetStep = 1.0f;
+uint32_t rsStepRampLeft = 0;
+double rsNextPos = 0.0;
+int64_t rsInputIndex = -1;
+float rsSourceRate = 44100.0f;
+float playbackSpeed = 1.0f;  // 0.75x, 1.00x, 1.25x, 1.75x
 
 float gBand[SPEC_BANDS] = {0};
 int16_t gScope[128] = {0};
@@ -606,51 +638,152 @@ inline int16_t processSample(float x) {
   return (int16_t)v;
 }
 
-inline float cubic4(const float *h, float t) {
-  const float a = -0.5f * h[0] + 1.5f * h[1] - 1.5f * h[2] + 0.5f * h[3];
-  const float b = h[0] - 2.5f * h[1] + 2.0f * h[2] - 0.5f * h[3];
-  const float c = -0.5f * h[0] + 0.5f * h[2];
-  return ((a * t + b) * t + c) * t + h[1];
+float sincPi(float x) {
+  if (fabsf(x) < 1e-5f) return 1.0f;
+  const float px = PI * x;
+  return sinf(px) / px;
+}
+
+void buildResampleTable(uint8_t table, float step) {
+  const float cutoff = fminf(0.96f, 0.94f / fmaxf(step, 1.0f));
+  constexpr float radius = 8.0f;
+  for (int phase = 0; phase <= RS_PHASES; ++phase) {
+    const float frac = (float)phase / (float)RS_PHASES;
+    float sum = 0.0f;
+    for (int tap = 0; tap < RS_TAPS; ++tap) {
+      const float distance = (float)(tap - 7) - frac;
+      const float windowPos = distance / radius;
+      float window = 0.0f;
+      if (fabsf(windowPos) <= 1.0f) {
+        window = 0.42f + 0.5f * cosf(PI * windowPos) +
+                 0.08f * cosf(2.0f * PI * windowPos);
+      }
+      const float coeff = 2.0f * cutoff * sincPi(2.0f * cutoff * distance) * window;
+      rsCoeff[table][phase][tap] = coeff;
+      sum += coeff;
+    }
+    if (fabsf(sum) > 1e-8f) {
+      const float inv = 1.0f / sum;
+      for (int tap = 0; tap < RS_TAPS; ++tap) rsCoeff[table][phase][tap] *= inv;
+    }
+  }
+}
+
+void configureResampler(float sampleRate, float speed, bool resetState) {
+  rsSourceRate = constrain(sampleRate, 8000.0f, 192000.0f);
+  gSrcRate = rsSourceRate;
+  speed = constrain(speed, 0.75f, 1.75f);
+  const float target = constrain(rsSourceRate * speed / (float)OUT_RATE, 0.12f, 8.0f);
+
+  if (resetState) {
+    rsStep = rsTargetStep = target;
+    rsStepRampLeft = 0;
+    rsNextPos = 0.0;
+    rsInputIndex = -1;
+    memset(rsHistory, 0, sizeof(rsHistory));
+    rsFilterActive = rsFilterTarget = 0;
+    rsFilterMix = 1.0f;
+    rsFilterMixStep = 1.0f;
+    buildResampleTable(rsFilterActive, target);
+    buildResampleTable(1, target);
+    return;
+  }
+
+  rsTargetStep = target;
+  rsStepRampLeft = OUT_RATE / 12;  // 83 ms de aceleracao/desaceleracao suave
+  const uint8_t nextTable = (uint8_t)(1U - rsFilterActive);
+  buildResampleTable(nextTable, target);
+  rsFilterTarget = nextTable;
+  rsFilterMix = 0.0f;
+  rsFilterMixStep = 1.0f / (float)(OUT_RATE / 12);
+}
+
+inline float resampleHistoryAt(int64_t index, int64_t newest) {
+  if (index < 0 || index > newest || newest - index >= RS_HISTORY) return 0.0f;
+  return rsHistory[(uint64_t)index & (RS_HISTORY - 1)];
+}
+
+inline void pushResampled(float input) {
+  const int64_t newest = ++rsInputIndex;
+  rsHistory[(uint64_t)newest & (RS_HISTORY - 1)] = input;
+  const double newestSafePosition = (double)newest - 8.0;
+
+  while (rsNextPos <= newestSafePosition) {
+    const int64_t base = (int64_t)rsNextPos;
+    const float frac = (float)(rsNextPos - (double)base);
+    const float phase = frac * (float)RS_PHASES;
+    const int phase0 = constrain((int)phase, 0, RS_PHASES - 1);
+    const int phase1 = phase0 + 1;
+    const float phaseMix = phase - (float)phase0;
+
+    const float *c00 = rsCoeff[rsFilterActive][phase0];
+    const float *c01 = rsCoeff[rsFilterActive][phase1];
+    float y = 0.0f;
+    if (rsFilterMix >= 0.9999f || rsFilterActive == rsFilterTarget) {
+      for (int tap = 0; tap < RS_TAPS; ++tap) {
+        const float sample = resampleHistoryAt(base + tap - 7, newest);
+        const float coeff = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
+        y += sample * coeff;
+      }
+    } else {
+      const float *c10 = rsCoeff[rsFilterTarget][phase0];
+      const float *c11 = rsCoeff[rsFilterTarget][phase1];
+      float yNext = 0.0f;
+      for (int tap = 0; tap < RS_TAPS; ++tap) {
+        const float sample = resampleHistoryAt(base + tap - 7, newest);
+        const float a = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
+        const float b = c10[tap] + (c11[tap] - c10[tap]) * phaseMix;
+        y += sample * a;
+        yNext += sample * b;
+      }
+      y += (yNext - y) * rsFilterMix;
+    }
+    gRing[gCur][gFill++] = processSample(y);
+    // Tempo de conteudo: avanca pela razao real atual, inclusive durante o ramp de velocidade.
+
+    if (rsFilterMix < 1.0f) {
+      rsFilterMix += rsFilterMixStep;
+      if (rsFilterMix >= 1.0f) {
+        rsFilterMix = 1.0f;
+        rsFilterActive = rsFilterTarget;
+      }
+    }
+    if (rsStepRampLeft) {
+      rsStep += (rsTargetStep - rsStep) / (float)rsStepRampLeft;
+      if (--rsStepRampLeft == 0) rsStep = rsTargetStep;
+    }
+    rsNextPos += (double)rsStep;
+  }
 }
 
 class AudioOut final : public AudioOutput {
 public:
   bool begin() override {
-    for (int i = 0; i < 4; ++i) rsH[i] = 0;
-    rsPhase = 0;
-    applyRate();
+    configureResampler((float)((hertz >= 8000 && hertz <= 192000) ? hertz : 44100),
+                       playbackSpeed, true);
     return true;
   }
 
   bool SetRate(int hz) override {
     AudioOutput::SetRate(hz);
-    applyRate();
+    configureResampler((float)((hz >= 8000 && hz <= 192000) ? hz : 44100),
+                       playbackSpeed, true);
     return true;
   }
 
-  // true = bloco quase cheio e o speaker ainda nao aceitou
   bool isFull() const {
-    if (gFill + 8 <= BLOCK_SAMPLES) return false;
+    if (gFill + RS_MAX_OUTPUTS_PER_INPUT <= BLOCK_SAMPLES) return false;
     return !submitBlock();
   }
 
   bool ConsumeSample(int16_t sample[2]) override {
-    if (gSliceLeft <= 0) return false;  // fatia esgotada: devolve o controle ao loop()
-    if (gFill + 8 > BLOCK_SAMPLES && !submitBlock()) return false;  // contrapressao
+    if (gSliceLeft <= 0) return false;
+    // Reserva o pior caso de upsampling antes de aceitar a amostra de entrada.
+    // Assim, contrapressao nunca perde nem duplica amostras do decoder.
+    if (gFill + RS_MAX_OUTPUTS_PER_INPUT > BLOCK_SAMPLES && !submitBlock()) return false;
     --gSliceLeft;
-    const float x = ((float)sample[0] + (float)sample[1]) * 0.5f;  // speaker mono
-    if (!rsActive) {
-      gRing[gCur][gFill++] = processSample(x);
-    } else {
-      rsH[0] = rsH[1]; rsH[1] = rsH[2]; rsH[2] = rsH[3]; rsH[3] = x;
-      while (rsPhase < 1.0f && gFill < BLOCK_SAMPLES) {
-        gRing[gCur][gFill++] = processSample(cubic4(rsH, rsPhase));
-        rsPhase += rsStep;
-      }
-      rsPhase -= 1.0f;
-      if (rsPhase < 0) rsPhase = 0;
-    }
-    if (gFill + 8 > BLOCK_SAMPLES) submitBlock();
+    const float mono = ((float)sample[0] + (float)sample[1]) * 0.5f;
+    pushResampled(mono);
     return true;
   }
 
@@ -664,13 +797,6 @@ public:
     return true;
   }
 
-private:
-  void applyRate() {
-    const int hz = (hertz >= 8000 && hertz <= 192000) ? hertz : 44100;
-    gSrcRate = (float)hz;
-    rsActive = (hz != (int)OUT_RATE) || fabsf(playbackSpeed - 1.0f) > 0.001f;
-    rsStep = ((float)hz / (float)OUT_RATE) * playbackSpeed;
-  }
 };
 
 // ============================================================ SD resiliente
@@ -678,63 +804,137 @@ bool mountSD();
 
 // Fonte de arquivo com recuperacao: se o SD falhar no meio da musica,
 // remonta o cartao, reabre o arquivo e retoma exatamente do mesmo byte.
+extern bool needRescan;
+extern uint32_t lastRemountAt;
+extern uint32_t lastSdProbeAt;
+
 class SdStreamSource final : public AudioFileSource {
 public:
   bool open(const char *path) override {
     close();
     safeCopy(path_, sizeof(path_), path);
-    f_ = activeFS().open(path_, FILE_READ);
+    fs_ = &activeFS();
+    f_ = fs_->open(path_, FILE_READ);
     if (!f_) return false;
     size_ = (uint32_t)f_.size();
     pos_ = 0;
-    return true;
+    recoverFailures_ = 0;
+    lastRecoverAt_ = 0;
+    readFailed_ = false;
+    return size_ > 0;
   }
 
   uint32_t read(void *data, uint32_t len) override {
-    if (!f_ || !len) return 0;
-    uint8_t *d = (uint8_t *)data;
-    uint32_t got = 0;
-    int fails = 0;
-    while (got < len) {
-      const size_t r = f_.read(d + got, len - got);
-      if (r > 0) { got += (uint32_t)r; pos_ += (uint32_t)r; fails = 0; continue; }
-      if (pos_ >= size_) break;               // fim real do arquivo
-      if (++fails > 3 || !recover()) break;   // erro de SD: tenta recuperar
+    if (!len) return 0;
+    uint8_t *dst = (uint8_t *)data;
+    uint32_t total = 0;
+    uint8_t consecutiveFailures = 0;
+    while (total < len) {
+      if (!f_) {
+        if (++consecutiveFailures > 2 || !recover()) { readFailed_ = true; break; }
+      }
+      const size_t got = f_.read(dst + total, len - total);
+      if (got > 0) {
+        total += (uint32_t)got;
+        pos_ += (uint32_t)got;
+        consecutiveFailures = 0;
+        recoverFailures_ = 0;
+        continue;
+      }
+      if (pos_ >= size_) break;  // fim real do arquivo
+      if (++consecutiveFailures > 2 || !recover()) { readFailed_ = true; break; }
     }
-    return got;
+    return total;
   }
 
-  bool seek(int32_t pos, int dir) override {
-    int64_t t = pos;
-    if (dir == SEEK_CUR) t = (int64_t)pos_ + pos;
-    else if (dir == SEEK_END) t = (int64_t)size_ + pos;
-    if (t < 0 || t > (int64_t)size_) return false;
-    pos_ = (uint32_t)t;
+  bool seek(int32_t offset, int direction) override {
+    int64_t target = offset;
+    if (direction == SEEK_CUR) target = (int64_t)pos_ + offset;
+    else if (direction == SEEK_END) target = (int64_t)size_ + offset;
+    if (target < 0 || target > (int64_t)size_) return false;
+    const uint32_t previous = pos_;
+    pos_ = (uint32_t)target;
     if (f_ && f_.seek(pos_)) return true;
-    return recover();
+    if (recover()) return true;
+    readFailed_ = true;
+    pos_ = previous;
+    return false;
   }
 
-  bool close() override { if (f_) f_.close(); return true; }
+  bool close() override {
+    if (f_) f_.close();
+    fs_ = nullptr;
+    return true;
+  }
   bool isOpen() override { return (bool)f_; }
   uint32_t getSize() override { return size_; }
   uint32_t getPos() override { return pos_; }
+  bool readFailed() const { return readFailed_; }
 
 private:
-  bool recover() {
+  bool reopenOn(fs::FS &filesystem) {
+    File candidate = filesystem.open(path_, FILE_READ);
+    if (!candidate) return false;
+    // Nunca continuar em arquivo diferente/alterado: valida tamanho e offset.
+    if ((uint32_t)candidate.size() != size_ || !candidate.seek(pos_)) {
+      candidate.close();
+      return false;
+    }
     if (f_) f_.close();
-    if (storageKind != STORAGE_SD) return false;
-    sdRemount();
-    f_ = SD.open(path_, FILE_READ);
-    if (!f_) return false;
-    return f_.seek(pos_);
+    f_ = std::move(candidate);
+    fs_ = &filesystem;
+    return true;
+  }
+
+  bool recover() {
+    const uint32_t now = millis();
+    if (lastRecoverAt_ && now - lastRecoverAt_ < SD_STREAM_RETRY_MS) return false;
+    lastRecoverAt_ = now;
+    ++recoverFailures_;
+
+    if (fs_ == &SD || storageKind == STORAGE_SD) {
+      Serial.printf("SD read recovery %u at %lu/%lu\n",
+                    (unsigned)recoverFailures_, (unsigned long)pos_, (unsigned long)size_);
+      sdReady = mountSD();
+      if (sdReady && reopenOn(SD)) {
+        storageKind = STORAGE_SD;
+        ++sdMediaEpoch;
+        needRescan = true;
+        lastRemountAt = now;
+        lastSdProbeAt = now;
+        showToast(uiText(UI_SD_RECOVERED));
+        return true;
+      }
+      sdReady = false;
+      SD.end();
+      sdSPI.end();
+    }
+
+    // Se existe uma copia identica no LittleFS, retoma do mesmo offset.
+    if (internalReady && LittleFS.exists(path_) && reopenOn(LittleFS)) {
+      storageKind = STORAGE_INTERNAL;
+      ++sdMediaEpoch;
+      needRescan = true;
+      lastRemountAt = now;
+      showToast(uiText(UI_SD_DISCONNECTED));
+      Serial.println("Playback resumed from identical LittleFS copy");
+      return true;
+    }
+
+    Serial.printf("SD recovery failed at %lu/%lu\n",
+                  (unsigned long)pos_, (unsigned long)size_);
+    return false;
   }
 
   File f_;
+  fs::FS *fs_ = nullptr;
   char path_[PATH_SIZE] = {0};
   uint32_t size_ = 0;
   uint32_t pos_ = 0;
+  uint32_t lastRecoverAt_ = 0;
+  uint8_t recoverFailures_ = 0;
+  bool readFailed_ = false;
 };
-
 SdStreamSource *source = nullptr;
 AudioFileSourceBuffer *bufferedSource = nullptr;
 AudioGenerator *decoder = nullptr;
@@ -805,14 +1005,25 @@ void saveSettings() {
 }
 
 const char *currentPresetName() {
+  static const UiTextId ids[NUM_PRESETS] = {
+    UI_PRESET_BALANCE, UI_PRESET_FLAT, UI_PRESET_BASS,
+    UI_PRESET_ROCK, UI_PRESET_VOCAL, UI_PRESET_ELECTRO
+  };
   for (int p = 0; p < NUM_PRESETS; ++p) {
     bool same = true;
     for (int i = 0; i < EQ_BANDS; ++i) {
       if (eqGain[i] != PRESETS[p][i]) { same = false; break; }
     }
-    if (same) return PRESET_NAMES[p];
+    if (same) return uiText(ids[p]);
   }
-  return "PERSONAL";
+  return uiText(UI_PRESET_PERSONAL);
+}
+
+const char *localizedThemeName(int index) {
+  static const UiTextId ids[THEME_COUNT] = {
+    UI_THEME_DARK, UI_THEME_MATRIX, UI_THEME_CYBER, UI_THEME_ICE, UI_THEME_AMBER
+  };
+  return uiText(ids[constrain(index, 0, THEME_COUNT - 1)]);
 }
 
 void applyPreset(int p) {
@@ -820,6 +1031,28 @@ void applyPreset(int p) {
   for (int i = 0; i < EQ_BANDS; ++i) eqGain[i] = PRESETS[p][i];
   configureDsp();
   markSettingsDirty();
+}
+
+// Buffer de leitura dimensionado pelo maior bloco contiguo disponivel.
+// O Cardputer ADV nao tem PSRAM; preservamos heap para decoder, display e sistema.
+void allocateAudioBuffer() {
+  if (sdAudioBuffer) { free(sdAudioBuffer); sdAudioBuffer = nullptr; }
+  sdAudioBufferSize = 0;
+  const size_t freeHeap = ESP.getFreeHeap();
+  const size_t maxBlock = ESP.getMaxAllocHeap();
+  const size_t candidates[] = {48 * 1024, 40 * 1024, 32 * 1024, 24 * 1024, 16 * 1024, 12 * 1024, 8 * 1024};
+  for (size_t candidate : candidates) {
+    if (candidate > SD_AUDIO_BUFFER_TARGET || candidate > maxBlock) continue;
+    if (freeHeap < candidate + 64 * 1024) continue;
+    uint8_t *buffer = (uint8_t *)malloc(candidate);
+    if (!buffer) continue;
+    sdAudioBuffer = buffer;
+    sdAudioBufferSize = candidate;
+    break;
+  }
+  Serial.printf("Audio RAM buffer: %u bytes | free=%u maxblk=%u\n",
+                (unsigned)sdAudioBufferSize, (unsigned)ESP.getFreeHeap(),
+                (unsigned)ESP.getMaxAllocHeap());
 }
 
 // ============================================================ metadados
@@ -921,13 +1154,14 @@ bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, boo
   uint32_t p = off + 2;
   const uint32_t end = off + len;
   uint8_t b[9];
-  for (int g = 0; g < 48 && p + 4 < end; ++g) {
+  for (int g = 0; g < 128 && p + 4 < end; ++g) {
     if (!f.seek(p) || f.read(b, 4) != 4) return false;
     if (b[0] != 0xFF) return false;
     const uint8_t m = b[1];
     if (m == 0xFF) { ++p; continue; }
     if (m == 0xD8 || (m >= 0xD0 && m <= 0xD7) || m == 0x01) { p += 2; continue; }
     const uint32_t seg = ((uint32_t)b[2] << 8) | b[3];
+    if (seg < 2 || p + 2 + seg > end) return false;
     if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
       if (f.read(b, 5) != 5) return false;
       h = (uint16_t)((b[1] << 8) | b[2]);
@@ -940,18 +1174,20 @@ bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, boo
   return false;
 }
 
-bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c) {
-  if (len < 32 || len > COVER_MAX_BYTES) return false;
+bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c,
+                  uint32_t maxBytes = COVER_MAX_BYTES) {
+  const uint32_t fileSize = (uint32_t)f.size();
+  if (len < 32 || len > maxBytes || off > fileSize || len > fileSize - off) return false;
   uint8_t b[24];
   if (!f.seek(off) || f.read(b, 24) != 24) return false;
   if (b[0] == 0xFF && b[1] == 0xD8) {
     bool prog = false;
     uint16_t w = 0, h = 0;
-    if (!jpegInfo(f, off, len, w, h, prog) || prog) return false;
+    if (!jpegInfo(f, off, len, w, h, prog) || prog || (uint64_t)w * h > 2400000ULL) return false;
     c.png = false; c.w = w; c.h = h;
   } else if (!memcmp(b, "\x89PNG\r\n\x1a\n", 8)) {
     const uint32_t w = be32(b + 16), h = be32(b + 20);
-    if (!w || !h || w > 2048 || h > 2048 || len > 400UL * 1024UL) return false;
+    if (!w || !h || w > 2048 || h > 2048 || (uint64_t)w * h > 2400000ULL) return false;
     c.png = true; c.w = (uint16_t)w; c.h = (uint16_t)h;
   } else {
     return false;
@@ -1204,8 +1440,13 @@ void findFolderCover(const char *path) {
   if (sl == dir) dir[1] = '\0'; else *sl = '\0';
   static char cachedDir[PATH_SIZE] = "\x01";
   static CoverRef cached;
-  if (strcmp(cachedDir, dir) == 0) { coverRef = cached; return; }
+  static uint32_t cachedEpoch = 0;
+  static StorageKind cachedStorage = STORAGE_INTERNAL;
+  if (strcmp(cachedDir, dir) == 0 && cachedEpoch == sdMediaEpoch &&
+      cachedStorage == storageKind) { coverRef = cached; return; }
   safeCopy(cachedDir, sizeof(cachedDir), dir);
+  cachedEpoch = sdMediaEpoch;
+  cachedStorage = storageKind;
   cached = CoverRef();
   static const char *const NAMES[] = {"cover", "folder", "front", "album", "albumart"};
   static const char *const EXTS[] = {"jpg", "jpeg", "png"};
@@ -1281,20 +1522,27 @@ private:
   uint32_t off_ = 0, len_ = 0, pos_ = 0;
 };
 
+bool drawImageRef(M5Canvas &canvas, const CoverRef &ref, int targetW, int targetH,
+                  uint16_t background = C_PANEL2) {
+  if (!ref.valid || !ref.w || !ref.h || targetW <= 0 || targetH <= 0) return false;
+  canvas.fillSprite(background);
+  CoverStream stream;
+  if (!stream.open(ref)) return false;
+  const float sx = (float)targetW / (float)ref.w;
+  const float sy = (float)targetH / (float)ref.h;
+  float scale = sx < sy ? sx : sy;
+  if (scale > 1.0f) scale = 1.0f;
+  const int drawW = max(1, (int)(ref.w * scale));
+  const int drawH = max(1, (int)(ref.h * scale));
+  const int x = (targetW - drawW) / 2;
+  const int y = (targetH - drawH) / 2;
+  if (ref.png) return canvas.drawPng(&stream, x, y, drawW, drawH, 0, 0, scale, scale);
+  return canvas.drawJpg(&stream, x, y, drawW, drawH, 0, 0, scale, scale);
+}
+
 bool decodeCover() {
   if (!coverCanvasReady || !coverRef.valid) return false;
-  coverCanvas.fillSprite(C_PANEL2);
-  CoverStream cs;
-  if (!cs.open(coverRef)) return false;
-  const int big = coverRef.w > coverRef.h ? coverRef.w : coverRef.h;
-  float sc = (float)COVER_PX / (float)big;
-  if (sc > 1.0f) sc = 1.0f;
-  const int dw = (int)(coverRef.w * sc), dh = (int)(coverRef.h * sc);
-  const int x = (COVER_PX - dw) / 2, y = (COVER_PX - dh) / 2;
-  bool ok;
-  if (coverRef.png) ok = coverCanvas.drawPng(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
-  else ok = coverCanvas.drawJpg(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
-  return ok;
+  return drawImageRef(coverCanvas, coverRef, COVER_PX, COVER_PX, C_PANEL2);
 }
 
 void prepareCoverState() {
@@ -1307,12 +1555,35 @@ void prepareCoverState() {
 struct Entry {
   char name[NAME_SIZE];
   bool isDir;
+  bool isImage;
 };
 Entry entries[MAX_ENTRIES];
 size_t entryCount = 0;
 char browseDir[DIR_SIZE] = "/";
 int selected = 0;
 int firstVisible = 0;
+
+struct ThumbnailCache {
+  char path[PATH_SIZE];
+  char title[NAME_SIZE];
+  char detail[48];
+  uint32_t mediaEpoch = 0;
+  bool loaded = false;
+  bool hasImage = false;
+};
+ThumbnailCache thumbnailCache[ROWS];
+int thumbnailWindow = -1;
+int thumbnailNextSlot = 0;
+uint32_t lastThumbnailStep = 0;
+
+CoverRef imageViewerRef;
+char imageViewerPath[PATH_SIZE] = {0};
+int imageViewerIndex = -1;
+
+void invalidateThumbnails();
+void thumbnailStep();
+bool openImageViewer(int entryIndex);
+void imageViewerKey(int key);
 bool scanning = false;
 bool validatingDirs = false;
 bool scanOverflow = false;
@@ -1360,18 +1631,16 @@ void addEntry(File &e) {
   const char *base = slash ? slash + 1 : raw;
   if (!base[0] || base[0] == '.') return;
   const bool dir = e.isDirectory();
-  if (!dir && !isAudioFile(base)) return;
+  const bool image = !dir && isImageFile(base);
+  if (!dir && !isAudioFile(base) && !image) return;
   if (dir && strcasecmp(base, "System Volume Information") == 0) return;
   if (strlen(base) >= NAME_SIZE) return;
 
   Entry tmp;
   safeCopy(tmp.name, NAME_SIZE, base);
   tmp.isDir = dir;
-  size_t pos = entryCount;
-  while (pos > 0 && cmpEntry(entries[pos - 1], tmp) > 0) --pos;
-  memmove(&entries[pos + 1], &entries[pos], (entryCount - pos) * sizeof(Entry));
-  entries[pos] = tmp;
-  ++entryCount;
+  tmp.isImage = image;
+  entries[entryCount++] = tmp;
 }
 
 void closeWalkStack() {
@@ -1399,7 +1668,7 @@ void sdRemount() {
   if (sdReady) storageKind = STORAGE_SD;
   else if (internalReady) storageKind = STORAGE_INTERNAL;
   needRescan = true;
-  showToast(sdReady ? "SD RECUPERADO" : "SD DESCONECTADO");
+  showToast(sdReady ? uiText(UI_SD_RECOVERED) : uiText(UI_SD_DISCONNECTED));
 }
 
 bool startDirValidation(size_t index) {
@@ -1442,7 +1711,7 @@ void walkDirectoryStep() {
   if (!base || !base[0] || base[0] == '.') { child.close(); return; }
 
   if (!child.isDirectory()) {
-    const bool found = isAudioFile(base);
+    const bool found = isBrowserMedia(base);
     child.close();
     if (found) {
       walkFoundSong = true;
@@ -1474,8 +1743,13 @@ void walkDirectoryStep() {
   ++walkDepth;
 }
 
+int compareEntryQsort(const void *a, const void *b) {
+  return cmpEntry(*static_cast<const Entry *>(a), *static_cast<const Entry *>(b));
+}
+
 void finishScan() {
   if (scanHandle) scanHandle.close();
+  if (entryCount > 1) qsort(entries, entryCount, sizeof(Entry), compareEntryQsort);
   closeWalkStack();
   scanning = false;
   validatingDirs = false;
@@ -1492,13 +1766,14 @@ void finishScan() {
     reselectName[0] = '\0';
     ensureVisible();
   }
-  if (scanFolderLimit) showToast("PASTA GRANDE: FILTRO PARCIAL");
-  else if (scanOverflow) showToast("LIMITE: 200 ITENS");
+  if (scanFolderLimit) showToast(uiText(UI_SCAN_FOLDER_LIMIT));
+  else if (scanOverflow) showToast(uiText(UI_SCAN_OVERFLOW));
   if (screen == SCR_BROWSER) drawBrowser();
 }
 
 void beginScan(const char *path, const char *reselect = nullptr) {
   abortScan();
+  invalidateThumbnails();
   validationIndex = 0;
   entryCount = 0;
   selected = 0;
@@ -1512,7 +1787,7 @@ void beginScan(const char *path, const char *reselect = nullptr) {
   scanHandle = activeFS().open(browseDir);
   if (!scanHandle || !scanHandle.isDirectory()) {
     if (scanHandle) scanHandle.close();
-    showToast("PASTA INVALIDA");
+    showToast(uiText(UI_INVALID_FOLDER));
     if (screen == SCR_BROWSER) drawBrowser();
     return;
   }
@@ -1569,7 +1844,7 @@ void scanStep(uint32_t budgetMs) {
 void enterDir(const char *name) {
   char path[PATH_SIZE];
   if (!buildPath(path, sizeof(path), browseDir, name) || strlen(path) >= sizeof(browseDir)) {
-    showToast("CAMINHO LONGO");
+    showToast(uiText(UI_PATH_TOO_LONG));
     drawBrowser();
     return;
   }
@@ -1637,7 +1912,7 @@ int buildQueueFromBrowser(int entryIdx) {
   queueCount = 0;
   int chosen = -1;
   for (size_t i = 0; i < entryCount && queueCount < MAX_ENTRIES; ++i) {
-    if (entries[i].isDir) continue;
+    if (entries[i].isDir || entries[i].isImage) continue;
     if ((int)i == entryIdx) chosen = (int)queueCount;
     safeCopy(queueNames[queueCount], NAME_SIZE, entries[i].name);
     ++queueCount;
@@ -1658,8 +1933,23 @@ uint32_t seekDue = 0;
 int pendingSkip = 0;
 uint32_t skipDue = 0;
 
+void updateMediaClock() {
+  const uint32_t now = millis();
+  if (mediaClockLastMs == 0) {
+    mediaClockLastMs = now;
+    return;
+  }
+  const uint32_t delta = now - mediaClockLastMs;
+  mediaClockLastMs = now;
+  if (playing && !paused && fadeAction != FA_PAUSE) {
+    mediaClockSeconds += ((double)delta / 1000.0) * (double)playbackSpeed;
+  }
+}
+
 uint32_t elapsedSec() {
-  return startOffsetSec + (uint32_t)(gSamplesSubmitted / OUT_RATE);
+  updateMediaClock();
+  if (mediaClockSeconds < 0.0) return 0;
+  return (uint32_t)mediaClockSeconds;
 }
 
 bool canSeek() { return meta.fmt == FMT_MP3 && meta.durationSec >= 3; }
@@ -1760,7 +2050,8 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   if (!source || !source->open(path)) { stopPlayback(true); return false; }
   if (startByte > 0) source->seek((int32_t)startByte, SEEK_SET);
 
-  bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sizeof(sdAudioBuffer));
+  if (!sdAudioBuffer || sdAudioBufferSize < 8192) { stopPlayback(true); showToast(uiText(UI_AUDIO_BUFFER_LOW)); return false; }
+  bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sdAudioBufferSize);
   audioOutput = new (std::nothrow) AudioOut();
   decoder = makeDecoder(fmt);
   if (!bufferedSource || !audioOutput || !decoder) { stopPlayback(true); return false; }
@@ -1770,6 +2061,8 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   gFadeGain = natural ? 1.0f : 0.0f;  // fade-in curto, exceto na troca gapless
   if (!natural) { resetDsp(); gVolCur = gVolTarget; }
   gSamplesSubmitted = 0;
+  mediaClockSeconds = (double)startedAt;
+  mediaClockLastMs = millis();
 
   if (!decoder->begin(bufferedSource, audioOutput)) { stopPlayback(true); return false; }
 
@@ -1787,7 +2080,7 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
 
 void finishQueue() {
   stopPlayback(false);
-  showToast("FIM DA LISTA");
+  showToast(uiText(UI_QUEUE_END));
   if (screen == SCR_PLAYER) { screen = SCR_BROWSER; }
   redrawCurrent();
 }
@@ -1818,7 +2111,7 @@ bool advance(int dir, bool automatic, int steps = 1) {
     if (startTrack(order[orderPos], 0, true, automatic)) { redrawCurrent(); return true; }
   }
   stopPlayback(true);
-  showToast("ERRO AO ABRIR ARQUIVO");
+  showToast(uiText(UI_OPEN_FILE_ERROR));
   if (screen == SCR_PLAYER) screen = SCR_BROWSER;
   redrawCurrent();
   return false;
@@ -1836,7 +2129,7 @@ void requestSkip(int dir) {
   pendingSkip += dir;
   skipDue = millis() + 200;
   char t[24];
-  snprintf(t, sizeof(t), pendingSkip > 0 ? "PROXIMA +%d" : "ANTERIOR %d", pendingSkip);
+  snprintf(t, sizeof(t), pendingSkip > 0 ? uiText(UI_NEXT_FMT) : uiText(UI_PREVIOUS_FMT), pendingSkip);
   showToast(t);
 }
 
@@ -1860,11 +2153,11 @@ void previousOrRestart() {
 
 void seekBy(int delta) {
   if (!playing) return;
-  if (!canSeek()) { showToast("BUSCA INDISPONIVEL"); return; }
+  if (!canSeek()) { showToast(uiText(UI_SEEK_UNAVAILABLE)); return; }
   pendingSeek += delta;
   seekDue = millis() + 280;
   char t[24];
-  snprintf(t, sizeof(t), "BUSCA %+ds", pendingSeek);
+  snprintf(t, sizeof(t), uiText(UI_SEEK_FMT), pendingSeek);
   showToast(t);
 }
 
@@ -1882,6 +2175,7 @@ void seekStep() {
 
 void togglePause() {
   if (!playing) return;
+  updateMediaClock();
   if (paused) {
     paused = false;
     fadeAction = FA_NONE;
@@ -1912,7 +2206,7 @@ void changeVolume(int delta) {
   updateVolumeTarget();
   markSettingsDirty();
   char t[24];
-  snprintf(t, sizeof(t), "VOLUME %d%%", volumePercent);
+  snprintf(t, sizeof(t), uiText(UI_VOLUME_FMT), volumePercent);
   showToast(t);
   redrawCurrent();
 }
@@ -1954,10 +2248,10 @@ void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
   g.setTextColor(C_RED);
   g.drawString("MP3 PLAYER", 8, 2);
 
-  g.setFont(&fonts::Font0);
+  applyUiFont(g, true);
   if (batteryPercent >= 0 && batteryPercent <= 100) {
     char b[12];
-    snprintf(b, sizeof(b), "BAT %d%%", batteryPercent);
+    snprintf(b, sizeof(b), uiText(UI_BATTERY_FMT), batteryPercent);
     g.setTextColor(batteryPercent <= 15 ? C_RED : C_GREY);
     g.drawString(b, 66, 6);
   }
@@ -2014,68 +2308,106 @@ void drawBrowser() {
   drawGrid(g);
 
   char title[NAME_SIZE];
-  if (browseDir[1] == '\0') safeCopy(title, sizeof(title), storageKind == STORAGE_SD ? "SD CARD" : "MEMORIA INTERNA");
+  if (browseDir[1] == '\0')
+    safeCopy(title, sizeof(title), storageKind == STORAGE_SD ? uiText(UI_STORAGE_SD) : uiText(UI_STORAGE_INTERNAL));
   else {
     const char *base = strrchr(browseDir, '/');
     toAscii(base ? base + 1 : browseDir, title, sizeof(title));
   }
   drawHeader(g, title, C_CYAN);
-
   applyUiFont(g);
   g.setTextSize(1);
-  constexpr int ROW_H = 17, Y0 = 24;
+  constexpr int ROW_H = 34, Y0 = 23;
 
   if (!storageReady()) {
     g.setTextColor(C_RED);
-    g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 14, 40);
-    applyUiFont(g);
+    g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 10, 38);
     g.setTextColor(C_GREY);
-    g.drawString(uiText(UI_STORAGE_KEYS), 14, 62);
+    g.drawString(uiText(UI_STORAGE_KEYS), 10, 58);
   } else if (scanning) {
     g.setTextColor(C_GREY);
-    char s[32];
-    snprintf(s, sizeof(s), validatingDirs ? uiText(UI_FILTERING) : uiText(UI_READING), (int)entryCount);
-    g.drawString(s, 14, 44);
+    char status[48];
+    snprintf(status, sizeof(status), validatingDirs ? uiText(UI_FILTERING) : uiText(UI_READING), (int)entryCount);
+    g.drawString(status, 10, 42);
   } else if (!entryCount) {
     g.setTextColor(C_GREY);
-    g.drawString(uiText(UI_EMPTY), 14, 44);
+    g.drawString(uiText(UI_EMPTY), 10, 42);
   }
 
   if (!scanning) {
-    for (int r = 0; r < ROWS; ++r) {
-      const int idx = firstVisible + r;
+    for (int row = 0; row < ROWS; ++row) {
+      const int idx = firstVisible + row;
       if (idx >= (int)entryCount) break;
-      const int y = Y0 + r * ROW_H;
-      const bool active = (idx == selected);
-      const Entry &e = entries[idx];
+      const int y = Y0 + row * ROW_H;
+      const Entry &entry = entries[idx];
+      const bool active = idx == selected;
       if (active) {
-        g.fillRoundRect(6, y, 224, 16, 3, C_PANEL);
-        g.fillRect(6, y + 2, 3, 12, C_RED);
-      }
-      const uint16_t ic = e.isDir ? C_YELLOW : C_CYAN;
-      if (e.isDir) {
-        g.fillRect(13, y + 4, 6, 2, ic);
-        g.fillRect(13, y + 6, 13, 8, ic);
+        g.fillRoundRect(6, y, 226, 32, 4, C_PANEL);
+        g.fillRect(6, y + 4, 3, 24, C_RED);
       } else {
-        g.fillCircle(16, y + 11, 3, ic);
-        g.drawFastVLine(18, y + 3, 9, ic);
-        g.drawLine(18, y + 3, 22, y + 6, ic);
+        g.drawRoundRect(6, y, 226, 32, 4, C_DIM);
       }
-      char shown[NAME_SIZE], fit[NAME_SIZE];
-      toAscii(e.name, shown, sizeof(shown));
-      if (!e.isDir) stripExt(shown);
+
+      char path[PATH_SIZE];
+      const bool pathOk = buildPath(path, sizeof(path), browseDir, entry.name);
+      const ThumbnailCache &cache = thumbnailCache[row];
+      const bool cacheMatch = pathOk && cache.loaded &&
+                              cache.mediaEpoch == sdMediaEpoch &&
+                              strcmp(cache.path, path) == 0;
+      const bool cachedImage = cacheMatch && cache.hasImage && thumbCanvasReady[row];
+      if (cachedImage) {
+        thumbCanvases[row]->pushSprite(11, y + 1);
+      } else {
+        g.fillRoundRect(11, y + 1, THUMB_PX + 2, THUMB_PX + 2, 3, C_PANEL2);
+        if (entry.isDir) {
+          g.fillRect(18, y + 12, 10, 3, C_YELLOW);
+          g.fillRect(18, y + 15, 19, 12, C_YELLOW);
+          g.fillRect(20, y + 10, 8, 3, C_YELLOW);
+        } else if (entry.isImage) {
+          g.drawRect(17, y + 7, 21, 19, C_CYAN);
+          g.drawLine(19, y + 24, 25, y + 17, C_CYAN);
+          g.drawLine(25, y + 17, 30, y + 22, C_CYAN);
+          g.fillCircle(32, y + 12, 2, C_YELLOW);
+        } else {
+          g.fillCircle(24, y + 17, 7, C_CYAN);
+          g.drawFastVLine(27, y + 7, 14, C_CYAN);
+          g.drawLine(27, y + 7, 34, y + 12, C_CYAN);
+        }
+      }
+
+      char name[NAME_SIZE], shown[NAME_SIZE], fit[NAME_SIZE];
+      if (cacheMatch && cache.title[0]) safeCopy(shown, sizeof(shown), cache.title);
+      else {
+        toAscii(entry.name, name, sizeof(name));
+        if (!entry.isDir) stripExt(name);
+        safeCopy(shown, sizeof(shown), name);
+      }
       g.setFont(&fonts::Font2);
-      fitText(g, shown, 192, fit, sizeof(fit));
+      fitText(g, shown, 174, fit, sizeof(fit));
       g.setTextColor(active ? C_WHITE : C_GREY);
-      g.drawString(fit, 32, y);
+      g.drawString(fit, 50, y + 5);
+
+      if (cacheMatch && cache.detail[0]) {
+        g.setFont(&fonts::Font0);
+        g.setTextColor(active ? C_CYAN : C_GREY);
+        char detail[48];
+        fitText(g, cache.detail, 174, detail, sizeof(detail));
+        g.drawString(detail, 50, y + 21);
+      } else if (entry.isImage) {
+        g.setFont(&fonts::Font0);
+        g.setTextColor(C_GREY);
+        g.drawString(uiText(UI_IMAGE_VIEW), 50, y + 21);
+      }
     }
+
     if ((int)entryCount > ROWS) {
-      const int trackH = ROWS * ROW_H;
-      g.fillRect(234, Y0, 3, trackH, C_DIM);
+      const int trackH = ROWS * ROW_H - 3;
+      g.fillRect(235, Y0, 3, trackH, C_DIM);
       int thumbH = trackH * ROWS / (int)entryCount;
-      if (thumbH < 8) thumbH = 8;
-      const int thumbY = Y0 + (trackH - thumbH) * firstVisible / ((int)entryCount - ROWS);
-      g.fillRect(234, thumbY, 3, thumbH, C_RED);
+      if (thumbH < 7) thumbH = 7;
+      const int maxStart = max(1, (int)entryCount - ROWS);
+      const int thumbY = Y0 + (trackH - thumbH) * firstVisible / maxStart;
+      g.fillRect(235, thumbY, 3, thumbH, C_RED);
     }
   }
 
@@ -2092,32 +2424,207 @@ void drawBrowser() {
     g.setFont(&fonts::Font0);
     char t[12], d[12], line[32];
     formatTime(t, sizeof(t), elapsedSec());
-    if (meta.durationSec) { formatTime(d, sizeof(d), meta.durationSec); snprintf(line, sizeof(line), "%s / %s", t, d); }
-    else safeCopy(line, sizeof(line), t);
+    if (meta.durationSec) {
+      formatTime(d, sizeof(d), meta.durationSec);
+      snprintf(line, sizeof(line), "%s / %s", t, d);
+    } else safeCopy(line, sizeof(line), t);
     g.setTextColor(C_CYAN);
     g.drawString(line, 8, 125);
-    const char *st = (paused || fadeAction == FA_PAUSE) ? uiText(UI_PAUSED) : uiText(UI_PLAYING);
+    const char *state = (paused || fadeAction == FA_PAUSE) ? uiText(UI_PAUSED) : uiText(UI_PLAYING);
     g.setTextColor((paused || fadeAction == FA_PAUSE) ? C_YELLOW : C_GREY);
-    g.drawString(st, 232 - g.textWidth(st), 125);
+    g.drawString(state, 232 - g.textWidth(state), 125);
   } else {
     g.setFont(&fonts::Font0);
     g.setTextColor(C_GREY);
     g.drawString(uiText(UI_BROWSER_KEYS1), 8, 101);
     g.drawString(uiText(UI_BROWSER_KEYS2), 8, 113);
     if (entryCount) {
-      char c[20];
-      snprintf(c, sizeof(c), "%d/%d", selected + 1, (int)entryCount);
+      char count[20];
+      snprintf(count, sizeof(count), "%d/%d", selected + 1, (int)entryCount);
       g.setTextColor(C_CYAN);
-      g.drawString(c, 232 - g.textWidth(c), 125);
+      g.drawString(count, 232 - g.textWidth(count), 125);
     }
   }
   if (toastActive && millis() < toastUntil) {
     g.fillRect(0, 122, 240, 13, C_PANEL2);
     g.setFont(&fonts::Font0);
     g.setTextColor(C_YELLOW);
-    g.drawString(toastText, 8, 125);
+    char toast[80];
+    fitText(g, toastText, 224, toast, sizeof(toast));
+    g.drawString(toast, 8, 125);
   }
   ui.pushSprite(0, 0);
+}
+
+void invalidateThumbnails() {
+  thumbnailWindow = -1;
+  thumbnailNextSlot = 0;
+  for (int i = 0; i < ROWS; ++i) {
+    thumbnailCache[i] = ThumbnailCache();
+    if (thumbCanvasReady[i]) thumbCanvases[i]->fillSprite(C_PANEL2);
+  }
+}
+
+void thumbnailStep() {
+  if (screenOff || screen != SCR_BROWSER || scanning || playing || !storageReady()) return;
+  if (thumbnailWindow != firstVisible) {
+    thumbnailWindow = firstVisible;
+    thumbnailNextSlot = 0;
+    for (int i = 0; i < ROWS; ++i) thumbnailCache[i] = ThumbnailCache();
+  }
+  if (thumbnailNextSlot >= ROWS) return;
+  const uint32_t now = millis();
+  if (now - lastThumbnailStep < 90) return;
+  lastThumbnailStep = now;
+
+  const int slot = thumbnailNextSlot++;
+  const int index = firstVisible + slot;
+  if (index >= (int)entryCount) return;
+  const Entry &entry = entries[index];
+  if (entry.isDir || !thumbCanvasReady[slot]) return;
+
+  char path[PATH_SIZE];
+  if (!buildPath(path, sizeof(path), browseDir, entry.name)) return;
+  ThumbnailCache &cache = thumbnailCache[slot];
+  safeCopy(cache.path, sizeof(cache.path), path);
+  cache.mediaEpoch = sdMediaEpoch;
+  cache.loaded = false;
+  cache.hasImage = false;
+  cache.title[0] = '\0';
+  cache.detail[0] = '\0';
+
+  CoverRef image;
+  if (entry.isImage) {
+    File file = activeFS().open(path, FILE_READ);
+    if (file) {
+      safeCopy(gProbePath, sizeof(gProbePath), path);
+      const uint32_t size = (uint32_t)file.size();
+      inspectImage(file, 0, size, image, IMAGE_MAX_BYTES);
+      file.close();
+    }
+    safeCopy(cache.title, sizeof(cache.title), entry.name);
+    stripExt(cache.title);
+    safeCopy(cache.detail, sizeof(cache.detail), image.valid ? (image.png ? uiText(UI_IMAGE_PNG) : uiText(UI_IMAGE_JPEG)) : uiText(UI_IMAGE_UNSUPPORTED));
+  } else {
+    Meta preview;
+    // A busca de miniaturas nunca pode substituir a capa da faixa que ja esta tocando.
+    const CoverRef savedCover = coverRef;
+    char savedProbePath[PATH_SIZE];
+    safeCopy(savedProbePath, sizeof(savedProbePath), gProbePath);
+    probeMeta(path, formatOf(entry.name), preview);
+    image = coverRef;
+    coverRef = savedCover;
+    safeCopy(gProbePath, sizeof(gProbePath), savedProbePath);
+    if (preview.title[0]) safeCopy(cache.title, sizeof(cache.title), preview.title);
+    else {
+      safeCopy(cache.title, sizeof(cache.title), entry.name);
+      stripExt(cache.title);
+    }
+    if (preview.artist[0]) safeCopy(cache.detail, sizeof(cache.detail), preview.artist);
+    else {
+      const Fmt format = formatOf(entry.name);
+      safeCopy(cache.detail, sizeof(cache.detail), format == FMT_WAV ? uiText(UI_FORMAT_WAV) :
+               format == FMT_FLAC ? uiText(UI_FORMAT_FLAC) :
+               format == FMT_AAC ? uiText(UI_FORMAT_AAC) : uiText(UI_FORMAT_MP3));
+    }
+  }
+  if (image.valid) cache.hasImage = drawImageRef(*thumbCanvases[slot], image, THUMB_PX, THUMB_PX);
+  if (!cache.hasImage) thumbCanvases[slot]->fillSprite(C_PANEL2);
+  cache.loaded = true;
+  if (screen == SCR_BROWSER) drawBrowser();
+}
+
+void drawImageViewer() {
+  screen = SCR_IMAGE;
+  if (screenOff) return;
+  auto &g = ui;
+  g.fillSprite(C_BG);
+  drawGrid(g);
+  char title[NAME_SIZE];
+  safeCopy(title, sizeof(title), imageViewerPath);
+  const char *base = strrchr(title, '/');
+  if (base) memmove(title, base + 1, strlen(base + 1) + 1);
+  stripExt(title);
+  drawHeader(g, title, C_CYAN);
+
+  bool ok = false;
+  if (imageViewerRef.valid) {
+    CoverStream stream;
+    if (stream.open(imageViewerRef)) {
+      constexpr int VIEW_W = 236, VIEW_H = 87, VIEW_Y = 23;
+      const float sx = (float)VIEW_W / (float)imageViewerRef.w;
+      const float sy = (float)VIEW_H / (float)imageViewerRef.h;
+      float scale = sx < sy ? sx : sy;
+      if (scale > 1.0f) scale = 1.0f;
+      const int dw = max(1, (int)(imageViewerRef.w * scale));
+      const int dh = max(1, (int)(imageViewerRef.h * scale));
+      const int x = (240 - dw) / 2;
+      const int y = VIEW_Y + (VIEW_H - dh) / 2;
+      ok = imageViewerRef.png
+          ? g.drawPng(&stream, x, y, dw, dh, 0, 0, scale, scale)
+          : g.drawJpg(&stream, x, y, dw, dh, 0, 0, scale, scale);
+    }
+  }
+  g.fillRect(0, 113, 240, 22, C_PANEL2);
+  applyUiFont(g, true);
+  g.setTextColor(ok ? C_GREY : C_RED);
+  g.drawString(ok ? uiText(UI_IMAGE_KEYS) : uiText(UI_IMAGE_UNSUPPORTED), 6, 120);
+  if (imageViewerIndex >= 0 && entryCount) {
+    char count[20];
+    snprintf(count, sizeof(count), "%d/%d", imageViewerIndex + 1, (int)entryCount);
+    g.setTextColor(C_CYAN);
+    g.drawString(count, 232 - g.textWidth(count), 130);
+  }
+  ui.pushSprite(0, 0);
+}
+
+bool openImageViewer(int entryIndex) {
+  if (entryIndex < 0 || entryIndex >= (int)entryCount) return false;
+  const Entry &entry = entries[entryIndex];
+  if (!entry.isImage) return false;
+  char path[PATH_SIZE];
+  if (!buildPath(path, sizeof(path), browseDir, entry.name)) {
+    showToast(uiText(UI_INVALID_PATH));
+    return false;
+  }
+  File file = activeFS().open(path, FILE_READ);
+  if (!file) {
+    showToast(uiText(UI_OPEN_FILE_ERROR));
+    return false;
+  }
+  safeCopy(gProbePath, sizeof(gProbePath), path);
+  CoverRef ref;
+  const uint32_t size = (uint32_t)file.size();
+  const bool valid = inspectImage(file, 0, size, ref, IMAGE_MAX_BYTES);
+  file.close();
+  if (!valid) {
+    showToast(uiText(UI_IMAGE_UNSUPPORTED));
+    return false;
+  }
+  imageViewerRef = ref;
+  safeCopy(imageViewerPath, sizeof(imageViewerPath), path);
+  imageViewerIndex = entryIndex;
+  drawImageViewer();
+  return true;
+}
+
+void imageViewerKey(int key) {
+  if (key == K_TAB || key == K_DEL || key == '`') {
+    drawBrowser();
+    return;
+  }
+  int dir = 0;
+  if (key == ',' || key == ';') dir = -1;
+  else if (key == '/' || key == '.') dir = +1;
+  if (!dir || !entryCount) return;
+  int index = imageViewerIndex;
+  for (size_t tries = 0; tries < entryCount; ++tries) {
+    index += dir;
+    if (index < 0) index = (int)entryCount - 1;
+    if (index >= (int)entryCount) index = 0;
+    if (entries[index].isImage && openImageViewer(index)) return;
+  }
+  showToast(uiText(UI_IMAGE_UNSUPPORTED));
 }
 
 void drawLive() {
@@ -2148,23 +2655,23 @@ void drawLive() {
   } else {
     g.setTextColor(C_GREY);
     char sub[24];
-    snprintf(sub, sizeof(sub), "FAIXA %d/%d", (int)orderPos + 1, (int)queueCount);
+    snprintf(sub, sizeof(sub), uiText(UI_TRACK_FMT), (int)orderPos + 1, (int)queueCount);
     g.drawString(sub, 8, 18);
     char flags[16] = "";
-    if (opt.shuffle) strcat(flags, "SHUF ");
-    if (opt.repeat == 1) strcat(flags, "REP");
-    else if (opt.repeat == 2) strcat(flags, "REP1");
+    if (opt.shuffle) strcat(flags, uiText(UI_SHUFFLE));
+    if (opt.repeat == 1) strcat(flags, uiText(UI_REPEAT));
+    else if (opt.repeat == 2) strcat(flags, "1x");
     g.setTextColor(C_YELLOW);
     g.drawString(flags, 80, 18);
     if (sleepDeadline) {
       const int32_t rem = (int32_t)(sleepDeadline - millis());
       char z[12];
-      snprintf(z, sizeof(z), "ZZ %dM", (int)(rem > 0 ? rem / 60000 + 1 : 0));
+      snprintf(z, sizeof(z), uiText(UI_SLEEP_FMT), (int)(rem > 0 ? rem / 60000 + 1 : 0));
       g.setTextColor(C_ORANGE);
       g.drawString(z, 138, 18);
     }
     char rate[20];
-    snprintf(rate, sizeof(rate), "%s %.1f", FMT_NAMES[meta.fmt <= FMT_NONE ? meta.fmt : FMT_NONE], gSrcRate / 1000.0f);
+    snprintf(rate, sizeof(rate), "%s %.1fk %.2fx", FMT_NAMES[meta.fmt <= FMT_NONE ? meta.fmt : FMT_NONE], gSrcRate / 1000.0f, playbackSpeed);
     g.setTextColor(C_GREY);
     g.drawString(rate, 232 - g.textWidth(rate), 18);
   }
@@ -2194,7 +2701,7 @@ void drawLive() {
     if (!coverLoaded) {
       g.setFont(&fonts::Font0);
       g.setTextColor(C_GREY);
-      const char *msg = coverPending ? "..." : "SEM CAPA";
+      const char *msg = coverPending ? "..." : uiText(UI_NO_COVER);
       g.drawString(msg, 119 - g.textWidth(msg) / 2, 46);
     }
   } else if (opt.visual == 2) {
@@ -2350,26 +2857,12 @@ const char *const SETTING_LABELS[9][SETTINGS_COUNT] = {
 };
 
 const char *uiLanguageName() { return LANGUAGE_NAMES[constrain(uiLanguage, 0, 8)]; }
-// Compact on-device UI dictionary. Audio, filesystem and decoder paths are not affected.
-const char *const UI_TEXT[9][UI_TEXT_COUNT] = {
-  {"microSD card not found","Internal storage unavailable","M: storage  |  R: refresh","Filtering folders %d","Reading folder... %d","Empty folder (no audio)","PAUSED","PLAYING","ENTER open/play  DEL parent","S settings  E EQ  R refresh  H help","PAUSED","PLAYING","HEADPHONES","SPEAKER","SPACE pause  N/P track  ,/ seek  TAB EQ","EQUALIZER","PRESET","1-6 presets  0 reset  TAB back"},
-  {"Cartao microSD nao encontrado","Memoria interna indisponivel","M: armazenamento  |  R: atualizar","Filtrando pastas %d","Lendo pasta... %d","Pasta vazia (sem audio)","PAUSADO","TOCANDO","ENTER abre/toca  DEL pasta acima","S ajustes  E EQ  R atualizar  H ajuda","PAUSADO","TOCANDO","FONE","ALTO-FALANTE","SPACE pausa  N/P faixa  ,/ busca  TAB EQ","EQUALIZADOR","PRESET","1-6 presets  0 zera  TAB voltar"},
-  {"Tarjeta microSD no encontrada","Almacenamiento interno no disponible","M: almacenamiento  |  R: actualizar","Filtrando carpetas %d","Leyendo carpeta... %d","Carpeta vacia (sin audio)","PAUSADO","REPRODUCIENDO","ENTER abrir/reproducir  DEL subir","S ajustes  E EQ  R actualizar  H ayuda","PAUSADO","REPRODUCIENDO","AURICULARES","ALTAVOZ","SPACE pausa  N/P pista  ,/ buscar  TAB EQ","ECUALIZADOR","PREAJUSTE","1-6 presets  0 reiniciar  TAB volver"},
-  {"未找到 microSD 卡","内部存储不可用","M：存储  |  R：刷新","正在筛选文件夹 %d","正在读取文件夹... %d","文件夹为空（无音频）","已暂停","正在播放","ENTER 打开/播放  DEL 返回上级","S 设置  E 均衡器  R 刷新  H 帮助","已暂停","正在播放","耳机","扬声器","SPACE 暂停  N/P 切歌  ,/ 搜索  TAB 均衡器","均衡器","预设","1-6 预设  0 重置  TAB 返回"},
-  {"microSDカードが見つかりません","内部ストレージを利用できません","M: ストレージ  |  R: 更新","フォルダーを確認中 %d","フォルダーを読み込み中... %d","フォルダーは空です","一時停止","再生中","ENTER 開く/再生  DEL 上へ","S 設定  E EQ  R 更新  H ヘルプ","一時停止","再生中","ヘッドホン","スピーカー","SPACE 一時停止  N/P 曲  ,/ 検索  TAB EQ","イコライザー","プリセット","1-6 プリセット  0 リセット  TAB 戻る"},
-  {"Carte microSD introuvable","Stockage interne indisponible","M : stockage  |  R : actualiser","Filtrage des dossiers %d","Lecture du dossier... %d","Dossier vide (aucun audio)","EN PAUSE","LECTURE","ENTER ouvrir/lire  DEL dossier parent","S reglages  E EQ  R actualiser  H aide","EN PAUSE","LECTURE","CASQUE","HAUT-PARLEUR","SPACE pause  N/P piste  ,/ recherche  TAB EQ","EGALISEUR","PRESELECTION","1-6 presets  0 reset  TAB retour"},
-  {"microSD-Karte nicht gefunden","Interner Speicher nicht verfuegbar","M: Speicher  |  R: aktualisieren","Ordner werden gefiltert %d","Lese Ordner... %d","Ordner leer (keine Audiodateien)","PAUSE","WIEDERGABE","ENTER oeffnen/abspielen  DEL zurueck","S Einstellungen  E EQ  R aktualisieren  H Hilfe","PAUSE","WIEDERGABE","KOPFHOERER","LAUTSPRECHER","SPACE Pause  N/P Titel  ,/ Suche  TAB EQ","EQUALIZER","VOREINSTELLUNG","1-6 Presets  0 reset  TAB zurueck"},
-  {"Карта microSD не найдена","Внутренняя память недоступна","M: память  |  R: обновить","Фильтрация папок %d","Чтение папки... %d","Папка пуста (нет аудио)","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","ENTER открыть/играть  DEL выше","S настройки  E EQ  R обновить  H помощь","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","НАУШНИКИ","ДИНАМИК","SPACE пауза  N/P трек  ,/ поиск  TAB EQ","ЭКВАЛАЙЗЕР","ПРЕСЕТ","1-6 пресеты  0 сброс  TAB назад"},
-  {"Scheda microSD non trovata","Memoria interna non disponibile","M: memoria  |  R: aggiorna","Filtro cartelle %d","Lettura cartella... %d","Cartella vuota (nessun audio)","IN PAUSA","IN RIPRODUZIONE","ENTER apri/riproduci  DEL indietro","S impostazioni  E EQ  R aggiorna  H aiuto","IN PAUSA","IN RIPRODUZIONE","CUFFIE","ALTOPARLANTE","SPACE pausa  N/P brano  ,/ cerca  TAB EQ","EQUALIZZATORE","PRESET","1-6 preset  0 reset  TAB indietro"}
-};
-const char *uiText(UiTextId id) {
-  return UI_TEXT[constrain(uiLanguage, 0, 8)][id];
-}
 
-void applyUiFont(LovyanGFX &g, bool small = false) {
+void applyUiFont(LovyanGFX &g, bool small) {
   (void)small;
   if (uiLanguage == 3) g.setFont(&fonts::efontCN_10);
   else if (uiLanguage == 4) g.setFont(&fonts::efontJA_10);
+  else if (uiLanguage == 7) g.setFont(&fonts::DejaVu9);
   else g.setFont(&fonts::Font0);
 }
 
@@ -2426,7 +2919,7 @@ void settingValue(int i, char *out, size_t n) {
     case 4: safeCopy(out, n, localizedRepeat(opt.repeat)); break;
     case 5: safeCopy(out, n, opt.shuffle ? localizedOn() : localizedOff()); break;
     case 6: safeCopy(out, n, localizedVisual(opt.visual)); break;
-    case 7: safeCopy(out, n, THEMES[themeIndex].name); break;
+    case 7: safeCopy(out, n, localizedThemeName(themeIndex)); break;
     case 8: safeCopy(out, n, localizedEnhance(opt.enhance)); break;
     case 9: safeCopy(out, n, uiLanguageName()); break;
     default: safeCopy(out, n, "ENTER"); break;
@@ -2460,66 +2953,32 @@ void drawSettings() {
     g.drawString(valueFit, 228 - g.textWidth(valueFit), y);
   }
   g.setTextColor(C_GREY);
-  g.drawString(uiLanguage == 1 ? "; . ESCOLHE  , / MUDA  ESC VOLTA" : uiLanguage == 2 ? "; . ELEGIR  , / CAMBIAR  ESC VOLVER" : uiLanguage == 3 ? "; . 选择  , / 更改  ESC 返回" : uiLanguage == 4 ? "; . 選択  , / 変更  ESC 戻る" : uiLanguage == 5 ? "; . CHOISIR  , / MODIFIER  ESC RETOUR" : uiLanguage == 6 ? "; . WAEHLEN  , / AENDERN  ESC ZURUECK" : uiLanguage == 7 ? "; . ВЫБРАТЬ  , / ИЗМЕНИТЬ  ESC НАЗАД" : uiLanguage == 8 ? "; . SCEGLI  , / CAMBIA  ESC INDIETRO" : "; . SELECT  , / CHANGE  ESC BACK", 8, 127);
+  g.drawString(uiText(UI_SETTINGS_KEYS), 8, 127);
   ui.pushSprite(0, 0);
 }
 
 void drawHelp() {
   screen = SCR_HELP;
   if (screenOff) return;
-  static const char *const pages[3][10] = {
-    {
-      "LIBRARY / GENERAL",
-      ";/. move item   ,// page",
-      "ENTER open folder or play queue",
-      "DEL parent folder  TAB player",
-      "SPACE pause  N/P track",
-      "- / = volume  1-6 EQ preset",
-      "S settings  E equalizer",
-      "R refresh SD  X stop audio",
-      "G sound enhancement (off/soft/strong)",
-      "Formats: MP3 WAV FLAC AAC",
-    },
-    {
-      "PLAYER",
-      "SPACE pause | N next track",
-      "P previous / restart (>3s)",
-      ", / / seek -10s / +10s (MP3)",
-      "; / . volume +/- 5%",
-      "S shuffle | R repeat off/all/one",
-      "V bars/mirror/wave/cover",
-      "T sleep timer | O speaker/headphones",
-      "TAB/E equalizer | G enhancement",
-      "DEL or ` back to library; X stop",
-    },
-    {
-      "EQ / SETTINGS",
-      "EQ: , / select band",
-      "EQ: ; / . gain +/-",
-      "EQ: 0 FLAT | 1-6 presets",
-      "SETTINGS: ; / . select item",
-      "SETTINGS: , / / change value",
-      "ENTER change / restore defaults",
-      "TAB/DEL/` return to previous screen",
-      "Display off: press any key to wake",
-      "H restarts | TAB/DEL closes help",
-    },
-  };
+
 
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
   char title[24];
-  snprintf(title, sizeof(title), "HELP %d/3", helpPage + 1);
+  snprintf(title, sizeof(title), uiText(UI_HELP_PAGE_FMT), helpPage + 1, 3);
   drawHeader(g, title, C_CYAN);
-  g.setFont(&fonts::Font0);
+  applyUiFont(g, true);
   g.setTextSize(1);
   for (int i = 0; i < 10; ++i) {
     g.setTextColor(i == 0 ? C_RED : C_GREY);
-    g.drawString(pages[helpPage][i], i == 0 ? 8 : 12, 26 + i * 10);
+    const UiTextId id = (UiTextId)(UI_HELP_00 + helpPage * 10 + i);
+    char line[56];
+    fitText(g, uiText(id), 222, line, sizeof(line));
+    g.drawString(line, i == 0 ? 8 : 12, 26 + i * 10);
   }
   g.setTextColor(C_CYAN);
-  g.drawString("H NEXT  TAB/DEL/` CLOSE", 8, 127);
+  g.drawString(uiText(UI_HELP_FOOTER), 8, 127);
   ui.pushSprite(0, 0);
 }
 
@@ -2530,14 +2989,11 @@ void redrawCurrent() {
     case SCR_EQ: drawEq(); break;
     case SCR_SETTINGS: drawSettings(); break;
     case SCR_HELP: drawHelp(); break;
+    case SCR_IMAGE: drawImageViewer(); break;
   }
 }
 
 // ============================================================ entrada
-constexpr int K_ENTER = 256;
-constexpr int K_TAB = 257;
-constexpr int K_DEL = 258;
-
 void stopAll() {
   stopPlayback(true);
   if (screen == SCR_PLAYER) screen = SCR_BROWSER;
@@ -2556,7 +3012,7 @@ bool mediaKey(int k) {
       configureDsp();
       markSettingsDirty();
       char t[28];
-      snprintf(t, sizeof(t), "REALCE: %s", ENHANCE_NAMES[opt.enhance]);
+      snprintf(t, sizeof(t), uiText(UI_SOUND_FMT), localizedEnhance(opt.enhance));
       showToast(t);
       redrawCurrent();
       return true;
@@ -2568,7 +3024,7 @@ bool mediaKey(int k) {
       updateVolumeTarget();
       markSettingsDirty();
       char t[28];
-      snprintf(t, sizeof(t), "%s %d%%", outMode ? "SAIDA: FONE" : "SAIDA: ALTO-FALANTE", volumePercent);
+      snprintf(t, sizeof(t), "%s %d%%", outMode ? uiText(UI_OUTPUT_HEADPHONE) : uiText(UI_OUTPUT_SPEAKER), volumePercent);
       showToast(t);
       redrawCurrent();
       return true;
@@ -2642,7 +3098,7 @@ void sdAutoDetectStep() {
       safeCopy(browseDir, sizeof(browseDir), "/");
       beginScan(browseDir);
     }
-    showToast("SD DESCONECTADO - BUSCANDO");
+    showToast(uiText(UI_SD_SEARCHING));
     return;
   }
 
@@ -2657,7 +3113,7 @@ void sdAutoDetectStep() {
   safeCopy(browseDir, sizeof(browseDir), SD.exists("/music") ? "/music" : "/");
   selected = 0;
   firstVisible = 0;
-  showToast("SD RECONECTADO");
+  showToast(uiText(UI_SD_RECONNECTED));
   beginScan(browseDir);
 }
 
@@ -2685,6 +3141,7 @@ void leaveToReturn() {
 
 void activateSelection() {
   if (!entryCount || selected < 0 || selected >= (int)entryCount) return;
+  if (entries[selected].isImage) { openImageViewer(selected); return; }
   if (entries[selected].isDir) {
     char name[NAME_SIZE];
     safeCopy(name, sizeof(name), entries[selected].name);
@@ -2711,7 +3168,7 @@ void resetDefaults() {
   sleepDeadline = 0;
   applyShuffleChange();
   markSettingsDirty();
-  showToast("DEFAULTS RESTORED");
+  showToast(uiText(UI_DEFAULTS_RESTORED));
   drawSettings();
 }
 
@@ -2741,26 +3198,26 @@ void browserKey(int k) {
     case 'e': returnScreen = SCR_BROWSER; drawEq(); return;
     case 'r': refreshBrowser(); return;
     case 'm':
-      if (playing) { showToast("PARE A MUSICA PARA TROCAR"); return; }
+      if (playing) { showToast(uiText(UI_STOP_MUSIC_TO_SWITCH)); return; }
       abortScan(); storageKind = (storageKind == STORAGE_SD) ? STORAGE_INTERNAL : STORAGE_SD;
       safeCopy(browseDir, sizeof(browseDir), "/"); selected = firstVisible = 0;
-      showToast(storageReady() ? (storageKind == STORAGE_SD ? "ARMAZENAMENTO: SD" : "ARMAZENAMENTO: INTERNO") : "ARMAZENAMENTO INDISPONIVEL");
+      showToast(storageReady() ? (storageKind == STORAGE_SD ? uiText(UI_STORAGE_SWITCH_SD) : uiText(UI_STORAGE_SWITCH_INTERNAL)) : uiText(UI_STORAGE_UNAVAILABLE));
       beginScan("/"); return;
     case 'c': {
-      if (storageKind != STORAGE_SD || !sdReady || !internalReady || entryCount == 0 || entries[selected].isDir) { showToast("SELECIONE ARQUIVO NO SD"); return; }
+      if (storageKind != STORAGE_SD || !sdReady || !internalReady || entryCount == 0 || entries[selected].isDir) { showToast(uiText(UI_SELECT_FILE_SD)); return; }
       char src[PATH_SIZE], dst[PATH_SIZE];
-      if (!buildPath(src, sizeof(src), browseDir, entries[selected].name)) { showToast("CAMINHO INVALIDO"); return; }
+      if (!buildPath(src, sizeof(src), browseDir, entries[selected].name)) { showToast(uiText(UI_INVALID_PATH)); return; }
       safeCopy(dst, sizeof(dst), src);
       char parent[PATH_SIZE]; safeCopy(parent, sizeof(parent), dst);
       for (char *q = parent + 1; *q; ++q) {
         if (*q == '/') { *q = 0; LittleFS.mkdir(parent); *q = '/'; }
       }
       File in = SD.open(src, FILE_READ); if (LittleFS.exists(dst)) LittleFS.remove(dst); File out = LittleFS.open(dst, FILE_WRITE);
-      if (!in || !out) { if (in) in.close(); if (out) out.close(); showToast("FALHA AO COPIAR"); return; }
+      if (!in || !out) { if (in) in.close(); if (out) out.close(); showToast(uiText(UI_COPY_FAILED)); return; }
       uint8_t buf[1024]; bool ok = true;
       while (in.available()) { size_t n = in.read(buf, sizeof(buf)); if (!n || out.write(buf, n) != n) { ok = false; break; } yield(); }
       in.close(); out.close();
-      showToast(ok ? "COPIADO PARA MEMORIA INTERNA" : "ERRO NA COPIA"); return;
+      showToast(uiText(ok ? UI_COPIED_INTERNAL : UI_COPY_ERROR)); return;
     }
     default: break;
   }
@@ -2774,20 +3231,16 @@ void browserKey(int k) {
 }
 
 void setPlaybackSpeed(float speed) {
+  updateMediaClock();
   playbackSpeed = constrain(speed, 0.75f, 1.75f);
-  // Reconfigura apenas a etapa do reamostrador. Nao reinicia decoder,
-  // arquivo ou fila do speaker; evita corte ao mudar velocidade.
-  rsActive = (fabsf(gSrcRate - (float)OUT_RATE) > 0.5f) ||
-             (fabsf(playbackSpeed - 1.0f) > 0.001f);
-  rsStep = (gSrcRate / (float)OUT_RATE) * playbackSpeed;
-  rsPhase = 0.0f;
-  const char *mode = "NORMAL";
-  if (fabsf(playbackSpeed - 0.75f) < 0.001f) mode = "SLOWED";
-  else if (fabsf(playbackSpeed - 1.25f) < 0.001f) mode = "SPED UP";
-  else if (fabsf(playbackSpeed - 1.75f) < 0.001f) mode = "Nightcore";
-  char msg[28];
-  snprintf(msg, sizeof(msg), "%s", mode);
-  showToast(msg);
+  // Mantem a posicao/fase do fluxo e transiciona a taxa em 83 ms.
+  // O filtro anti-aliasing tambem muda por crossfade entre duas tabelas FIR.
+  configureResampler(rsSourceRate, playbackSpeed, false);
+  UiTextId modeId = UI_SPEED_NORMAL;
+  if (fabsf(playbackSpeed - 0.75f) < 0.001f) modeId = UI_SPEED_SLOWED;
+  else if (fabsf(playbackSpeed - 1.25f) < 0.001f) modeId = UI_SPEED_FAST;
+  else if (fabsf(playbackSpeed - 1.75f) < 0.001f) modeId = UI_SPEED_NIGHTCORE;
+  showToast(uiText(modeId));
 }
 
 void playerKey(int k) {
@@ -2810,27 +3263,27 @@ void playerKey(int k) {
       opt.shuffle = !opt.shuffle;
       applyShuffleChange();
       markSettingsDirty();
-      showToast(opt.shuffle ? "ALEATORIO: LIGADO" : "ALEATORIO: DESLIGADO");
+      showToast(uiText(opt.shuffle ? UI_SHUFFLE_ON : UI_SHUFFLE_OFF));
       drawPlayer();
       break;
     case 'r':
       opt.repeat = (opt.repeat + 1) % 3;
       markSettingsDirty();
-      snprintf(t, sizeof(t), "REPETIR: %s", REPEAT_NAMES[opt.repeat]);
+      snprintf(t, sizeof(t), uiText(UI_REPEAT_FMT), localizedRepeat(opt.repeat));
       showToast(t);
       drawPlayer();
       break;
     case 'v':
       opt.visual = (opt.visual + 1) % 4;
       markSettingsDirty();
-      snprintf(t, sizeof(t), "VISUAL: %s", VISUAL_NAMES[opt.visual]);
+      snprintf(t, sizeof(t), uiText(UI_VISUAL_FMT), localizedVisual(opt.visual));
       showToast(t);
       break;
     case 't':
       sleepIdx = (sleepIdx + 1) % 5;
       setSleepTimer();
-      if (SLEEP_MIN[sleepIdx]) snprintf(t, sizeof(t), "SONO: %d MIN", SLEEP_MIN[sleepIdx]);
-      else safeCopy(t, sizeof(t), "SONO: DESLIGADO");
+      if (SLEEP_MIN[sleepIdx]) snprintf(t, sizeof(t), uiText(UI_SLEEP_FMT), SLEEP_MIN[sleepIdx]);
+      else safeCopy(t, sizeof(t), uiText(UI_SLEEP_OFF));
       showToast(t);
       break;
     default: break;
@@ -2871,6 +3324,7 @@ void settingsKey(int k) {
 void onKey(int k) {
   if (k >= 'A' && k <= 'Z') k += 32;
 
+  if (screen == SCR_IMAGE) { imageViewerKey(k); return; }
   if (screen == SCR_HELP) {
     if (k == 'h') {
       helpPage = (helpPage + 1) % 3;
@@ -2967,7 +3421,16 @@ void pollShake() {
 void decodeStep() {
   if (!playing || paused || !decoder) return;
   if (!trackEndPending) decodeSlice(8);  // fatia curta: UI e teclado nunca ficam presos
-  if (trackEndPending) { trackEndPending = false; onTrackEnded(); return; }
+  if (trackEndPending) {
+    trackEndPending = false;
+    if (source && source->readFailed()) {
+      showToast(uiText(UI_READ_ERROR));
+      advance(+1, true);
+      return;
+    }
+    onTrackEnded();
+    return;
+  }
   if (audioOutput && audioOutput->isFull()) delay(2);
 
   // anti-travamento: sem progresso = arquivo ruim/SD com problema
@@ -2979,10 +3442,10 @@ void decodeStep() {
     lastProgress = millis();
     if (stallRetries == 0 && canSeek()) {  // 1a tentativa: reabre no mesmo ponto
       stallRetries = 1;
-      showToast("RECUPERANDO...");
+      showToast(uiText(UI_RECOVERING));
       if (startTrack(order[orderPos], elapsedSec(), false, false)) { redrawCurrent(); return; }
     }
-    showToast("ERRO DE LEITURA");
+    showToast(uiText(UI_READ_ERROR));
     advance(+1, true);
   }
 }
@@ -3119,6 +3582,10 @@ void setup() {
   if (!live.createSprite(240, 90)) Serial.println("ERRO: sprite live sem memoria");
   coverCanvas.setColorDepth(16);
   coverCanvasReady = coverCanvas.createSprite(COVER_PX, COVER_PX);
+  for (int i = 0; i < ROWS; ++i) {
+    thumbCanvases[i]->setColorDepth(16);
+    thumbCanvasReady[i] = thumbCanvases[i]->createSprite(THUMB_PX, THUMB_PX);
+  }
   if (!coverCanvasReady) Serial.println("AVISO: capa indisponivel (sem memoria)");
 
   // Speaker: 44.1 kHz nativo, mais DMA, tarefa de audio no core 0
@@ -3141,6 +3608,7 @@ void setup() {
   batteryPercent = M5Cardputer.Power.getBatteryLevel();
   lastActivity = millis();
 
+  allocateAudioBuffer();
   internalReady = LittleFS.begin(false);
   sdReady = mountSD();
   storageKind = sdReady ? STORAGE_SD : STORAGE_INTERNAL;
@@ -3162,6 +3630,7 @@ void loop() {
   scanStep(4);
   handleKeyboard();
   coverStep();
+  thumbnailStep();
   pollShake();
   housekeeping();
   ledUpdate();
