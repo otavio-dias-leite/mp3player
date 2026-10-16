@@ -797,58 +797,124 @@ public:
   bool open(const char *path) override {
     close();
     safeCopy(path_, sizeof(path_), path);
-    f_ = activeFS().open(path_, FILE_READ);
+    fs_ = &activeFS();
+    f_ = fs_->open(path_, FILE_READ);
     if (!f_) return false;
     size_ = (uint32_t)f_.size();
     pos_ = 0;
-    return true;
+    recoverFailures_ = 0;
+    lastRecoverAt_ = 0;
+    return size_ > 0;
   }
 
   uint32_t read(void *data, uint32_t len) override {
-    if (!f_ || !len) return 0;
-    uint8_t *d = (uint8_t *)data;
-    uint32_t got = 0;
-    int fails = 0;
-    while (got < len) {
-      const size_t r = f_.read(d + got, len - got);
-      if (r > 0) { got += (uint32_t)r; pos_ += (uint32_t)r; fails = 0; continue; }
-      if (pos_ >= size_) break;               // fim real do arquivo
-      if (++fails > 3 || !recover()) break;   // erro de SD: tenta recuperar
+    if (!len) return 0;
+    uint8_t *dst = (uint8_t *)data;
+    uint32_t total = 0;
+    uint8_t consecutiveFailures = 0;
+    while (total < len) {
+      if (!f_) {
+        if (++consecutiveFailures > 2 || !recover()) break;
+      }
+      const size_t got = f_.read(dst + total, len - total);
+      if (got > 0) {
+        total += (uint32_t)got;
+        pos_ += (uint32_t)got;
+        consecutiveFailures = 0;
+        recoverFailures_ = 0;
+        continue;
+      }
+      if (pos_ >= size_) break;  // fim real do arquivo
+      if (++consecutiveFailures > 2 || !recover()) break;
     }
-    return got;
+    return total;
   }
 
-  bool seek(int32_t pos, int dir) override {
-    int64_t t = pos;
-    if (dir == SEEK_CUR) t = (int64_t)pos_ + pos;
-    else if (dir == SEEK_END) t = (int64_t)size_ + pos;
-    if (t < 0 || t > (int64_t)size_) return false;
-    pos_ = (uint32_t)t;
+  bool seek(int32_t offset, int direction) override {
+    int64_t target = offset;
+    if (direction == SEEK_CUR) target = (int64_t)pos_ + offset;
+    else if (direction == SEEK_END) target = (int64_t)size_ + offset;
+    if (target < 0 || target > (int64_t)size_) return false;
+    const uint32_t previous = pos_;
+    pos_ = (uint32_t)target;
     if (f_ && f_.seek(pos_)) return true;
-    return recover();
+    if (recover()) return true;
+    pos_ = previous;
+    return false;
   }
 
-  bool close() override { if (f_) f_.close(); return true; }
+  bool close() override {
+    if (f_) f_.close();
+    fs_ = nullptr;
+    return true;
+  }
   bool isOpen() override { return (bool)f_; }
   uint32_t getSize() override { return size_; }
   uint32_t getPos() override { return pos_; }
 
 private:
-  bool recover() {
+  bool reopenOn(fs::FS &filesystem) {
+    File candidate = filesystem.open(path_, FILE_READ);
+    if (!candidate) return false;
+    // Nunca continuar em arquivo diferente/alterado: valida tamanho e offset.
+    if ((uint32_t)candidate.size() != size_ || !candidate.seek(pos_)) {
+      candidate.close();
+      return false;
+    }
     if (f_) f_.close();
-    if (storageKind != STORAGE_SD) return false;
-    sdRemount();
-    f_ = SD.open(path_, FILE_READ);
-    if (!f_) return false;
-    return f_.seek(pos_);
+    f_ = candidate;
+    fs_ = &filesystem;
+    return true;
+  }
+
+  bool recover() {
+    const uint32_t now = millis();
+    if (lastRecoverAt_ && now - lastRecoverAt_ < SD_STREAM_RETRY_MS) return false;
+    lastRecoverAt_ = now;
+    ++recoverFailures_;
+
+    if (fs_ == &SD || storageKind == STORAGE_SD) {
+      Serial.printf("SD read recovery %u at %lu/%lu\n",
+                    (unsigned)recoverFailures_, (unsigned long)pos_, (unsigned long)size_);
+      sdReady = mountSD();
+      if (sdReady && reopenOn(SD)) {
+        storageKind = STORAGE_SD;
+        ++sdMediaEpoch;
+        needRescan = true;
+        lastRemountAt = now;
+        lastSdProbeAt = now;
+        showToast(uiText(UI_SD_RECOVERED));
+        return true;
+      }
+      sdReady = false;
+      SD.end();
+      sdSPI.end();
+    }
+
+    // Se existe uma copia identica no LittleFS, retoma do mesmo offset.
+    if (internalReady && LittleFS.exists(path_) && reopenOn(LittleFS)) {
+      storageKind = STORAGE_INTERNAL;
+      ++sdMediaEpoch;
+      needRescan = true;
+      lastRemountAt = now;
+      showToast(uiText(UI_SD_DISCONNECTED));
+      Serial.println("Playback resumed from identical LittleFS copy");
+      return true;
+    }
+
+    Serial.printf("SD recovery failed at %lu/%lu\n",
+                  (unsigned long)pos_, (unsigned long)size_);
+    return false;
   }
 
   File f_;
+  fs::FS *fs_ = nullptr;
   char path_[PATH_SIZE] = {0};
   uint32_t size_ = 0;
   uint32_t pos_ = 0;
+  uint32_t lastRecoverAt_ = 0;
+  uint8_t recoverFailures_ = 0;
 };
-
 SdStreamSource *source = nullptr;
 AudioFileSourceBuffer *bufferedSource = nullptr;
 AudioGenerator *decoder = nullptr;
