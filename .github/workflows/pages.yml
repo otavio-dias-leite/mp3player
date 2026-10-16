@@ -62,8 +62,8 @@ jobs:
                         if a.get("name") == "mp3-player-cardputer-adv-full.bin"), None)
           assert asset and asset.get("browser_download_url"), "Full MP3 Player firmware is missing from published release"
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write("version=" + release["tag_name"] + "\\n")
-              out.write("asset_url=" + asset["browser_download_url"] + "\\n")
+              out.write("version=" + release["tag_name"] + "\n")
+              out.write("asset_url=" + asset["browser_download_url"] + "\n")
           PY
 
       - name: Assemble website with an actually published firmware release
@@ -89,7 +89,7 @@ jobs:
           data = json.loads(manifest.read_text())
           data["version"] = version
           data["builds"][0]["parts"] = [{"path": "mp3-player-cardputer-adv-full.bin", "offset": 0}]
-          manifest.write_text(json.dumps(data, indent=2) + "\\n")
+          manifest.write_text(json.dumps(data, indent=2) + "\n")
           PY
           touch _site/.nojekyll
           test -s _site/index.html
