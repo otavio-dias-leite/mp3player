@@ -80,6 +80,7 @@
 
 namespace {
 #include "ui_text_fwd.h"
+#include "ui_translations.h"
 
 
 // ============================================================ hardware
@@ -108,7 +109,7 @@ constexpr uint16_t C_YELLOW  = rgb(255, 230, 60);
 
 // ============================================================ constantes
 constexpr uint32_t OUT_RATE = 44100;               // taxa fixa da saida
-constexpr size_t SD_AUDIO_BUFFER_SIZE = 48 * 1024; // readahead na RAM interna
+constexpr size_t SD_AUDIO_BUFFER_TARGET = 48 * 1024; // alvo adaptativo em RAM interna
 constexpr size_t BLOCK_SAMPLES = 2048;             // amostras por bloco no speaker
 constexpr size_t RING_BLOCKS   = 4;                // speaker segura no maximo 2
 constexpr size_t MAX_ENTRIES   = 200;
@@ -119,15 +120,19 @@ constexpr int    EQ_BANDS      = 5;
 constexpr int    SPEC_BANDS    = 12;
 constexpr int    EQ_LIMIT      = 12;
 constexpr int    NUM_PRESETS   = 6;
-constexpr int    ROWS          = 4;
+constexpr int    ROWS          = 2;
 constexpr float  SHAKE_G       = 2.6f;
 constexpr int    COVER_PX      = 44;
 constexpr uint32_t COVER_MAX_BYTES = 900UL * 1024UL;
+constexpr uint32_t IMAGE_MAX_BYTES = 6UL * 1024UL * 1024UL;
+constexpr uint16_t THUMB_PX = 32;
+constexpr uint32_t SD_STREAM_RETRY_MS = 1200;
 
-static uint8_t sdAudioBuffer[SD_AUDIO_BUFFER_SIZE];
+uint8_t *sdAudioBuffer = nullptr;
+size_t sdAudioBufferSize = 0;
 
 // ============================================================ estado geral
-enum Screen { SCR_BROWSER, SCR_PLAYER, SCR_EQ, SCR_SETTINGS, SCR_HELP };
+enum Screen { SCR_BROWSER, SCR_PLAYER, SCR_EQ, SCR_SETTINGS, SCR_HELP, SCR_IMAGE };
 Screen screen = SCR_BROWSER;
 Screen returnScreen = SCR_BROWSER;
 int helpPage = 0;
@@ -230,6 +235,10 @@ uint32_t lastActivity = 0;
 M5Canvas ui(&M5Cardputer.Display);
 M5Canvas live(&M5Cardputer.Display);
 M5Canvas coverCanvas(&M5Cardputer.Display);
+M5Canvas thumbCanvas0(&M5Cardputer.Display);
+M5Canvas thumbCanvas1(&M5Cardputer.Display);
+M5Canvas *thumbCanvases[2] = {&thumbCanvas0, &thumbCanvas1};
+bool thumbCanvasReady[2] = {false, false};
 SPIClass sdSPI(FSPI);
 
 void drawBrowser();
@@ -237,6 +246,7 @@ void drawPlayer();
 void drawEq();
 void drawSettings();
 void drawHelp();
+void drawImageViewer();
 void redrawCurrent();
 void sdRemount();
 void pumpAudio();
@@ -2350,26 +2360,12 @@ const char *const SETTING_LABELS[9][SETTINGS_COUNT] = {
 };
 
 const char *uiLanguageName() { return LANGUAGE_NAMES[constrain(uiLanguage, 0, 8)]; }
-// Compact on-device UI dictionary. Audio, filesystem and decoder paths are not affected.
-const char *const UI_TEXT[9][UI_TEXT_COUNT] = {
-  {"microSD card not found","Internal storage unavailable","M: storage  |  R: refresh","Filtering folders %d","Reading folder... %d","Empty folder (no audio)","PAUSED","PLAYING","ENTER open/play  DEL parent","S settings  E EQ  R refresh  H help","PAUSED","PLAYING","HEADPHONES","SPEAKER","SPACE pause  N/P track  ,/ seek  TAB EQ","EQUALIZER","PRESET","1-6 presets  0 reset  TAB back"},
-  {"Cartao microSD nao encontrado","Memoria interna indisponivel","M: armazenamento  |  R: atualizar","Filtrando pastas %d","Lendo pasta... %d","Pasta vazia (sem audio)","PAUSADO","TOCANDO","ENTER abre/toca  DEL pasta acima","S ajustes  E EQ  R atualizar  H ajuda","PAUSADO","TOCANDO","FONE","ALTO-FALANTE","SPACE pausa  N/P faixa  ,/ busca  TAB EQ","EQUALIZADOR","PRESET","1-6 presets  0 zera  TAB voltar"},
-  {"Tarjeta microSD no encontrada","Almacenamiento interno no disponible","M: almacenamiento  |  R: actualizar","Filtrando carpetas %d","Leyendo carpeta... %d","Carpeta vacia (sin audio)","PAUSADO","REPRODUCIENDO","ENTER abrir/reproducir  DEL subir","S ajustes  E EQ  R actualizar  H ayuda","PAUSADO","REPRODUCIENDO","AURICULARES","ALTAVOZ","SPACE pausa  N/P pista  ,/ buscar  TAB EQ","ECUALIZADOR","PREAJUSTE","1-6 presets  0 reiniciar  TAB volver"},
-  {"未找到 microSD 卡","内部存储不可用","M：存储  |  R：刷新","正在筛选文件夹 %d","正在读取文件夹... %d","文件夹为空（无音频）","已暂停","正在播放","ENTER 打开/播放  DEL 返回上级","S 设置  E 均衡器  R 刷新  H 帮助","已暂停","正在播放","耳机","扬声器","SPACE 暂停  N/P 切歌  ,/ 搜索  TAB 均衡器","均衡器","预设","1-6 预设  0 重置  TAB 返回"},
-  {"microSDカードが見つかりません","内部ストレージを利用できません","M: ストレージ  |  R: 更新","フォルダーを確認中 %d","フォルダーを読み込み中... %d","フォルダーは空です","一時停止","再生中","ENTER 開く/再生  DEL 上へ","S 設定  E EQ  R 更新  H ヘルプ","一時停止","再生中","ヘッドホン","スピーカー","SPACE 一時停止  N/P 曲  ,/ 検索  TAB EQ","イコライザー","プリセット","1-6 プリセット  0 リセット  TAB 戻る"},
-  {"Carte microSD introuvable","Stockage interne indisponible","M : stockage  |  R : actualiser","Filtrage des dossiers %d","Lecture du dossier... %d","Dossier vide (aucun audio)","EN PAUSE","LECTURE","ENTER ouvrir/lire  DEL dossier parent","S reglages  E EQ  R actualiser  H aide","EN PAUSE","LECTURE","CASQUE","HAUT-PARLEUR","SPACE pause  N/P piste  ,/ recherche  TAB EQ","EGALISEUR","PRESELECTION","1-6 presets  0 reset  TAB retour"},
-  {"microSD-Karte nicht gefunden","Interner Speicher nicht verfuegbar","M: Speicher  |  R: aktualisieren","Ordner werden gefiltert %d","Lese Ordner... %d","Ordner leer (keine Audiodateien)","PAUSE","WIEDERGABE","ENTER oeffnen/abspielen  DEL zurueck","S Einstellungen  E EQ  R aktualisieren  H Hilfe","PAUSE","WIEDERGABE","KOPFHOERER","LAUTSPRECHER","SPACE Pause  N/P Titel  ,/ Suche  TAB EQ","EQUALIZER","VOREINSTELLUNG","1-6 Presets  0 reset  TAB zurueck"},
-  {"Карта microSD не найдена","Внутренняя память недоступна","M: память  |  R: обновить","Фильтрация папок %d","Чтение папки... %d","Папка пуста (нет аудио)","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","ENTER открыть/играть  DEL выше","S настройки  E EQ  R обновить  H помощь","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","НАУШНИКИ","ДИНАМИК","SPACE пауза  N/P трек  ,/ поиск  TAB EQ","ЭКВАЛАЙЗЕР","ПРЕСЕТ","1-6 пресеты  0 сброс  TAB назад"},
-  {"Scheda microSD non trovata","Memoria interna non disponibile","M: memoria  |  R: aggiorna","Filtro cartelle %d","Lettura cartella... %d","Cartella vuota (nessun audio)","IN PAUSA","IN RIPRODUZIONE","ENTER apri/riproduci  DEL indietro","S impostazioni  E EQ  R aggiorna  H aiuto","IN PAUSA","IN RIPRODUZIONE","CUFFIE","ALTOPARLANTE","SPACE pausa  N/P brano  ,/ cerca  TAB EQ","EQUALIZZATORE","PRESET","1-6 preset  0 reset  TAB indietro"}
-};
-const char *uiText(UiTextId id) {
-  return UI_TEXT[constrain(uiLanguage, 0, 8)][id];
-}
 
-void applyUiFont(LovyanGFX &g, bool small = false) {
+void applyUiFont(LovyanGFX &g, bool small) {
   (void)small;
   if (uiLanguage == 3) g.setFont(&fonts::efontCN_10);
   else if (uiLanguage == 4) g.setFont(&fonts::efontJA_10);
+  else if (uiLanguage == 7) g.setFont(&fonts::DejaVu9);
   else g.setFont(&fonts::Font0);
 }
 
