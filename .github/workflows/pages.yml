@@ -1,15 +1,6 @@
 name: Deploy MP3 PLAYER website
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "index.html"
-      - "style.css"
-      - "firmware/manifest.json"
-      - "docs/M5LAUNCHER.md"
-      - "docs/RELEASE-1.0.0.md"
-      - ".github/workflows/pages.yml"
   workflow_run:
     workflows: ["Build and publish MP3 PLAYER firmware"]
     types: [completed]
