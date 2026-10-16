@@ -16,7 +16,7 @@ MP3 Player is a dedicated music-player firmware. It reads MP3 files from a micro
 - Audio visualizers: bars, mirror, waveform and album cover.
 - Sleep timer, screen timeout, brightness and optional shake-to-skip.
 - Settings saved to device preferences.
-- Five selectable themes: Dark Red, Matrix, Cyberpunk, Ice Blue and Amber.
+- Five selectable themes: Ice Blue (default), Dark Red, Matrix, Cyberpunk and Amber. The interface uses a subtle blue grid over a deep navy background.
 - Cardputer ADV RGB LED follows the selected theme and pulses with music.
 
 ## Hardware
