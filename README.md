@@ -1,54 +1,46 @@
 # MP3 Player — M5Stack Cardputer ADV
 
-**Firmware for playing MP3 music on the M5Stack Cardputer ADV (ESP32-S3).**
+Firmware de reprodução musical para o M5Stack Cardputer ADV (ESP32-S3), com biblioteca em microSD/LittleFS, reprodução com DSP, leitor de imagens e interface multilíngue.
 
-MP3 Player is a dedicated music-player firmware. It reads MP3 files from a microSD card and provides a compact library browser and playback interface designed for the Cardputer ADV hardware.
+## Recursos
 
-## Features
+- Navegação por pastas com duas entradas visíveis por vez, miniaturas de capas e metadados ID3.
+- Leitura de capa incorporada em MP3 (ID3 APIC/PIC) e FLAC PICTURE; também procura `cover.jpg`, `folder.jpg`, `front.jpg`, `album.jpg` e `albumart.jpg`.
+- Visualizador de imagens JPEG e PNG, com navegação entre arquivos da pasta.
+- Reprodução MP3, WAV, FLAC e AAC quando o decoder está disponível no pacote ESP8266Audio utilizado.
+- Velocidades: normal (1.00x), slowed (0.75x), sped up (1.25x) e nightcore (1.75x), com transição de taxa gradual e reamostrador FIR polifásico com filtro anti-aliasing.
+- EQ de cinco bandas, presets, controle de volume, compressor suave, limitador e realce adaptado ao speaker do Cardputer.
+- Fila, próximo/anterior, busca, aleatório, repetição, temporizador de sono e visualizadores de áudio.
+- Recuperação do microSD: remonta o barramento SPI em frequências graduais, reabre a faixa no mesmo offset e tenta continuar de uma cópia idêntica em LittleFS quando disponível.
+- Cache limitado de miniaturas; decodificação por etapas e buffers de áudio dimensionados pelo maior bloco contíguo de RAM disponível.
+- Interface integralmente localizada em inglês, português brasileiro, espanhol, chinês simplificado, japonês, francês, alemão, russo e italiano.
+- Temas escuros, grade azul discreta, LED RGB e configurações persistidas.
 
-- Browse microSD folders containing MP3 files, including nested folders.
-- Build a playback queue from the selected folder.
-- Play, pause, stop, next/previous track and automatic track advance.
-- Shuffle and repeat modes.
-- Seek backward and forward, track duration and progress.
-- ID3 title/artist metadata and embedded JPEG/PNG album art.
-- Five-band equalizer with six presets and per-band adjustment.
-- Audio visualizers: bars, mirror, waveform and album cover.
-- Sleep timer, screen timeout, brightness and optional shake-to-skip.
-- Settings saved to device preferences, including the selected interface language.
-- Multilingual interface: English (default), Brazilian Portuguese, Spanish, Simplified Chinese, Japanese, French, German, Russian and Italian. Select the language in Settings.
-- Five selectable themes: Ice Blue (default), Dark Red, Matrix, Cyberpunk and Amber. The interface uses a subtle blue grid over a deep navy background.
-- Cardputer ADV RGB LED follows the selected theme and pulses with music.
+## Hardware e memória
 
-## Hardware
+- M5Stack Cardputer ADV / ESP32-S3FN8, 8 MB de flash e microSD.
+- O firmware não pressupõe PSRAM: sprites e buffer de áudio são alocados na RAM interna, com margem reservada para decoder e sistema.
+- Pinos SPI do microSD: CS GPIO12, SCK GPIO40, MISO GPIO39, MOSI GPIO14.
 
-- M5Stack Cardputer ADV / ESP32-S3
-- microSD card containing .mp3 files
-- Built-in speaker or headphones
+## Teclas
 
-microSD SPI pins: CS GPIO12, SCK GPIO40, MISO GPIO39, MOSI GPIO14. The RGB LED is driven on GPIO21.
+- `;` / `.`: mover seleção / volume
+- `,` / `/`: página da biblioteca / busca no player
+- `ENTER`: abrir pasta, tocar faixa ou abrir imagem
+- `SPACE`: pausar/retomar
+- `N` / `P`: próxima/anterior
+- `TAB`: abrir player
+- `S`: configurações; `E`: equalizador; `H`: ajuda
+- `M`: alternar SD/memória interna; `C`: copiar arquivo SD para LittleFS
+- `7`: slowed; `8`: sped up; `9`: nightcore; `0`: velocidade normal
+- No visualizador: `,` / `;` imagem anterior, `.` / `/` próxima, `DEL` voltar
 
 ## Build
 
-Install PlatformIO with `python -m pip install --user platformio`, then run `pio run -e cardputer-adv` from the repository directory.
+Com PlatformIO: `pio run -e cardputer-adv`.
 
-USB upload: `pio run -e cardputer-adv -t upload`.
+O build de CI gera `firmware.bin` para OTA e `mp3-player-cardputer-adv-full.bin` para gravação USB.
 
-Dependencies are managed by PlatformIO: M5Stack M5Cardputer and ESP8266Audio.
+## Nota de validação
 
-## Keyboard
-
-- `;` / `.`: move through the library or adjust volume
-- `,` / `/`: page through the library or seek
-- `ENTER`: open folder / play selected track
-- `SPACE`: pause or resume
-- `N` / `P`: next / previous track
-- `TAB`: open player or switch player/equalizer
-- `S`: settings
-- `E`: equalizer
-- `X`: stop playback
-- `1`–`6`: equalizer presets
-
-## Stability notes
-
-The MP3 decoder is advanced in short cooperative slices so the UI can continue processing input. Audio output uses fixed-size buffers and a bounded queue. Playback should still be validated on the physical Cardputer ADV with the target microSD card, speaker and headphones; a successful CI build alone does not prove hardware stability.
+A compilação automatizada verifica o toolchain. A qualidade final de áudio, estabilidade de cartões específicos, leitura de imagens grandes e consumo de bateria ainda precisam de testes físicos no Cardputer ADV.
