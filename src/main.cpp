@@ -455,11 +455,23 @@ float gCompEnv = 0, gCompThr = 12000.0f, gCompMake = 1.1f;
 float gVBassMix = 0, gBassLp = 0, gBassHp = 0;
 uint32_t gRng = 0x1234ABCDu;
 
-// reamostrador (arquivo -> 44.1 kHz)
-bool rsActive = false;
-float rsStep = 1.0f, rsPhase = 0.0f;
-float rsH[4] = {0, 0, 0, 0};
-float playbackSpeed = 1.0f;  // SLOWED 0.75x, NORMAL 1.00x, SPED UP 1.25x, Nightcore 1.75x
+// Reamostrador polifasico FIR: 9 taps, 32 fases + interpolacao de fase.
+// A tabela e criada fora do caminho de audio; o loop de amostras so faz MACs.
+constexpr int RS_TAPS = 9;
+constexpr int RS_PHASES = 32;
+constexpr int RS_HISTORY = 16;
+constexpr int RS_MAX_OUTPUTS_PER_INPUT = 16;
+float rsCoeff[2][RS_PHASES + 1][RS_TAPS] = {};
+float rsHistory[RS_HISTORY] = {};
+uint8_t rsFilterActive = 0, rsFilterTarget = 0;
+float rsFilterMix = 1.0f;
+float rsFilterMixStep = 1.0f;
+float rsStep = 1.0f, rsTargetStep = 1.0f;
+uint32_t rsStepRampLeft = 0;
+double rsNextPos = 0.0;
+int64_t rsInputIndex = -1;
+float rsSourceRate = 44100.0f;
+float playbackSpeed = 1.0f;  // 0.75x, 1.00x, 1.25x, 1.75x
 
 float gBand[SPEC_BANDS] = {0};
 int16_t gScope[128] = {0};
@@ -623,51 +635,141 @@ inline int16_t processSample(float x) {
   return (int16_t)v;
 }
 
-inline float cubic4(const float *h, float t) {
-  const float a = -0.5f * h[0] + 1.5f * h[1] - 1.5f * h[2] + 0.5f * h[3];
-  const float b = h[0] - 2.5f * h[1] + 2.0f * h[2] - 0.5f * h[3];
-  const float c = -0.5f * h[0] + 0.5f * h[2];
-  return ((a * t + b) * t + c) * t + h[1];
+float sincPi(float x) {
+  if (fabsf(x) < 1e-5f) return 1.0f;
+  const float px = PI * x;
+  return sinf(px) / px;
+}
+
+void buildResampleTable(uint8_t table, float step) {
+  const float cutoff = fminf(0.96f, 0.94f / fmaxf(step, 1.0f));
+  constexpr float radius = 4.5f;
+  for (int phase = 0; phase <= RS_PHASES; ++phase) {
+    const float frac = (float)phase / (float)RS_PHASES;
+    float sum = 0.0f;
+    for (int tap = 0; tap < RS_TAPS; ++tap) {
+      const float distance = (float)(tap - 4) - frac;
+      const float windowPos = distance / radius;
+      float window = 0.0f;
+      if (fabsf(windowPos) <= 1.0f) {
+        window = 0.42f + 0.5f * cosf(PI * windowPos) +
+                 0.08f * cosf(2.0f * PI * windowPos);
+      }
+      const float coeff = 2.0f * cutoff * sincPi(2.0f * cutoff * distance) * window;
+      rsCoeff[table][phase][tap] = coeff;
+      sum += coeff;
+    }
+    if (fabsf(sum) > 1e-8f) {
+      const float inv = 1.0f / sum;
+      for (int tap = 0; tap < RS_TAPS; ++tap) rsCoeff[table][phase][tap] *= inv;
+    }
+  }
+}
+
+void configureResampler(float sampleRate, float speed, bool resetState) {
+  rsSourceRate = constrain(sampleRate, 8000.0f, 192000.0f);
+  speed = constrain(speed, 0.75f, 1.75f);
+  const float target = constrain(rsSourceRate * speed / (float)OUT_RATE, 0.12f, 8.0f);
+
+  if (resetState) {
+    rsStep = rsTargetStep = target;
+    rsStepRampLeft = 0;
+    rsNextPos = 0.0;
+    rsInputIndex = -1;
+    memset(rsHistory, 0, sizeof(rsHistory));
+    rsFilterActive = rsFilterTarget = 0;
+    rsFilterMix = 1.0f;
+    rsFilterMixStep = 1.0f;
+    buildResampleTable(rsFilterActive, target);
+    buildResampleTable(1, target);
+    return;
+  }
+
+  rsTargetStep = target;
+  rsStepRampLeft = OUT_RATE / 12;  // 83 ms de aceleracao/desaceleracao suave
+  const uint8_t nextTable = (uint8_t)(1U - rsFilterActive);
+  buildResampleTable(nextTable, target);
+  rsFilterTarget = nextTable;
+  rsFilterMix = 0.0f;
+  rsFilterMixStep = 1.0f / (float)(OUT_RATE / 12);
+}
+
+inline float resampleHistoryAt(int64_t index, int64_t newest) {
+  if (index < 0 || index > newest || newest - index >= RS_HISTORY) return 0.0f;
+  return rsHistory[(uint64_t)index & (RS_HISTORY - 1)];
+}
+
+inline void pushResampled(float input) {
+  const int64_t newest = ++rsInputIndex;
+  rsHistory[(uint64_t)newest & (RS_HISTORY - 1)] = input;
+  const double newestSafePosition = (double)newest - 4.0;
+
+  while (rsNextPos <= newestSafePosition) {
+    const int64_t base = (int64_t)rsNextPos;
+    const float frac = (float)(rsNextPos - (double)base);
+    const float phase = frac * (float)RS_PHASES;
+    const int phase0 = constrain((int)phase, 0, RS_PHASES - 1);
+    const int phase1 = phase0 + 1;
+    const float phaseMix = phase - (float)phase0;
+
+    float y0 = 0.0f, y1 = 0.0f;
+    const float *c00 = rsCoeff[rsFilterActive][phase0];
+    const float *c01 = rsCoeff[rsFilterActive][phase1];
+    const float *c10 = rsCoeff[rsFilterTarget][phase0];
+    const float *c11 = rsCoeff[rsFilterTarget][phase1];
+    for (int tap = 0; tap < RS_TAPS; ++tap) {
+      const float sample = resampleHistoryAt(base + tap - 4, newest);
+      const float a = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
+      const float b = c10[tap] + (c11[tap] - c10[tap]) * phaseMix;
+      y0 += sample * a;
+      y1 += sample * b;
+    }
+    const float y = y0 + (y1 - y0) * rsFilterMix;
+    gRing[gCur][gFill++] = processSample(y);
+
+    if (rsFilterMix < 1.0f) {
+      rsFilterMix += rsFilterMixStep;
+      if (rsFilterMix >= 1.0f) {
+        rsFilterMix = 1.0f;
+        rsFilterActive = rsFilterTarget;
+      }
+    }
+    if (rsStepRampLeft) {
+      rsStep += (rsTargetStep - rsStep) / (float)rsStepRampLeft;
+      if (--rsStepRampLeft == 0) rsStep = rsTargetStep;
+    }
+    rsNextPos += (double)rsStep;
+  }
 }
 
 class AudioOut final : public AudioOutput {
 public:
   bool begin() override {
-    for (int i = 0; i < 4; ++i) rsH[i] = 0;
-    rsPhase = 0;
-    applyRate();
+    configureResampler((float)((hertz >= 8000 && hertz <= 192000) ? hertz : 44100),
+                       playbackSpeed, true);
     return true;
   }
 
   bool SetRate(int hz) override {
     AudioOutput::SetRate(hz);
-    applyRate();
+    configureResampler((float)((hz >= 8000 && hz <= 192000) ? hz : 44100),
+                       playbackSpeed, true);
     return true;
   }
 
-  // true = bloco quase cheio e o speaker ainda nao aceitou
   bool isFull() const {
-    if (gFill + 8 <= BLOCK_SAMPLES) return false;
+    if (gFill + RS_MAX_OUTPUTS_PER_INPUT <= BLOCK_SAMPLES) return false;
     return !submitBlock();
   }
 
   bool ConsumeSample(int16_t sample[2]) override {
-    if (gSliceLeft <= 0) return false;  // fatia esgotada: devolve o controle ao loop()
-    if (gFill + 8 > BLOCK_SAMPLES && !submitBlock()) return false;  // contrapressao
+    if (gSliceLeft <= 0) return false;
+    // Reserva o pior caso de upsampling antes de aceitar a amostra de entrada.
+    // Assim, contrapressao nunca perde nem duplica amostras do decoder.
+    if (gFill + RS_MAX_OUTPUTS_PER_INPUT > BLOCK_SAMPLES && !submitBlock()) return false;
     --gSliceLeft;
-    const float x = ((float)sample[0] + (float)sample[1]) * 0.5f;  // speaker mono
-    if (!rsActive) {
-      gRing[gCur][gFill++] = processSample(x);
-    } else {
-      rsH[0] = rsH[1]; rsH[1] = rsH[2]; rsH[2] = rsH[3]; rsH[3] = x;
-      while (rsPhase < 1.0f && gFill < BLOCK_SAMPLES) {
-        gRing[gCur][gFill++] = processSample(cubic4(rsH, rsPhase));
-        rsPhase += rsStep;
-      }
-      rsPhase -= 1.0f;
-      if (rsPhase < 0) rsPhase = 0;
-    }
-    if (gFill + 8 > BLOCK_SAMPLES) submitBlock();
+    const float mono = ((float)sample[0] + (float)sample[1]) * 0.5f;
+    pushResampled(mono);
     return true;
   }
 
@@ -681,13 +783,7 @@ public:
     return true;
   }
 
-private:
-  void applyRate() {
-    const int hz = (hertz >= 8000 && hertz <= 192000) ? hertz : 44100;
-    gSrcRate = (float)hz;
-    rsActive = (hz != (int)OUT_RATE) || fabsf(playbackSpeed - 1.0f) > 0.001f;
-    rsStep = ((float)hz / (float)OUT_RATE) * playbackSpeed;
-  }
+};
 };
 
 // ============================================================ SD resiliente
@@ -1817,7 +1913,8 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   if (!source || !source->open(path)) { stopPlayback(true); return false; }
   if (startByte > 0) source->seek((int32_t)startByte, SEEK_SET);
 
-  bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sizeof(sdAudioBuffer));
+  if (!sdAudioBuffer || sdAudioBufferSize < 8192) { stopPlayback(true); showToast("AUDIO BUFFER UNAVAILABLE"); return false; }
+  bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sdAudioBufferSize);
   audioOutput = new (std::nothrow) AudioOut();
   decoder = makeDecoder(fmt);
   if (!bufferedSource || !audioOutput || !decoder) { stopPlayback(true); return false; }
@@ -2973,19 +3070,14 @@ void browserKey(int k) {
 
 void setPlaybackSpeed(float speed) {
   playbackSpeed = constrain(speed, 0.75f, 1.75f);
-  // Reconfigura apenas a etapa do reamostrador. Nao reinicia decoder,
-  // arquivo ou fila do speaker; evita corte ao mudar velocidade.
-  rsActive = (fabsf(gSrcRate - (float)OUT_RATE) > 0.5f) ||
-             (fabsf(playbackSpeed - 1.0f) > 0.001f);
-  rsStep = (gSrcRate / (float)OUT_RATE) * playbackSpeed;
-  rsPhase = 0.0f;
-  const char *mode = "NORMAL";
-  if (fabsf(playbackSpeed - 0.75f) < 0.001f) mode = "SLOWED";
-  else if (fabsf(playbackSpeed - 1.25f) < 0.001f) mode = "SPED UP";
-  else if (fabsf(playbackSpeed - 1.75f) < 0.001f) mode = "Nightcore";
-  char msg[28];
-  snprintf(msg, sizeof(msg), "%s", mode);
-  showToast(msg);
+  // Mantem a posicao/fase do fluxo e transiciona a taxa em 83 ms.
+  // O filtro anti-aliasing tambem muda por crossfade entre duas tabelas FIR.
+  configureResampler(rsSourceRate, playbackSpeed, false);
+  UiTextId modeId = UI_SPEED_NORMAL;
+  if (fabsf(playbackSpeed - 0.75f) < 0.001f) modeId = UI_SPEED_SLOWED;
+  else if (fabsf(playbackSpeed - 1.25f) < 0.001f) modeId = UI_SPEED_FAST;
+  else if (fabsf(playbackSpeed - 1.75f) < 0.001f) modeId = UI_SPEED_NIGHTCORE;
+  showToast(uiText(modeId));
 }
 
 void playerKey(int k) {
