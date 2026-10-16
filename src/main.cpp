@@ -57,6 +57,7 @@
 #include <Preferences.h>
 #include <math.h>
 #include <new>
+#include <utility>
 
 #include <AudioOutput.h>
 #include <AudioFileSource.h>
@@ -864,7 +865,7 @@ private:
       return false;
     }
     if (f_) f_.close();
-    f_ = candidate;
+    f_ = std::move(candidate);
     fs_ = &filesystem;
     return true;
   }
