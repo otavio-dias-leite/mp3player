@@ -123,7 +123,7 @@ constexpr int    NUM_PRESETS   = 6;
 constexpr int    ROWS          = 2;
 constexpr float  SHAKE_G       = 2.6f;
 constexpr int    COVER_PX      = 44;
-constexpr uint32_t COVER_MAX_BYTES = 900UL * 1024UL;
+constexpr uint32_t COVER_MAX_BYTES = 3UL * 1024UL * 1024UL;
 constexpr uint32_t IMAGE_MAX_BYTES = 6UL * 1024UL * 1024UL;
 constexpr uint16_t THUMB_PX = 32;
 constexpr uint32_t SD_STREAM_RETRY_MS = 1200;
@@ -807,6 +807,7 @@ public:
     pos_ = 0;
     recoverFailures_ = 0;
     lastRecoverAt_ = 0;
+    readFailed_ = false;
     return size_ > 0;
   }
 
@@ -817,7 +818,7 @@ public:
     uint8_t consecutiveFailures = 0;
     while (total < len) {
       if (!f_) {
-        if (++consecutiveFailures > 2 || !recover()) break;
+        if (++consecutiveFailures > 2 || !recover()) { readFailed_ = true; break; }
       }
       const size_t got = f_.read(dst + total, len - total);
       if (got > 0) {
@@ -842,6 +843,7 @@ public:
     pos_ = (uint32_t)target;
     if (f_ && f_.seek(pos_)) return true;
     if (recover()) return true;
+    readFailed_ = true;
     pos_ = previous;
     return false;
   }
@@ -854,6 +856,7 @@ public:
   bool isOpen() override { return (bool)f_; }
   uint32_t getSize() override { return size_; }
   uint32_t getPos() override { return pos_; }
+  bool readFailed() const { return readFailed_; }
 
 private:
   bool reopenOn(fs::FS &filesystem) {
@@ -917,6 +920,7 @@ private:
   uint32_t pos_ = 0;
   uint32_t lastRecoverAt_ = 0;
   uint8_t recoverFailures_ = 0;
+  bool readFailed_ = false;
 };
 SdStreamSource *source = nullptr;
 AudioFileSourceBuffer *bufferedSource = nullptr;
@@ -2429,7 +2433,7 @@ void invalidateThumbnails() {
 }
 
 void thumbnailStep() {
-  if (screenOff || screen != SCR_BROWSER || scanning || playing || !storageReady()) return;
+  if (screenOff || screen != SCR_BROWSER || scanning || !storageReady()) return;
   if (thumbnailWindow != firstVisible) {
     thumbnailWindow = firstVisible;
     thumbnailNextSlot = 0;
@@ -3379,7 +3383,16 @@ void pollShake() {
 void decodeStep() {
   if (!playing || paused || !decoder) return;
   if (!trackEndPending) decodeSlice(8);  // fatia curta: UI e teclado nunca ficam presos
-  if (trackEndPending) { trackEndPending = false; onTrackEnded(); return; }
+  if (trackEndPending) {
+    trackEndPending = false;
+    if (source && source->readFailed()) {
+      showToast(uiText(UI_READ_ERROR));
+      advance(+1, true);
+      return;
+    }
+    onTrackEnded();
+    return;
+  }
   if (audioOutput && audioOutput->isFull()) delay(2);
 
   // anti-travamento: sem progresso = arquivo ruim/SD com problema
