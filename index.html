@@ -14,4 +14,95 @@
 </div></section>
 <section class="section"><div class="section-head"><span>02 / INSTALLATION</span><h2>FLASH THE CARDPUTER</h2></div><div class="steps"><article><small>STEP 01</small><strong>CONNECT</strong><p>Connect the Cardputer ADV to your computer with a USB cable.</p></article><article><small>STEP 02</small><strong>BOOT MODE</strong><p>Hold G0 while connecting the USB cable to enter download mode.</p></article><article><small>STEP 03</small><strong>INSTALL</strong><p>Click the install button, select the serial port and confirm.</p></article></div></section>
 <section class="section transfer"><div><small>MP3 PLAYER / CARDPUTER ADV</small><h2>MADE FOR<br><em>YOUR MUSIC.</em></h2><p>MP3 playback firmware focused on local music, efficient audio decoding and a responsive interface on the Cardputer ADV.</p></div><div class="source-links"><a href="https://raw.githubusercontent.com/otavio-dias-leite/mp3player/main/src/main.cpp">ARDUINO SOURCE CODE ↓</a><a href="https://github.com/otavio-dias-leite/mp3player/releases">FIRMWARE RELEASES ↗</a></div></section>
-<footer><span>MP3 PLAYER</span><span>M5STACK CARDPUTER ADV</span><span>© 2026</span></footer></main></body></html>
+<footer><span>MP3 PLAYER</span><span>M5STACK CARDPUTER ADV</span><span>© 2026</span></footer></main>
+<script>
+(() => {
+  const language = (() => {
+    const locales = [...(navigator.languages || []), navigator.language || ""]
+      .map(value => String(value).toLowerCase());
+    if (locales.some(value => value.startsWith("pt"))) return "pt";
+    if (locales.some(value => value.startsWith("zh"))) return "zh";
+    return "en";
+  })();
+
+  const translations = {
+    pt: {
+      "nav[aria-label='Site sections'] a": "FIRMWARE",
+      ".tagline": "SUA MÚSICA. SEU CARDPUTER.",
+      ".intro": "Um reprodutor MP3 dedicado ao M5Stack Cardputer ADV.<br>Reproduza músicas do microSD ou da memória flash interna.",
+      "esp-web-install-button button": "INSTALAR FIRMWARE ↗",
+      ".install-note": "CONEXÃO USB NECESSÁRIA · CHROME / EDGE",
+      ".firmware-version span": "FIRMWARE DISPONÍVEL",
+      ".firmware-version small": "DESENVOLVIDO PARA M5STACK CARDPUTER ADV · ESP32-S3",
+      ".terminal-line": "<span>SYS</span> MP3 PLAYER PRONTO <b>●</b>",
+      ".section:nth-of-type(2) .section-head h2": "REPRODUÇÃO DE MÚSICA",
+      ".section:nth-of-type(2) article:nth-child(1) h3": "BIBLIOTECA MP3",
+      ".section:nth-of-type(2) article:nth-child(1) p": "Navegue por pastas de áudio no microSD e na memória flash interna, incluindo subpastas. Copie faixas do SD para a memória interna.",
+      ".section:nth-of-type(2) article:nth-child(2) h3": "CONTROLES DE REPRODUÇÃO",
+      ".section:nth-of-type(2) article:nth-child(2) p": "Reproduzir, pausar, parar, avançar/voltar faixa, avanço automático, busca e velocidade ajustável (0,75x–1,50x).",
+      ".section:nth-of-type(2) article:nth-child(3) h3": "METADADOS E CAPAS",
+      ".section:nth-of-type(2) article:nth-child(3) p": "Leia título e artista pelas tags ID3 e exiba capas JPEG/PNG incorporadas.",
+      ".section:nth-of-type(2) article:nth-child(4) h3": "EQUALIZADOR DE 5 BANDAS",
+      ".section:nth-of-type(2) article:nth-child(4) p": "Equalizador de cinco bandas, seis predefinições, ajuste independente por banda, aprimoramento de áudio e limitador suave.",
+      ".section:nth-of-type(2) article:nth-child(5) h3": "VISUALIZADOR DE ÁUDIO",
+      ".section:nth-of-type(2) article:nth-child(5) p": "Modos de visualização em barras, espelho, forma de onda e capa do álbum.",
+      ".section:nth-of-type(2) article:nth-child(6) h3": "TEMAS E LED RGB",
+      ".section:nth-of-type(2) article:nth-child(6) p": "Ice Blue (padrão), Dark Red, Matrix, Cyberpunk e Amber. O LED do Cardputer acompanha a paleta selecionada e reage à música.",
+      ".section:nth-of-type(3) .section-head h2": "INSTALAR NO CARDPUTER",
+      ".section:nth-of-type(3) article:nth-child(1) strong": "CONECTAR",
+      ".section:nth-of-type(3) article:nth-child(1) p": "Conecte o Cardputer ADV ao computador com um cabo USB.",
+      ".section:nth-of-type(3) article:nth-child(2) strong": "MODO DE INICIALIZAÇÃO",
+      ".section:nth-of-type(3) article:nth-child(2) p": "Mantenha G0 pressionado enquanto conecta o cabo USB para entrar no modo de download.",
+      ".section:nth-of-type(3) article:nth-child(3) strong": "INSTALAR",
+      ".section:nth-of-type(3) article:nth-child(3) p": "Clique no botão de instalação, selecione a porta serial e confirme.",
+      ".transfer h2": "FEITO PARA<br><em>SUA MÚSICA.</em>",
+      ".transfer p": "Firmware de reprodução MP3 focado em música local, decodificação de áudio eficiente e interface responsiva no Cardputer ADV.",
+      ".source-links a:nth-child(1)": "CÓDIGO-FONTE ARDUINO ↓",
+      ".source-links a:nth-child(2)": "VERSÕES DO FIRMWARE ↗"
+    },
+    zh: {
+      ".tagline": "你的音乐。你的 Cardputer。",
+      ".intro": "专为 M5Stack Cardputer ADV 打造的 MP3 音乐播放器。<br>从 microSD 卡或内部闪存播放音乐。",
+      "esp-web-install-button button": "刷写固件 ↗",
+      ".install-note": "需要 USB 连接 · CHROME / EDGE",
+      ".firmware-version span": "可用固件",
+      ".firmware-version small": "适用于 M5STACK CARDPUTER ADV · ESP32-S3",
+      ".terminal-line": "<span>SYS</span> MP3 PLAYER 已就绪 <b>●</b>",
+      ".section:nth-of-type(2) .section-head h2": "音乐播放",
+      ".section:nth-of-type(2) article:nth-child(1) h3": "MP3 音乐库",
+      ".section:nth-of-type(2) article:nth-child(1) p": "浏览 microSD 和内部闪存中的音频文件夹，包括嵌套文件夹。可将曲目从 SD 卡复制到内部存储。",
+      ".section:nth-of-type(2) article:nth-child(2) h3": "播放控制",
+      ".section:nth-of-type(2) article:nth-child(2) p": "播放、暂停、停止、上一曲/下一曲、自动切换、定位及速度调节（0.75x–1.50x）。",
+      ".section:nth-of-type(2) article:nth-child(3) h3": "元数据与封面",
+      ".section:nth-of-type(2) article:nth-child(3) p": "读取 ID3 标题和艺术家标签，并显示嵌入的 JPEG/PNG 专辑封面。",
+      ".section:nth-of-type(2) article:nth-child(4) h3": "五段均衡器",
+      ".section:nth-of-type(2) article:nth-child(4) p": "五段均衡器、六种预设、独立频段调节、音频增强和软限制器。",
+      ".section:nth-of-type(2) article:nth-child(5) h3": "音频可视化",
+      ".section:nth-of-type(2) article:nth-child(5) p": "支持柱状图、镜像、波形和专辑封面显示模式。",
+      ".section:nth-of-type(2) article:nth-child(6) h3": "主题与 RGB LED",
+      ".section:nth-of-type(2) article:nth-child(6) p": "Ice Blue（默认）、Dark Red、Matrix、Cyberpunk 和 Amber。Cardputer LED 会跟随所选配色并随音乐律动。",
+      ".section:nth-of-type(3) .section-head h2": "刷写 Cardputer",
+      ".section:nth-of-type(3) article:nth-child(1) strong": "连接设备",
+      ".section:nth-of-type(3) article:nth-child(1) p": "使用 USB 数据线将 Cardputer ADV 连接到电脑。",
+      ".section:nth-of-type(3) article:nth-child(2) strong": "下载模式",
+      ".section:nth-of-type(3) article:nth-child(2) p": "连接 USB 线时按住 G0，进入下载模式。",
+      ".section:nth-of-type(3) article:nth-child(3) strong": "安装",
+      ".section:nth-of-type(3) article:nth-child(3) p": "点击安装按钮，选择串口并确认。",
+      ".transfer h2": "为你的<br><em>音乐而造。</em>",
+      ".transfer p": "专注本地音乐播放、高效音频解码，并为 Cardputer ADV 提供响应迅速的界面。",
+      ".source-links a:nth-child(1)": "ARDUINO 源代码 ↓",
+      ".source-links a:nth-child(2)": "固件版本 ↗"
+    }
+  };
+
+  const dict = translations[language] || {};
+  for (const [selector, value] of Object.entries(dict)) {
+    const node = document.querySelector(selector);
+    if (node) node.innerHTML = value;
+  }
+  document.documentElement.lang = language === "pt" ? "pt-BR" : language === "zh" ? "zh-CN" : "en-US";
+  document.title = language === "pt" ? "MP3 Player // Cardputer ADV" :
+    language === "zh" ? "MP3播放器 // Cardputer ADV" : "MP3 Player // Cardputer ADV";
+})();
+</script>
+</body></html>
