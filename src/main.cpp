@@ -79,6 +79,8 @@
 #define MP3_PLAYER_VERSION "8.1.1"
 
 namespace {
+#include "ui_text_fwd.h"
+
 
 // ============================================================ hardware
 constexpr int SD_CS   = 12;
@@ -2349,12 +2351,6 @@ const char *const SETTING_LABELS[9][SETTINGS_COUNT] = {
 
 const char *uiLanguageName() { return LANGUAGE_NAMES[constrain(uiLanguage, 0, 8)]; }
 // Compact on-device UI dictionary. Audio, filesystem and decoder paths are not affected.
-enum UiTextId {
-  UI_SD_MISSING, UI_FLASH_MISSING, UI_STORAGE_KEYS, UI_FILTERING, UI_READING,
-  UI_EMPTY, UI_PAUSED, UI_PLAYING, UI_BROWSER_KEYS1, UI_BROWSER_KEYS2,
-  UI_PLAYER_PAUSED, UI_PLAYER_PLAYING, UI_OUTPUT_HEADPHONE, UI_OUTPUT_SPEAKER,
-  UI_PLAYER_KEYS, UI_EQ_TITLE, UI_EQ_PRESET, UI_EQ_KEYS, UI_TEXT_COUNT
-};
 const char *const UI_TEXT[9][UI_TEXT_COUNT] = {
   {"microSD card not found","Internal storage unavailable","M: storage  |  R: refresh","Filtering folders %d","Reading folder... %d","Empty folder (no audio)","PAUSED","PLAYING","ENTER open/play  DEL parent","S settings  E EQ  R refresh  H help","PAUSED","PLAYING","HEADPHONES","SPEAKER","SPACE pause  N/P track  ,/ seek  TAB EQ","EQUALIZER","PRESET","1-6 presets  0 reset  TAB back"},
   {"Cartao microSD nao encontrado","Memoria interna indisponivel","M: armazenamento  |  R: atualizar","Filtrando pastas %d","Lendo pasta... %d","Pasta vazia (sem audio)","PAUSADO","TOCANDO","ENTER abre/toca  DEL pasta acima","S ajustes  E EQ  R atualizar  H ajuda","PAUSADO","TOCANDO","FONE","ALTO-FALANTE","SPACE pausa  N/P faixa  ,/ busca  TAB EQ","EQUALIZADOR","PRESET","1-6 presets  0 zera  TAB voltar"},
