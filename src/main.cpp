@@ -989,14 +989,25 @@ void saveSettings() {
 }
 
 const char *currentPresetName() {
+  static const UiTextId ids[NUM_PRESETS] = {
+    UI_PRESET_BALANCE, UI_PRESET_FLAT, UI_PRESET_BASS,
+    UI_PRESET_ROCK, UI_PRESET_VOCAL, UI_PRESET_ELECTRO
+  };
   for (int p = 0; p < NUM_PRESETS; ++p) {
     bool same = true;
     for (int i = 0; i < EQ_BANDS; ++i) {
       if (eqGain[i] != PRESETS[p][i]) { same = false; break; }
     }
-    if (same) return PRESET_NAMES[p];
+    if (same) return uiText(ids[p]);
   }
-  return "PERSONAL";
+  return uiText(UI_PRESET_PERSONAL);
+}
+
+const char *localizedThemeName(int index) {
+  static const UiTextId ids[THEME_COUNT] = {
+    UI_THEME_DARK, UI_THEME_MATRIX, UI_THEME_CYBER, UI_THEME_ICE, UI_THEME_AMBER
+  };
+  return uiText(ids[constrain(index, 0, THEME_COUNT - 1)]);
 }
 
 void applyPreset(int p) {
@@ -2006,7 +2017,7 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   if (!source || !source->open(path)) { stopPlayback(true); return false; }
   if (startByte > 0) source->seek((int32_t)startByte, SEEK_SET);
 
-  if (!sdAudioBuffer || sdAudioBufferSize < 8192) { stopPlayback(true); showToast("AUDIO BUFFER UNAVAILABLE"); return false; }
+  if (!sdAudioBuffer || sdAudioBufferSize < 8192) { stopPlayback(true); showToast(uiText(UI_AUDIO_BUFFER_LOW)); return false; }
   bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sdAudioBufferSize);
   audioOutput = new (std::nothrow) AudioOut();
   decoder = makeDecoder(fmt);
@@ -2107,7 +2118,7 @@ void previousOrRestart() {
 
 void seekBy(int delta) {
   if (!playing) return;
-  if (!canSeek()) { showToast("BUSCA INDISPONIVEL"); return; }
+  if (!canSeek()) { showToast(uiText(UI_SEEK_UNAVAILABLE)); return; }
   pendingSeek += delta;
   seekDue = millis() + 280;
   char t[24];
@@ -2204,7 +2215,7 @@ void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
   g.setFont(&fonts::Font0);
   if (batteryPercent >= 0 && batteryPercent <= 100) {
     char b[12];
-    snprintf(b, sizeof(b), "BAT %d%%", batteryPercent);
+    snprintf(b, sizeof(b), uiText(UI_BATTERY_FMT), batteryPercent);
     g.setTextColor(batteryPercent <= 15 ? C_RED : C_GREY);
     g.drawString(b, 66, 6);
   }
@@ -2599,18 +2610,18 @@ void drawLive() {
   } else {
     g.setTextColor(C_GREY);
     char sub[24];
-    snprintf(sub, sizeof(sub), "FAIXA %d/%d", (int)orderPos + 1, (int)queueCount);
+    snprintf(sub, sizeof(sub), uiText(UI_TRACK_FMT), (int)orderPos + 1, (int)queueCount);
     g.drawString(sub, 8, 18);
     char flags[16] = "";
-    if (opt.shuffle) strcat(flags, "SHUF ");
-    if (opt.repeat == 1) strcat(flags, "REP");
-    else if (opt.repeat == 2) strcat(flags, "REP1");
+    if (opt.shuffle) strcat(flags, uiText(UI_SHUFFLE));
+    if (opt.repeat == 1) strcat(flags, uiText(UI_REPEAT));
+    else if (opt.repeat == 2) strcat(flags, "1x");
     g.setTextColor(C_YELLOW);
     g.drawString(flags, 80, 18);
     if (sleepDeadline) {
       const int32_t rem = (int32_t)(sleepDeadline - millis());
       char z[12];
-      snprintf(z, sizeof(z), "ZZ %dM", (int)(rem > 0 ? rem / 60000 + 1 : 0));
+      snprintf(z, sizeof(z), uiText(UI_SLEEP_FMT), (int)(rem > 0 ? rem / 60000 + 1 : 0));
       g.setTextColor(C_ORANGE);
       g.drawString(z, 138, 18);
     }
@@ -2645,7 +2656,7 @@ void drawLive() {
     if (!coverLoaded) {
       g.setFont(&fonts::Font0);
       g.setTextColor(C_GREY);
-      const char *msg = coverPending ? "..." : "SEM CAPA";
+      const char *msg = coverPending ? "..." : uiText(UI_NO_COVER);
       g.drawString(msg, 119 - g.textWidth(msg) / 2, 46);
     }
   } else if (opt.visual == 2) {
@@ -2863,7 +2874,7 @@ void settingValue(int i, char *out, size_t n) {
     case 4: safeCopy(out, n, localizedRepeat(opt.repeat)); break;
     case 5: safeCopy(out, n, opt.shuffle ? localizedOn() : localizedOff()); break;
     case 6: safeCopy(out, n, localizedVisual(opt.visual)); break;
-    case 7: safeCopy(out, n, THEMES[themeIndex].name); break;
+    case 7: safeCopy(out, n, localizedThemeName(themeIndex)); break;
     case 8: safeCopy(out, n, localizedEnhance(opt.enhance)); break;
     case 9: safeCopy(out, n, uiLanguageName()); break;
     default: safeCopy(out, n, "ENTER"); break;
@@ -2897,66 +2908,32 @@ void drawSettings() {
     g.drawString(valueFit, 228 - g.textWidth(valueFit), y);
   }
   g.setTextColor(C_GREY);
-  g.drawString(uiLanguage == 1 ? "; . ESCOLHE  , / MUDA  ESC VOLTA" : uiLanguage == 2 ? "; . ELEGIR  , / CAMBIAR  ESC VOLVER" : uiLanguage == 3 ? "; . 选择  , / 更改  ESC 返回" : uiLanguage == 4 ? "; . 選択  , / 変更  ESC 戻る" : uiLanguage == 5 ? "; . CHOISIR  , / MODIFIER  ESC RETOUR" : uiLanguage == 6 ? "; . WAEHLEN  , / AENDERN  ESC ZURUECK" : uiLanguage == 7 ? "; . ВЫБРАТЬ  , / ИЗМЕНИТЬ  ESC НАЗАД" : uiLanguage == 8 ? "; . SCEGLI  , / CAMBIA  ESC INDIETRO" : "; . SELECT  , / CHANGE  ESC BACK", 8, 127);
+  g.drawString(uiText(UI_SETTINGS_KEYS), 8, 127);
   ui.pushSprite(0, 0);
 }
 
 void drawHelp() {
   screen = SCR_HELP;
   if (screenOff) return;
-  static const char *const pages[3][10] = {
-    {
-      "LIBRARY / GENERAL",
-      ";/. move item   ,// page",
-      "ENTER open folder or play queue",
-      "DEL parent folder  TAB player",
-      "SPACE pause  N/P track",
-      "- / = volume  1-6 EQ preset",
-      "S settings  E equalizer",
-      "R refresh SD  X stop audio",
-      "G sound enhancement (off/soft/strong)",
-      "Formats: MP3 WAV FLAC AAC",
-    },
-    {
-      "PLAYER",
-      "SPACE pause | N next track",
-      "P previous / restart (>3s)",
-      ", / / seek -10s / +10s (MP3)",
-      "; / . volume +/- 5%",
-      "S shuffle | R repeat off/all/one",
-      "V bars/mirror/wave/cover",
-      "T sleep timer | O speaker/headphones",
-      "TAB/E equalizer | G enhancement",
-      "DEL or ` back to library; X stop",
-    },
-    {
-      "EQ / SETTINGS",
-      "EQ: , / select band",
-      "EQ: ; / . gain +/-",
-      "EQ: 0 FLAT | 1-6 presets",
-      "SETTINGS: ; / . select item",
-      "SETTINGS: , / / change value",
-      "ENTER change / restore defaults",
-      "TAB/DEL/` return to previous screen",
-      "Display off: press any key to wake",
-      "H restarts | TAB/DEL closes help",
-    },
-  };
+
 
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
   char title[24];
-  snprintf(title, sizeof(title), "HELP %d/3", helpPage + 1);
+  snprintf(title, sizeof(title), uiText(UI_HELP_PAGE_FMT), helpPage + 1, 3);
   drawHeader(g, title, C_CYAN);
   g.setFont(&fonts::Font0);
   g.setTextSize(1);
   for (int i = 0; i < 10; ++i) {
     g.setTextColor(i == 0 ? C_RED : C_GREY);
-    g.drawString(pages[helpPage][i], i == 0 ? 8 : 12, 26 + i * 10);
+    const UiTextId id = (UiTextId)(UI_HELP_00 + helpPage * 10 + i);
+    char line[56];
+    fitText(g, uiText(id), 222, line, sizeof(line));
+    g.drawString(line, i == 0 ? 8 : 12, 26 + i * 10);
   }
   g.setTextColor(C_CYAN);
-  g.drawString("H NEXT  TAB/DEL/` CLOSE", 8, 127);
+  g.drawString(uiText(UI_HELP_FOOTER), 8, 127);
   ui.pushSprite(0, 0);
 }
 
