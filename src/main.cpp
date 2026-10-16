@@ -152,6 +152,7 @@ int outMode = 0;
 int eqGain[EQ_BANDS] = {3, 1, 0, 2, 3};
 int eqSelected = 0;
 int settingsSel = 0;
+int uiLanguage = 0;  // 0 English, 1 Portuguese, 2 Spanish, 3 Chinese, 4 Japanese, 5 French, 6 German, 7 Russian, 8 Italian
 int sleepIdx = 0;
 uint32_t sleepDeadline = 0;
 
@@ -167,9 +168,9 @@ struct Options {
 
 const int SCREEN_OFF_SEC[4] = {0, 15, 30, 60};
 const int SLEEP_MIN[5] = {0, 15, 30, 60, 90};
-const char *REPEAT_NAMES[3] = {"DESLIGADO", "TODAS", "UMA"};
-const char *VISUAL_NAMES[4] = {"BARRAS", "ESPELHO", "ONDA", "CAPA"};
-const char *ENHANCE_NAMES[3] = {"DESLIGADO", "SUAVE", "FORTE"};
+const char *REPEAT_NAMES[3] = {"OFF", "ALL", "ONE"};
+const char *VISUAL_NAMES[4] = {"BARS", "MIRROR", "WAVE", "COVER"};
+const char *ENHANCE_NAMES[3] = {"OFF", "SOFT", "STRONG"};
 
 const char *EQ_LABELS[EQ_BANDS] = {"60", "250", "1K", "4K", "12K"};
 const float EQ_FREQS[EQ_BANDS] = {60.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
@@ -749,6 +750,7 @@ void markSettingsDirty() {
 
 void loadSettings() {
   prefs.begin("mp3player", true);
+  uiLanguage = constrain(prefs.getInt("lang", 0), 0, 8);
   volByMode[0] = constrain(prefs.getInt("vs", 80), 0, 100);
   volByMode[1] = constrain(prefs.getInt("vp", 30), 0, 100);
   outMode = constrain(prefs.getInt("om", 0), 0, 1);
@@ -780,6 +782,7 @@ void loadSettings() {
 void saveSettings() {
   prefs.begin("mp3player", false);
   volByMode[outMode] = volumePercent;
+  prefs.putInt("lang", uiLanguage);
   prefs.putInt("vs", volByMode[0]);
   prefs.putInt("vp", volByMode[1]);
   prefs.putInt("om", outMode);
@@ -2323,29 +2326,50 @@ void drawEq() {
   ui.pushSprite(0, 0);
 }
 
-constexpr int SETTINGS_COUNT = 10;
-const char *SETTING_LABELS[SETTINGS_COUNT] = {
-  "BRILHO", "TELA APAGA", "TIMER DE SONO", "AGITAR = PROXIMA",
-  "REPETIR", "ALEATORIO", "VISUALIZADOR", "TEMA", "REALCE DE SOM", "RESTAURAR PADROES"
+constexpr int SETTINGS_COUNT = 11;
+const char *const LANGUAGE_NAMES[9] = {
+  "ENGLISH", "PORTUGUES (BR)", "ESPANOL", "中文", "日本語",
+  "FRANCAIS", "DEUTSCH", "РУССКИЙ", "ITALIANO"
 };
+const char *const SETTING_LABELS[9][SETTINGS_COUNT] = {
+  {"BRIGHTNESS","SCREEN TIMEOUT","SLEEP TIMER","SHAKE TO SKIP","REPEAT","SHUFFLE","VISUALIZER","THEME","SOUND ENHANCEMENT","LANGUAGE","RESTORE DEFAULTS"},
+  {"BRILHO","TELA APAGA","TIMER DE SONO","AGITAR = PROXIMA","REPETIR","ALEATORIO","VISUALIZADOR","TEMA","REALCE DE SOM","IDIOMA","RESTAURAR PADROES"},
+  {"BRILLO","APAGADO DE PANTALLA","TEMPORIZADOR","AGITAR PARA AVANZAR","REPETIR","ALEATORIO","VISUALIZADOR","TEMA","MEJORA DE SONIDO","IDIOMA","VALORES INICIALES"},
+  {"亮度","屏幕超时","睡眠定时器","摇动切歌","循环","随机播放","可视化","主题","声音增强","语言","恢复默认"},
+  {"明るさ","画面オフ","スリープタイマー","振って次の曲","リピート","シャッフル","ビジュアライザー","テーマ","サウンド強化","言語","初期設定に戻す"},
+  {"LUMINOSITE","VEILLE ECRAN","MINUTERIE","SECOUER POUR SUIVANT","REPETITION","ALEATOIRE","VISUALISEUR","THEME","AMPLIFICATION","LANGUE","REINITIALISER"},
+  {"HELLIGKEIT","BILDSCHIRM AUS","SLEEP-TIMER","SCHUETTELN = WEITER","WIEDERHOLEN","ZUFALL","VISUALISIERUNG","THEMA","KLANGVERBESSERUNG","SPRACHE","ZURUECKSETZEN"},
+  {"ЯРКОСТЬ","ТАЙМ-АУТ ЭКРАНА","ТАЙМЕР СНА","ВСТРЯХНУТЬ = ДАЛЕЕ","ПОВТОР","ПЕРЕМЕШАТЬ","ВИЗУАЛИЗАТОР","ТЕМА","УЛУЧШЕНИЕ ЗВУКА","ЯЗЫК","СБРОСИТЬ"},
+  {"LUMINOSITA","SPEGNIMENTO SCHERMO","SPEGNIMENTO MUSICA","SCUOTI PER AVANTI","RIPETI","CASUALE","VISUALIZZATORE","TEMA","MIGLIORIA AUDIO","LINGUA","RIPRISTINA"}
+};
+
+const char *uiLanguageName() { return LANGUAGE_NAMES[constrain(uiLanguage, 0, 8)]; }
+void applyUiFont(LovyanGFX &g, bool small = false) {
+  (void)small;
+  if (uiLanguage == 3) g.setFont(&fonts::efontCN_10);
+  else if (uiLanguage == 4) g.setFont(&fonts::efontJA_10);
+  else g.setFont(&fonts::Font0);
+}
+
 
 void settingValue(int i, char *out, size_t n) {
   switch (i) {
     case 0: snprintf(out, n, "%d%%", opt.brightness); break;
     case 1:
       if (SCREEN_OFF_SEC[opt.screenOffIdx]) snprintf(out, n, "%ds", SCREEN_OFF_SEC[opt.screenOffIdx]);
-      else safeCopy(out, n, "NUNCA");
+      else safeCopy(out, n, "NEVER");
       break;
     case 2:
       if (SLEEP_MIN[sleepIdx]) snprintf(out, n, "%d MIN", SLEEP_MIN[sleepIdx]);
-      else safeCopy(out, n, "DESLIGADO");
+      else safeCopy(out, n, "OFF");
       break;
-    case 3: safeCopy(out, n, imuOk ? (opt.shake ? "LIGADO" : "DESLIGADO") : "N/D"); break;
+    case 3: safeCopy(out, n, imuOk ? (opt.shake ? "ON" : "OFF") : "N/A"); break;
     case 4: safeCopy(out, n, REPEAT_NAMES[opt.repeat]); break;
-    case 5: safeCopy(out, n, opt.shuffle ? "LIGADO" : "DESLIGADO"); break;
+    case 5: safeCopy(out, n, opt.shuffle ? "ON" : "OFF"); break;
     case 6: safeCopy(out, n, VISUAL_NAMES[opt.visual]); break;
     case 7: safeCopy(out, n, THEMES[themeIndex].name); break;
     case 8: safeCopy(out, n, ENHANCE_NAMES[opt.enhance]); break;
+    case 9: safeCopy(out, n, uiLanguageName()); break;
     default: safeCopy(out, n, "ENTER"); break;
   }
 }
@@ -2356,15 +2380,15 @@ void drawSettings() {
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
-  drawHeader(g, "AJUSTES", C_CYAN);
-  g.setFont(&fonts::Font0);
+  drawHeader(g, SETTING_LABELS[constrain(uiLanguage, 0, 8)][9], C_CYAN);
+  applyUiFont(g, true);
   g.setTextSize(1);
   for (int i = 0; i < SETTINGS_COUNT; ++i) {
     const int y = 25 + i * 10;
     const bool sel = (i == settingsSel);
     if (sel) g.fillRoundRect(6, y - 2, 228, 11, 3, C_PANEL);
     g.setTextColor(sel ? C_WHITE : C_GREY);
-    g.drawString(SETTING_LABELS[i], 12, y);
+    g.drawString(SETTING_LABELS[constrain(uiLanguage, 0, 8)][i], 12, y);
     char v[24], shown[32];
     settingValue(i, v, sizeof(v));
     if (sel && i < SETTINGS_COUNT - 1) snprintf(shown, sizeof(shown), "< %s >", v);
@@ -2373,7 +2397,7 @@ void drawSettings() {
     g.drawString(shown, 228 - g.textWidth(shown), y);
   }
   g.setTextColor(C_GREY);
-  g.drawString("; . ESCOLHE   , / MUDA   ESC VOLTA", 8, 127);
+  g.drawString(uiLanguage == 1 ? "; . ESCOLHE  , / MUDA  ESC VOLTA" : uiLanguage == 2 ? "; . ELEGIR  , / CAMBIAR  ESC VOLVER" : uiLanguage == 3 ? "; . 选择  , / 更改  ESC 返回" : uiLanguage == 4 ? "; . 選択  , / 変更  ESC 戻る" : uiLanguage == 5 ? "; . CHOISIR  , / MODIFIER  ESC RETOUR" : uiLanguage == 6 ? "; . WAEHLEN  , / AENDERN  ESC ZURUECK" : uiLanguage == 7 ? "; . ВЫБРАТЬ  , / ИЗМЕНИТЬ  ESC НАЗАД" : uiLanguage == 8 ? "; . SCEGLI  , / CAMBIA  ESC INDIETRO" : "; . SELECT  , / CHANGE  ESC BACK", 8, 127);
   ui.pushSprite(0, 0);
 }
 
@@ -2563,7 +2587,7 @@ void resetDefaults() {
   sleepDeadline = 0;
   applyShuffleChange();
   markSettingsDirty();
-  showToast("PADROES RESTAURADOS");
+  showToast("DEFAULTS RESTORED");
   drawSettings();
 }
 
@@ -2578,6 +2602,7 @@ void changeSetting(int item, int dir) {
     case 6: opt.visual = (opt.visual + dir + 4) % 4; break;
     case 7: themeIndex = (themeIndex + dir + THEME_COUNT) % THEME_COUNT; applyTheme(); break;
     case 8: opt.enhance = (opt.enhance + dir + 3) % 3; configureDsp(); break;
+    case 9: uiLanguage = (uiLanguage + dir + 9) % 9; break;
     default: break;
   }
   markSettingsDirty();
