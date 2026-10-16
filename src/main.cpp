@@ -77,7 +77,7 @@
 #define HAVE_AAC 1
 #endif
 
-#define MP3_PLAYER_VERSION "8.2.0"
+#define MP3_PLAYER_VERSION "8.4.0"
 
 namespace {
 #include "ui_text_fwd.h"

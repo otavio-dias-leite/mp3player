@@ -1,6 +1,6 @@
 # MP3 Player — M5Stack Cardputer ADV
 
-Firmware de reprodução musical para o M5Stack Cardputer ADV (ESP32-S3), com biblioteca em microSD/LittleFS, reprodução com DSP, leitor de imagens e interface multilíngue.
+**Versão 8.4.0** — firmware de reprodução musical para o M5Stack Cardputer ADV (ESP32-S3), com biblioteca em microSD/LittleFS, reprodução com DSP, leitor de imagens e interface multilíngue.
 
 ## Recursos
 
@@ -37,6 +37,8 @@ Firmware de reprodução musical para o M5Stack Cardputer ADV (ESP32-S3), com bi
 
 ## Build
 
+Fonte principal: `src/main.cpp` (PlatformIO). O arquivo `MP3_Player.ino` na raiz é um snapshot legado e não é usado pelo pipeline oficial.
+
 Com PlatformIO: `pio run -e cardputer-adv`.
 
 O build de CI gera `firmware.bin` para OTA e `mp3-player-cardputer-adv-full.bin` para gravação USB.
@@ -44,3 +46,11 @@ O build de CI gera `firmware.bin` para OTA e `mp3-player-cardputer-adv-full.bin`
 ## Nota de validação
 
 A compilação automatizada verifica o toolchain. A qualidade final de áudio, estabilidade de cartões específicos, leitura de imagens grandes e consumo de bateria ainda precisam de testes físicos no Cardputer ADV.
+
+
+## Versão 8.4.0
+
+- Consolida o pipeline de áudio FIR polifásico com anti-aliasing e transição gradual de velocidade.
+- Mantém a recuperação de leitura do microSD com distinção entre falha de mídia e fim normal de arquivo.
+- Preserva a navegação de biblioteca, metadados, capas, equalizador, armazenamento interno e interface multilíngue.
+- Publicação automatizada: GitHub Actions compila o firmware, cria os binários da release e atualiza o GitHub Pages após a release ser publicada.
