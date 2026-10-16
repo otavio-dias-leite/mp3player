@@ -2,7 +2,7 @@
  * MP3 PLAYER - player de audio para M5Stack Cardputer ADV
  * Versao 6.0
  *
- * Base consolidada v7.0 (v6.0 + compatibilidade/fluxo da v5.0)\n * Playback modes: 7=SLOWED (0.75x), 8=SPED UP (1.25x), 9=Nightcore (1.75x), 0=NORMAL.\n * NOVIDADES DA v6.0
+ * Base consolidada v7.0 (v6.0 + compatibilidade/fluxo da v5.0)\n * Controle de velocidade: 7=0.75x, 8=1.25x, 9=1.50x, 0=1.00x.\n * NOVIDADES DA v6.0
  *  SOM
  *   - Saida fixa em 44.1 kHz com reamostrador cubico (Catmull-Rom) proprio:
  *     arquivos 48k/32k/22k tocam limpos e na velocidade certa.
@@ -44,7 +44,7 @@
  *  PLAYER  ESPACO pausa  N proxima  P anterior/reinicia  , / busca 10 s
  *          ; . volume    - = volume  1-6 preset  TAB equalizador  G realce
  *          S aleatorio   R repetir   V visual    T timer de sono
- *          7 SLOWED  8 SPED UP  9 Nightcore  0 NORMAL
+ *          7 0.75x  8 1.25x  9 1.50x  0 normal
  *          X para        DEL/` volta a lista (musica continua)
  *  EQ      , / banda     ; . ganho   0 zera      TAB/DEL/` volta
  */
@@ -57,7 +57,6 @@
 #include <Preferences.h>
 #include <math.h>
 #include <new>
-#include <utility>
 
 #include <AudioOutput.h>
 #include <AudioFileSource.h>
@@ -77,12 +76,9 @@
 #define HAVE_AAC 1
 #endif
 
-#define MP3_PLAYER_VERSION "8.4.0"
+#define MP3_PLAYER_VERSION "8.0.0"
 
 namespace {
-#include "ui_text_fwd.h"
-#include "ui_translations.h"
-
 
 // ============================================================ hardware
 constexpr int SD_CS   = 12;
@@ -110,7 +106,7 @@ constexpr uint16_t C_YELLOW  = rgb(255, 230, 60);
 
 // ============================================================ constantes
 constexpr uint32_t OUT_RATE = 44100;               // taxa fixa da saida
-constexpr size_t SD_AUDIO_BUFFER_TARGET = 48 * 1024; // alvo adaptativo em RAM interna
+constexpr size_t SD_AUDIO_BUFFER_SIZE = 48 * 1024; // readahead na RAM interna
 constexpr size_t BLOCK_SAMPLES = 2048;             // amostras por bloco no speaker
 constexpr size_t RING_BLOCKS   = 4;                // speaker segura no maximo 2
 constexpr size_t MAX_ENTRIES   = 200;
@@ -121,23 +117,15 @@ constexpr int    EQ_BANDS      = 5;
 constexpr int    SPEC_BANDS    = 12;
 constexpr int    EQ_LIMIT      = 12;
 constexpr int    NUM_PRESETS   = 6;
-constexpr int    ROWS          = 2;
+constexpr int    ROWS          = 4;
 constexpr float  SHAKE_G       = 2.6f;
 constexpr int    COVER_PX      = 44;
-constexpr uint32_t COVER_MAX_BYTES = 3UL * 1024UL * 1024UL;
-constexpr uint32_t IMAGE_MAX_BYTES = 6UL * 1024UL * 1024UL;
-constexpr uint16_t THUMB_PX = 32;
-constexpr uint32_t SD_STREAM_RETRY_MS = 1200;
+constexpr uint32_t COVER_MAX_BYTES = 900UL * 1024UL;
 
-uint8_t *sdAudioBuffer = nullptr;
-size_t sdAudioBufferSize = 0;
+static uint8_t sdAudioBuffer[SD_AUDIO_BUFFER_SIZE];
 
 // ============================================================ estado geral
-enum Screen { SCR_BROWSER, SCR_PLAYER, SCR_EQ, SCR_SETTINGS, SCR_HELP, SCR_IMAGE };
-
-constexpr int K_ENTER = 256;
-constexpr int K_TAB = 257;
-constexpr int K_DEL = 258;
+enum Screen { SCR_BROWSER, SCR_PLAYER, SCR_EQ, SCR_SETTINGS, SCR_HELP };
 Screen screen = SCR_BROWSER;
 Screen returnScreen = SCR_BROWSER;
 int helpPage = 0;
@@ -152,7 +140,6 @@ bool sdReady = false;
 bool internalReady = false;
 enum StorageKind : uint8_t { STORAGE_SD, STORAGE_INTERNAL };
 StorageKind storageKind = STORAGE_SD;
-uint32_t sdMediaEpoch = 1;
 fs::FS &activeFS() { return storageKind == STORAGE_SD ? (fs::FS &)SD : (fs::FS &)LittleFS; }
 bool storageReady() { return storageKind == STORAGE_SD ? sdReady : internalReady; }
 bool playing = false;   // decoder ativo (inclui pausado)
@@ -165,7 +152,6 @@ int outMode = 0;
 int eqGain[EQ_BANDS] = {3, 1, 0, 2, 3};
 int eqSelected = 0;
 int settingsSel = 0;
-int uiLanguage = 0;  // 0 English, 1 Portuguese, 2 Spanish, 3 Chinese, 4 Japanese, 5 French, 6 German, 7 Russian, 8 Italian
 int sleepIdx = 0;
 uint32_t sleepDeadline = 0;
 
@@ -181,9 +167,13 @@ struct Options {
 
 const int SCREEN_OFF_SEC[4] = {0, 15, 30, 60};
 const int SLEEP_MIN[5] = {0, 15, 30, 60, 90};
+const char *REPEAT_NAMES[3] = {"DESLIGADO", "TODAS", "UMA"};
+const char *VISUAL_NAMES[4] = {"BARRAS", "ESPELHO", "ONDA", "CAPA"};
+const char *ENHANCE_NAMES[3] = {"DESLIGADO", "SUAVE", "FORTE"};
 
 const char *EQ_LABELS[EQ_BANDS] = {"60", "250", "1K", "4K", "12K"};
 const float EQ_FREQS[EQ_BANDS] = {60.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
+const char *PRESET_NAMES[NUM_PRESETS] = {"BALANCE", "FLAT", "BASS", "ROCK", "VOCAL", "ELETRO"};
 const int8_t PRESETS[NUM_PRESETS][EQ_BANDS] = {
   { 3,  1,  0,  2,  3},
   { 0,  0,  0,  0,  0},
@@ -193,7 +183,7 @@ const int8_t PRESETS[NUM_PRESETS][EQ_BANDS] = {
   { 6,  3, -1,  2,  5},
 };
 
-char toastText[80] = {0};
+char toastText[40] = {0};
 uint32_t toastUntil = 0;
 bool toastActive = false;
 
@@ -237,10 +227,6 @@ uint32_t lastActivity = 0;
 M5Canvas ui(&M5Cardputer.Display);
 M5Canvas live(&M5Cardputer.Display);
 M5Canvas coverCanvas(&M5Cardputer.Display);
-M5Canvas thumbCanvas0(&M5Cardputer.Display);
-M5Canvas thumbCanvas1(&M5Cardputer.Display);
-M5Canvas *thumbCanvases[2] = {&thumbCanvas0, &thumbCanvas1};
-bool thumbCanvasReady[2] = {false, false};
 SPIClass sdSPI(FSPI);
 
 void drawBrowser();
@@ -248,7 +234,6 @@ void drawPlayer();
 void drawEq();
 void drawSettings();
 void drawHelp();
-void drawImageViewer();
 void redrawCurrent();
 void sdRemount();
 void pumpAudio();
@@ -345,12 +330,6 @@ Fmt formatOf(const char *name) {
   return FMT_NONE;
 }
 bool isAudioFile(const char *name) { return formatOf(name) != FMT_NONE; }
-bool isImageFile(const char *name) {
-  const char *dot = name ? strrchr(name, '.') : nullptr;
-  return dot && (!strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg") ||
-                 !strcasecmp(dot, ".png"));
-}
-bool isBrowserMedia(const char *name) { return isAudioFile(name) || isImageFile(name); }
 
 void fitText(LovyanGFX &g, const char *src, int maxW, char *out, size_t n) {
   safeCopy(out, n, src);
@@ -449,8 +428,6 @@ float gFadeGain = 0.0f;
 float gFadeTarget = 1.0f;
 float gFadeStep = 1.0f / (0.03f * 44100.0f);
 uint32_t gSamplesSubmitted = 0;
-double mediaClockSeconds = 0.0;
-uint32_t mediaClockLastMs = 0;
 
 // realce de som
 bool gCompOn = false;
@@ -458,23 +435,11 @@ float gCompEnv = 0, gCompThr = 12000.0f, gCompMake = 1.1f;
 float gVBassMix = 0, gBassLp = 0, gBassHp = 0;
 uint32_t gRng = 0x1234ABCDu;
 
-// Reamostrador polifasico FIR: 9 taps, 32 fases + interpolacao de fase.
-// A tabela e criada fora do caminho de audio; o loop de amostras so faz MACs.
-constexpr int RS_TAPS = 16;
-constexpr int RS_PHASES = 64;
-constexpr int RS_HISTORY = 32;
-constexpr int RS_MAX_OUTPUTS_PER_INPUT = 16;
-float rsCoeff[2][RS_PHASES + 1][RS_TAPS] = {};
-float rsHistory[RS_HISTORY] = {};
-uint8_t rsFilterActive = 0, rsFilterTarget = 0;
-float rsFilterMix = 1.0f;
-float rsFilterMixStep = 1.0f;
-float rsStep = 1.0f, rsTargetStep = 1.0f;
-uint32_t rsStepRampLeft = 0;
-double rsNextPos = 0.0;
-int64_t rsInputIndex = -1;
-float rsSourceRate = 44100.0f;
-float playbackSpeed = 1.0f;  // 0.75x, 1.00x, 1.25x, 1.75x
+// reamostrador (arquivo -> 44.1 kHz)
+bool rsActive = false;
+float rsStep = 1.0f, rsPhase = 0.0f;
+float rsH[4] = {0, 0, 0, 0};
+float playbackSpeed = 1.0f;  // 0.75x, 1.00x, 1.25x, 1.50x
 
 float gBand[SPEC_BANDS] = {0};
 int16_t gScope[128] = {0};
@@ -638,152 +603,51 @@ inline int16_t processSample(float x) {
   return (int16_t)v;
 }
 
-float sincPi(float x) {
-  if (fabsf(x) < 1e-5f) return 1.0f;
-  const float px = PI * x;
-  return sinf(px) / px;
-}
-
-void buildResampleTable(uint8_t table, float step) {
-  const float cutoff = fminf(0.96f, 0.94f / fmaxf(step, 1.0f));
-  constexpr float radius = 8.0f;
-  for (int phase = 0; phase <= RS_PHASES; ++phase) {
-    const float frac = (float)phase / (float)RS_PHASES;
-    float sum = 0.0f;
-    for (int tap = 0; tap < RS_TAPS; ++tap) {
-      const float distance = (float)(tap - 7) - frac;
-      const float windowPos = distance / radius;
-      float window = 0.0f;
-      if (fabsf(windowPos) <= 1.0f) {
-        window = 0.42f + 0.5f * cosf(PI * windowPos) +
-                 0.08f * cosf(2.0f * PI * windowPos);
-      }
-      const float coeff = 2.0f * cutoff * sincPi(2.0f * cutoff * distance) * window;
-      rsCoeff[table][phase][tap] = coeff;
-      sum += coeff;
-    }
-    if (fabsf(sum) > 1e-8f) {
-      const float inv = 1.0f / sum;
-      for (int tap = 0; tap < RS_TAPS; ++tap) rsCoeff[table][phase][tap] *= inv;
-    }
-  }
-}
-
-void configureResampler(float sampleRate, float speed, bool resetState) {
-  rsSourceRate = constrain(sampleRate, 8000.0f, 192000.0f);
-  gSrcRate = rsSourceRate;
-  speed = constrain(speed, 0.75f, 1.75f);
-  const float target = constrain(rsSourceRate * speed / (float)OUT_RATE, 0.12f, 8.0f);
-
-  if (resetState) {
-    rsStep = rsTargetStep = target;
-    rsStepRampLeft = 0;
-    rsNextPos = 0.0;
-    rsInputIndex = -1;
-    memset(rsHistory, 0, sizeof(rsHistory));
-    rsFilterActive = rsFilterTarget = 0;
-    rsFilterMix = 1.0f;
-    rsFilterMixStep = 1.0f;
-    buildResampleTable(rsFilterActive, target);
-    buildResampleTable(1, target);
-    return;
-  }
-
-  rsTargetStep = target;
-  rsStepRampLeft = OUT_RATE / 12;  // 83 ms de aceleracao/desaceleracao suave
-  const uint8_t nextTable = (uint8_t)(1U - rsFilterActive);
-  buildResampleTable(nextTable, target);
-  rsFilterTarget = nextTable;
-  rsFilterMix = 0.0f;
-  rsFilterMixStep = 1.0f / (float)(OUT_RATE / 12);
-}
-
-inline float resampleHistoryAt(int64_t index, int64_t newest) {
-  if (index < 0 || index > newest || newest - index >= RS_HISTORY) return 0.0f;
-  return rsHistory[(uint64_t)index & (RS_HISTORY - 1)];
-}
-
-inline void pushResampled(float input) {
-  const int64_t newest = ++rsInputIndex;
-  rsHistory[(uint64_t)newest & (RS_HISTORY - 1)] = input;
-  const double newestSafePosition = (double)newest - 8.0;
-
-  while (rsNextPos <= newestSafePosition) {
-    const int64_t base = (int64_t)rsNextPos;
-    const float frac = (float)(rsNextPos - (double)base);
-    const float phase = frac * (float)RS_PHASES;
-    const int phase0 = constrain((int)phase, 0, RS_PHASES - 1);
-    const int phase1 = phase0 + 1;
-    const float phaseMix = phase - (float)phase0;
-
-    const float *c00 = rsCoeff[rsFilterActive][phase0];
-    const float *c01 = rsCoeff[rsFilterActive][phase1];
-    float y = 0.0f;
-    if (rsFilterMix >= 0.9999f || rsFilterActive == rsFilterTarget) {
-      for (int tap = 0; tap < RS_TAPS; ++tap) {
-        const float sample = resampleHistoryAt(base + tap - 7, newest);
-        const float coeff = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
-        y += sample * coeff;
-      }
-    } else {
-      const float *c10 = rsCoeff[rsFilterTarget][phase0];
-      const float *c11 = rsCoeff[rsFilterTarget][phase1];
-      float yNext = 0.0f;
-      for (int tap = 0; tap < RS_TAPS; ++tap) {
-        const float sample = resampleHistoryAt(base + tap - 7, newest);
-        const float a = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
-        const float b = c10[tap] + (c11[tap] - c10[tap]) * phaseMix;
-        y += sample * a;
-        yNext += sample * b;
-      }
-      y += (yNext - y) * rsFilterMix;
-    }
-    gRing[gCur][gFill++] = processSample(y);
-    // Tempo de conteudo: avanca pela razao real atual, inclusive durante o ramp de velocidade.
-
-    if (rsFilterMix < 1.0f) {
-      rsFilterMix += rsFilterMixStep;
-      if (rsFilterMix >= 1.0f) {
-        rsFilterMix = 1.0f;
-        rsFilterActive = rsFilterTarget;
-      }
-    }
-    if (rsStepRampLeft) {
-      rsStep += (rsTargetStep - rsStep) / (float)rsStepRampLeft;
-      if (--rsStepRampLeft == 0) rsStep = rsTargetStep;
-    }
-    rsNextPos += (double)rsStep;
-  }
+inline float cubic4(const float *h, float t) {
+  const float a = -0.5f * h[0] + 1.5f * h[1] - 1.5f * h[2] + 0.5f * h[3];
+  const float b = h[0] - 2.5f * h[1] + 2.0f * h[2] - 0.5f * h[3];
+  const float c = -0.5f * h[0] + 0.5f * h[2];
+  return ((a * t + b) * t + c) * t + h[1];
 }
 
 class AudioOut final : public AudioOutput {
 public:
   bool begin() override {
-    configureResampler((float)((hertz >= 8000 && hertz <= 192000) ? hertz : 44100),
-                       playbackSpeed, true);
+    for (int i = 0; i < 4; ++i) rsH[i] = 0;
+    rsPhase = 0;
+    applyRate();
     return true;
   }
 
   bool SetRate(int hz) override {
     AudioOutput::SetRate(hz);
-    configureResampler((float)((hz >= 8000 && hz <= 192000) ? hz : 44100),
-                       playbackSpeed, true);
+    applyRate();
     return true;
   }
 
+  // true = bloco quase cheio e o speaker ainda nao aceitou
   bool isFull() const {
-    if (gFill + RS_MAX_OUTPUTS_PER_INPUT <= BLOCK_SAMPLES) return false;
+    if (gFill + 8 <= BLOCK_SAMPLES) return false;
     return !submitBlock();
   }
 
   bool ConsumeSample(int16_t sample[2]) override {
-    if (gSliceLeft <= 0) return false;
-    // Reserva o pior caso de upsampling antes de aceitar a amostra de entrada.
-    // Assim, contrapressao nunca perde nem duplica amostras do decoder.
-    if (gFill + RS_MAX_OUTPUTS_PER_INPUT > BLOCK_SAMPLES && !submitBlock()) return false;
+    if (gSliceLeft <= 0) return false;  // fatia esgotada: devolve o controle ao loop()
+    if (gFill + 8 > BLOCK_SAMPLES && !submitBlock()) return false;  // contrapressao
     --gSliceLeft;
-    const float mono = ((float)sample[0] + (float)sample[1]) * 0.5f;
-    pushResampled(mono);
+    const float x = ((float)sample[0] + (float)sample[1]) * 0.5f;  // speaker mono
+    if (!rsActive) {
+      gRing[gCur][gFill++] = processSample(x);
+    } else {
+      rsH[0] = rsH[1]; rsH[1] = rsH[2]; rsH[2] = rsH[3]; rsH[3] = x;
+      while (rsPhase < 1.0f && gFill < BLOCK_SAMPLES) {
+        gRing[gCur][gFill++] = processSample(cubic4(rsH, rsPhase));
+        rsPhase += rsStep;
+      }
+      rsPhase -= 1.0f;
+      if (rsPhase < 0) rsPhase = 0;
+    }
+    if (gFill + 8 > BLOCK_SAMPLES) submitBlock();
     return true;
   }
 
@@ -797,6 +661,13 @@ public:
     return true;
   }
 
+private:
+  void applyRate() {
+    const int hz = (hertz >= 8000 && hertz <= 192000) ? hertz : 44100;
+    gSrcRate = (float)hz;
+    rsActive = (hz != (int)OUT_RATE) || fabsf(playbackSpeed - 1.0f) > 0.001f;
+    rsStep = ((float)hz / (float)OUT_RATE) * playbackSpeed;
+  }
 };
 
 // ============================================================ SD resiliente
@@ -804,137 +675,63 @@ bool mountSD();
 
 // Fonte de arquivo com recuperacao: se o SD falhar no meio da musica,
 // remonta o cartao, reabre o arquivo e retoma exatamente do mesmo byte.
-extern bool needRescan;
-extern uint32_t lastRemountAt;
-extern uint32_t lastSdProbeAt;
-
 class SdStreamSource final : public AudioFileSource {
 public:
   bool open(const char *path) override {
     close();
     safeCopy(path_, sizeof(path_), path);
-    fs_ = &activeFS();
-    f_ = fs_->open(path_, FILE_READ);
+    f_ = activeFS().open(path_, FILE_READ);
     if (!f_) return false;
     size_ = (uint32_t)f_.size();
     pos_ = 0;
-    recoverFailures_ = 0;
-    lastRecoverAt_ = 0;
-    readFailed_ = false;
-    return size_ > 0;
+    return true;
   }
 
   uint32_t read(void *data, uint32_t len) override {
-    if (!len) return 0;
-    uint8_t *dst = (uint8_t *)data;
-    uint32_t total = 0;
-    uint8_t consecutiveFailures = 0;
-    while (total < len) {
-      if (!f_) {
-        if (++consecutiveFailures > 2 || !recover()) { readFailed_ = true; break; }
-      }
-      const size_t got = f_.read(dst + total, len - total);
-      if (got > 0) {
-        total += (uint32_t)got;
-        pos_ += (uint32_t)got;
-        consecutiveFailures = 0;
-        recoverFailures_ = 0;
-        continue;
-      }
-      if (pos_ >= size_) break;  // fim real do arquivo
-      if (++consecutiveFailures > 2 || !recover()) { readFailed_ = true; break; }
+    if (!f_ || !len) return 0;
+    uint8_t *d = (uint8_t *)data;
+    uint32_t got = 0;
+    int fails = 0;
+    while (got < len) {
+      const size_t r = f_.read(d + got, len - got);
+      if (r > 0) { got += (uint32_t)r; pos_ += (uint32_t)r; fails = 0; continue; }
+      if (pos_ >= size_) break;               // fim real do arquivo
+      if (++fails > 3 || !recover()) break;   // erro de SD: tenta recuperar
     }
-    return total;
+    return got;
   }
 
-  bool seek(int32_t offset, int direction) override {
-    int64_t target = offset;
-    if (direction == SEEK_CUR) target = (int64_t)pos_ + offset;
-    else if (direction == SEEK_END) target = (int64_t)size_ + offset;
-    if (target < 0 || target > (int64_t)size_) return false;
-    const uint32_t previous = pos_;
-    pos_ = (uint32_t)target;
+  bool seek(int32_t pos, int dir) override {
+    int64_t t = pos;
+    if (dir == SEEK_CUR) t = (int64_t)pos_ + pos;
+    else if (dir == SEEK_END) t = (int64_t)size_ + pos;
+    if (t < 0 || t > (int64_t)size_) return false;
+    pos_ = (uint32_t)t;
     if (f_ && f_.seek(pos_)) return true;
-    if (recover()) return true;
-    readFailed_ = true;
-    pos_ = previous;
-    return false;
+    return recover();
   }
 
-  bool close() override {
-    if (f_) f_.close();
-    fs_ = nullptr;
-    return true;
-  }
+  bool close() override { if (f_) f_.close(); return true; }
   bool isOpen() override { return (bool)f_; }
   uint32_t getSize() override { return size_; }
   uint32_t getPos() override { return pos_; }
-  bool readFailed() const { return readFailed_; }
 
 private:
-  bool reopenOn(fs::FS &filesystem) {
-    File candidate = filesystem.open(path_, FILE_READ);
-    if (!candidate) return false;
-    // Nunca continuar em arquivo diferente/alterado: valida tamanho e offset.
-    if ((uint32_t)candidate.size() != size_ || !candidate.seek(pos_)) {
-      candidate.close();
-      return false;
-    }
-    if (f_) f_.close();
-    f_ = std::move(candidate);
-    fs_ = &filesystem;
-    return true;
-  }
-
   bool recover() {
-    const uint32_t now = millis();
-    if (lastRecoverAt_ && now - lastRecoverAt_ < SD_STREAM_RETRY_MS) return false;
-    lastRecoverAt_ = now;
-    ++recoverFailures_;
-
-    if (fs_ == &SD || storageKind == STORAGE_SD) {
-      Serial.printf("SD read recovery %u at %lu/%lu\n",
-                    (unsigned)recoverFailures_, (unsigned long)pos_, (unsigned long)size_);
-      sdReady = mountSD();
-      if (sdReady && reopenOn(SD)) {
-        storageKind = STORAGE_SD;
-        ++sdMediaEpoch;
-        needRescan = true;
-        lastRemountAt = now;
-        lastSdProbeAt = now;
-        showToast(uiText(UI_SD_RECOVERED));
-        return true;
-      }
-      sdReady = false;
-      SD.end();
-      sdSPI.end();
-    }
-
-    // Se existe uma copia identica no LittleFS, retoma do mesmo offset.
-    if (internalReady && LittleFS.exists(path_) && reopenOn(LittleFS)) {
-      storageKind = STORAGE_INTERNAL;
-      ++sdMediaEpoch;
-      needRescan = true;
-      lastRemountAt = now;
-      showToast(uiText(UI_SD_DISCONNECTED));
-      Serial.println("Playback resumed from identical LittleFS copy");
-      return true;
-    }
-
-    Serial.printf("SD recovery failed at %lu/%lu\n",
-                  (unsigned long)pos_, (unsigned long)size_);
-    return false;
+    if (f_) f_.close();
+    if (storageKind != STORAGE_SD) return false;
+    sdRemount();
+    f_ = SD.open(path_, FILE_READ);
+    if (!f_) return false;
+    return f_.seek(pos_);
   }
 
   File f_;
-  fs::FS *fs_ = nullptr;
   char path_[PATH_SIZE] = {0};
   uint32_t size_ = 0;
   uint32_t pos_ = 0;
-  uint32_t lastRecoverAt_ = 0;
-  uint8_t recoverFailures_ = 0;
-  bool readFailed_ = false;
 };
+
 SdStreamSource *source = nullptr;
 AudioFileSourceBuffer *bufferedSource = nullptr;
 AudioGenerator *decoder = nullptr;
@@ -952,7 +749,6 @@ void markSettingsDirty() {
 
 void loadSettings() {
   prefs.begin("mp3player", true);
-  uiLanguage = constrain(prefs.getInt("lang", 0), 0, 8);
   volByMode[0] = constrain(prefs.getInt("vs", 80), 0, 100);
   volByMode[1] = constrain(prefs.getInt("vp", 30), 0, 100);
   outMode = constrain(prefs.getInt("om", 0), 0, 1);
@@ -984,7 +780,6 @@ void loadSettings() {
 void saveSettings() {
   prefs.begin("mp3player", false);
   volByMode[outMode] = volumePercent;
-  prefs.putInt("lang", uiLanguage);
   prefs.putInt("vs", volByMode[0]);
   prefs.putInt("vp", volByMode[1]);
   prefs.putInt("om", outMode);
@@ -1005,25 +800,14 @@ void saveSettings() {
 }
 
 const char *currentPresetName() {
-  static const UiTextId ids[NUM_PRESETS] = {
-    UI_PRESET_BALANCE, UI_PRESET_FLAT, UI_PRESET_BASS,
-    UI_PRESET_ROCK, UI_PRESET_VOCAL, UI_PRESET_ELECTRO
-  };
   for (int p = 0; p < NUM_PRESETS; ++p) {
     bool same = true;
     for (int i = 0; i < EQ_BANDS; ++i) {
       if (eqGain[i] != PRESETS[p][i]) { same = false; break; }
     }
-    if (same) return uiText(ids[p]);
+    if (same) return PRESET_NAMES[p];
   }
-  return uiText(UI_PRESET_PERSONAL);
-}
-
-const char *localizedThemeName(int index) {
-  static const UiTextId ids[THEME_COUNT] = {
-    UI_THEME_DARK, UI_THEME_MATRIX, UI_THEME_CYBER, UI_THEME_ICE, UI_THEME_AMBER
-  };
-  return uiText(ids[constrain(index, 0, THEME_COUNT - 1)]);
+  return "PERSONAL";
 }
 
 void applyPreset(int p) {
@@ -1031,28 +815,6 @@ void applyPreset(int p) {
   for (int i = 0; i < EQ_BANDS; ++i) eqGain[i] = PRESETS[p][i];
   configureDsp();
   markSettingsDirty();
-}
-
-// Buffer de leitura dimensionado pelo maior bloco contiguo disponivel.
-// O Cardputer ADV nao tem PSRAM; preservamos heap para decoder, display e sistema.
-void allocateAudioBuffer() {
-  if (sdAudioBuffer) { free(sdAudioBuffer); sdAudioBuffer = nullptr; }
-  sdAudioBufferSize = 0;
-  const size_t freeHeap = ESP.getFreeHeap();
-  const size_t maxBlock = ESP.getMaxAllocHeap();
-  const size_t candidates[] = {48 * 1024, 40 * 1024, 32 * 1024, 24 * 1024, 16 * 1024, 12 * 1024, 8 * 1024};
-  for (size_t candidate : candidates) {
-    if (candidate > SD_AUDIO_BUFFER_TARGET || candidate > maxBlock) continue;
-    if (freeHeap < candidate + 64 * 1024) continue;
-    uint8_t *buffer = (uint8_t *)malloc(candidate);
-    if (!buffer) continue;
-    sdAudioBuffer = buffer;
-    sdAudioBufferSize = candidate;
-    break;
-  }
-  Serial.printf("Audio RAM buffer: %u bytes | free=%u maxblk=%u\n",
-                (unsigned)sdAudioBufferSize, (unsigned)ESP.getFreeHeap(),
-                (unsigned)ESP.getMaxAllocHeap());
 }
 
 // ============================================================ metadados
@@ -1154,14 +916,13 @@ bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, boo
   uint32_t p = off + 2;
   const uint32_t end = off + len;
   uint8_t b[9];
-  for (int g = 0; g < 128 && p + 4 < end; ++g) {
+  for (int g = 0; g < 48 && p + 4 < end; ++g) {
     if (!f.seek(p) || f.read(b, 4) != 4) return false;
     if (b[0] != 0xFF) return false;
     const uint8_t m = b[1];
     if (m == 0xFF) { ++p; continue; }
     if (m == 0xD8 || (m >= 0xD0 && m <= 0xD7) || m == 0x01) { p += 2; continue; }
     const uint32_t seg = ((uint32_t)b[2] << 8) | b[3];
-    if (seg < 2 || p + 2 + seg > end) return false;
     if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
       if (f.read(b, 5) != 5) return false;
       h = (uint16_t)((b[1] << 8) | b[2]);
@@ -1174,20 +935,18 @@ bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, boo
   return false;
 }
 
-bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c,
-                  uint32_t maxBytes = COVER_MAX_BYTES) {
-  const uint32_t fileSize = (uint32_t)f.size();
-  if (len < 32 || len > maxBytes || off > fileSize || len > fileSize - off) return false;
+bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c) {
+  if (len < 32 || len > COVER_MAX_BYTES) return false;
   uint8_t b[24];
   if (!f.seek(off) || f.read(b, 24) != 24) return false;
   if (b[0] == 0xFF && b[1] == 0xD8) {
     bool prog = false;
     uint16_t w = 0, h = 0;
-    if (!jpegInfo(f, off, len, w, h, prog) || prog || (uint64_t)w * h > 2400000ULL) return false;
+    if (!jpegInfo(f, off, len, w, h, prog) || prog) return false;
     c.png = false; c.w = w; c.h = h;
   } else if (!memcmp(b, "\x89PNG\r\n\x1a\n", 8)) {
     const uint32_t w = be32(b + 16), h = be32(b + 20);
-    if (!w || !h || w > 2048 || h > 2048 || (uint64_t)w * h > 2400000ULL) return false;
+    if (!w || !h || w > 2048 || h > 2048 || len > 400UL * 1024UL) return false;
     c.png = true; c.w = (uint16_t)w; c.h = (uint16_t)h;
   } else {
     return false;
@@ -1440,13 +1199,8 @@ void findFolderCover(const char *path) {
   if (sl == dir) dir[1] = '\0'; else *sl = '\0';
   static char cachedDir[PATH_SIZE] = "\x01";
   static CoverRef cached;
-  static uint32_t cachedEpoch = 0;
-  static StorageKind cachedStorage = STORAGE_INTERNAL;
-  if (strcmp(cachedDir, dir) == 0 && cachedEpoch == sdMediaEpoch &&
-      cachedStorage == storageKind) { coverRef = cached; return; }
+  if (strcmp(cachedDir, dir) == 0) { coverRef = cached; return; }
   safeCopy(cachedDir, sizeof(cachedDir), dir);
-  cachedEpoch = sdMediaEpoch;
-  cachedStorage = storageKind;
   cached = CoverRef();
   static const char *const NAMES[] = {"cover", "folder", "front", "album", "albumart"};
   static const char *const EXTS[] = {"jpg", "jpeg", "png"};
@@ -1522,27 +1276,20 @@ private:
   uint32_t off_ = 0, len_ = 0, pos_ = 0;
 };
 
-bool drawImageRef(M5Canvas &canvas, const CoverRef &ref, int targetW, int targetH,
-                  uint16_t background = C_PANEL2) {
-  if (!ref.valid || !ref.w || !ref.h || targetW <= 0 || targetH <= 0) return false;
-  canvas.fillSprite(background);
-  CoverStream stream;
-  if (!stream.open(ref)) return false;
-  const float sx = (float)targetW / (float)ref.w;
-  const float sy = (float)targetH / (float)ref.h;
-  float scale = sx < sy ? sx : sy;
-  if (scale > 1.0f) scale = 1.0f;
-  const int drawW = max(1, (int)(ref.w * scale));
-  const int drawH = max(1, (int)(ref.h * scale));
-  const int x = (targetW - drawW) / 2;
-  const int y = (targetH - drawH) / 2;
-  if (ref.png) return canvas.drawPng(&stream, x, y, drawW, drawH, 0, 0, scale, scale);
-  return canvas.drawJpg(&stream, x, y, drawW, drawH, 0, 0, scale, scale);
-}
-
 bool decodeCover() {
   if (!coverCanvasReady || !coverRef.valid) return false;
-  return drawImageRef(coverCanvas, coverRef, COVER_PX, COVER_PX, C_PANEL2);
+  coverCanvas.fillSprite(C_PANEL2);
+  CoverStream cs;
+  if (!cs.open(coverRef)) return false;
+  const int big = coverRef.w > coverRef.h ? coverRef.w : coverRef.h;
+  float sc = (float)COVER_PX / (float)big;
+  if (sc > 1.0f) sc = 1.0f;
+  const int dw = (int)(coverRef.w * sc), dh = (int)(coverRef.h * sc);
+  const int x = (COVER_PX - dw) / 2, y = (COVER_PX - dh) / 2;
+  bool ok;
+  if (coverRef.png) ok = coverCanvas.drawPng(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
+  else ok = coverCanvas.drawJpg(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
+  return ok;
 }
 
 void prepareCoverState() {
@@ -1555,43 +1302,18 @@ void prepareCoverState() {
 struct Entry {
   char name[NAME_SIZE];
   bool isDir;
-  bool isImage;
 };
 Entry entries[MAX_ENTRIES];
 size_t entryCount = 0;
 char browseDir[DIR_SIZE] = "/";
 int selected = 0;
 int firstVisible = 0;
-
-struct ThumbnailCache {
-  char path[PATH_SIZE];
-  char title[NAME_SIZE];
-  char detail[48];
-  uint32_t mediaEpoch = 0;
-  bool loaded = false;
-  bool hasImage = false;
-};
-ThumbnailCache thumbnailCache[ROWS];
-int thumbnailWindow = -1;
-int thumbnailNextSlot = 0;
-uint32_t lastThumbnailStep = 0;
-
-CoverRef imageViewerRef;
-char imageViewerPath[PATH_SIZE] = {0};
-int imageViewerIndex = -1;
-
-void invalidateThumbnails();
-void thumbnailStep();
-bool openImageViewer(int entryIndex);
-void imageViewerKey(int key);
 bool scanning = false;
 bool validatingDirs = false;
 bool scanOverflow = false;
 bool scanFolderLimit = false;
 bool needRescan = false;
 uint32_t lastRemountAt = 0;
-uint32_t lastSdProbeAt = 0;
-constexpr uint32_t SD_AUTO_PROBE_INTERVAL_MS = 2500;
 File scanHandle;
 
 constexpr int DIR_WALK_DEPTH = 8;
@@ -1631,16 +1353,18 @@ void addEntry(File &e) {
   const char *base = slash ? slash + 1 : raw;
   if (!base[0] || base[0] == '.') return;
   const bool dir = e.isDirectory();
-  const bool image = !dir && isImageFile(base);
-  if (!dir && !isAudioFile(base) && !image) return;
+  if (!dir && !isAudioFile(base)) return;
   if (dir && strcasecmp(base, "System Volume Information") == 0) return;
   if (strlen(base) >= NAME_SIZE) return;
 
   Entry tmp;
   safeCopy(tmp.name, NAME_SIZE, base);
   tmp.isDir = dir;
-  tmp.isImage = image;
-  entries[entryCount++] = tmp;
+  size_t pos = entryCount;
+  while (pos > 0 && cmpEntry(entries[pos - 1], tmp) > 0) --pos;
+  memmove(&entries[pos + 1], &entries[pos], (entryCount - pos) * sizeof(Entry));
+  entries[pos] = tmp;
+  ++entryCount;
 }
 
 void closeWalkStack() {
@@ -1661,14 +1385,12 @@ void abortScan() {
 // Chamada pela fonte de audio quando o SD falha durante a reproducao.
 void sdRemount() {
   abortScan();
-  delay(30);
+  SD.end();
+  delay(60);
   sdReady = mountSD();
   lastRemountAt = millis();
-  lastSdProbeAt = lastRemountAt;
-  if (sdReady) storageKind = STORAGE_SD;
-  else if (internalReady) storageKind = STORAGE_INTERNAL;
   needRescan = true;
-  showToast(sdReady ? uiText(UI_SD_RECOVERED) : uiText(UI_SD_DISCONNECTED));
+  showToast(sdReady ? "SD RECUPERADO" : "SD DESCONECTADO");
 }
 
 bool startDirValidation(size_t index) {
@@ -1711,7 +1433,7 @@ void walkDirectoryStep() {
   if (!base || !base[0] || base[0] == '.') { child.close(); return; }
 
   if (!child.isDirectory()) {
-    const bool found = isBrowserMedia(base);
+    const bool found = isAudioFile(base);
     child.close();
     if (found) {
       walkFoundSong = true;
@@ -1743,13 +1465,8 @@ void walkDirectoryStep() {
   ++walkDepth;
 }
 
-int compareEntryQsort(const void *a, const void *b) {
-  return cmpEntry(*static_cast<const Entry *>(a), *static_cast<const Entry *>(b));
-}
-
 void finishScan() {
   if (scanHandle) scanHandle.close();
-  if (entryCount > 1) qsort(entries, entryCount, sizeof(Entry), compareEntryQsort);
   closeWalkStack();
   scanning = false;
   validatingDirs = false;
@@ -1766,14 +1483,13 @@ void finishScan() {
     reselectName[0] = '\0';
     ensureVisible();
   }
-  if (scanFolderLimit) showToast(uiText(UI_SCAN_FOLDER_LIMIT));
-  else if (scanOverflow) showToast(uiText(UI_SCAN_OVERFLOW));
+  if (scanFolderLimit) showToast("PASTA GRANDE: FILTRO PARCIAL");
+  else if (scanOverflow) showToast("LIMITE: 200 ITENS");
   if (screen == SCR_BROWSER) drawBrowser();
 }
 
 void beginScan(const char *path, const char *reselect = nullptr) {
   abortScan();
-  invalidateThumbnails();
   validationIndex = 0;
   entryCount = 0;
   selected = 0;
@@ -1787,7 +1503,7 @@ void beginScan(const char *path, const char *reselect = nullptr) {
   scanHandle = activeFS().open(browseDir);
   if (!scanHandle || !scanHandle.isDirectory()) {
     if (scanHandle) scanHandle.close();
-    showToast(uiText(UI_INVALID_FOLDER));
+    showToast("PASTA INVALIDA");
     if (screen == SCR_BROWSER) drawBrowser();
     return;
   }
@@ -1844,7 +1560,7 @@ void scanStep(uint32_t budgetMs) {
 void enterDir(const char *name) {
   char path[PATH_SIZE];
   if (!buildPath(path, sizeof(path), browseDir, name) || strlen(path) >= sizeof(browseDir)) {
-    showToast(uiText(UI_PATH_TOO_LONG));
+    showToast("CAMINHO LONGO");
     drawBrowser();
     return;
   }
@@ -1912,7 +1628,7 @@ int buildQueueFromBrowser(int entryIdx) {
   queueCount = 0;
   int chosen = -1;
   for (size_t i = 0; i < entryCount && queueCount < MAX_ENTRIES; ++i) {
-    if (entries[i].isDir || entries[i].isImage) continue;
+    if (entries[i].isDir) continue;
     if ((int)i == entryIdx) chosen = (int)queueCount;
     safeCopy(queueNames[queueCount], NAME_SIZE, entries[i].name);
     ++queueCount;
@@ -1933,23 +1649,8 @@ uint32_t seekDue = 0;
 int pendingSkip = 0;
 uint32_t skipDue = 0;
 
-void updateMediaClock() {
-  const uint32_t now = millis();
-  if (mediaClockLastMs == 0) {
-    mediaClockLastMs = now;
-    return;
-  }
-  const uint32_t delta = now - mediaClockLastMs;
-  mediaClockLastMs = now;
-  if (playing && !paused && fadeAction != FA_PAUSE) {
-    mediaClockSeconds += ((double)delta / 1000.0) * (double)playbackSpeed;
-  }
-}
-
 uint32_t elapsedSec() {
-  updateMediaClock();
-  if (mediaClockSeconds < 0.0) return 0;
-  return (uint32_t)mediaClockSeconds;
+  return startOffsetSec + (uint32_t)(gSamplesSubmitted / OUT_RATE);
 }
 
 bool canSeek() { return meta.fmt == FMT_MP3 && meta.durationSec >= 3; }
@@ -2050,8 +1751,7 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   if (!source || !source->open(path)) { stopPlayback(true); return false; }
   if (startByte > 0) source->seek((int32_t)startByte, SEEK_SET);
 
-  if (!sdAudioBuffer || sdAudioBufferSize < 8192) { stopPlayback(true); showToast(uiText(UI_AUDIO_BUFFER_LOW)); return false; }
-  bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sdAudioBufferSize);
+  bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sizeof(sdAudioBuffer));
   audioOutput = new (std::nothrow) AudioOut();
   decoder = makeDecoder(fmt);
   if (!bufferedSource || !audioOutput || !decoder) { stopPlayback(true); return false; }
@@ -2061,8 +1761,6 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   gFadeGain = natural ? 1.0f : 0.0f;  // fade-in curto, exceto na troca gapless
   if (!natural) { resetDsp(); gVolCur = gVolTarget; }
   gSamplesSubmitted = 0;
-  mediaClockSeconds = (double)startedAt;
-  mediaClockLastMs = millis();
 
   if (!decoder->begin(bufferedSource, audioOutput)) { stopPlayback(true); return false; }
 
@@ -2080,7 +1778,7 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
 
 void finishQueue() {
   stopPlayback(false);
-  showToast(uiText(UI_QUEUE_END));
+  showToast("FIM DA LISTA");
   if (screen == SCR_PLAYER) { screen = SCR_BROWSER; }
   redrawCurrent();
 }
@@ -2111,7 +1809,7 @@ bool advance(int dir, bool automatic, int steps = 1) {
     if (startTrack(order[orderPos], 0, true, automatic)) { redrawCurrent(); return true; }
   }
   stopPlayback(true);
-  showToast(uiText(UI_OPEN_FILE_ERROR));
+  showToast("ERRO AO ABRIR ARQUIVO");
   if (screen == SCR_PLAYER) screen = SCR_BROWSER;
   redrawCurrent();
   return false;
@@ -2129,7 +1827,7 @@ void requestSkip(int dir) {
   pendingSkip += dir;
   skipDue = millis() + 200;
   char t[24];
-  snprintf(t, sizeof(t), pendingSkip > 0 ? uiText(UI_NEXT_FMT) : uiText(UI_PREVIOUS_FMT), pendingSkip);
+  snprintf(t, sizeof(t), pendingSkip > 0 ? "PROXIMA +%d" : "ANTERIOR %d", pendingSkip);
   showToast(t);
 }
 
@@ -2153,11 +1851,11 @@ void previousOrRestart() {
 
 void seekBy(int delta) {
   if (!playing) return;
-  if (!canSeek()) { showToast(uiText(UI_SEEK_UNAVAILABLE)); return; }
+  if (!canSeek()) { showToast("BUSCA INDISPONIVEL"); return; }
   pendingSeek += delta;
   seekDue = millis() + 280;
   char t[24];
-  snprintf(t, sizeof(t), uiText(UI_SEEK_FMT), pendingSeek);
+  snprintf(t, sizeof(t), "BUSCA %+ds", pendingSeek);
   showToast(t);
 }
 
@@ -2175,7 +1873,6 @@ void seekStep() {
 
 void togglePause() {
   if (!playing) return;
-  updateMediaClock();
   if (paused) {
     paused = false;
     fadeAction = FA_NONE;
@@ -2206,7 +1903,7 @@ void changeVolume(int delta) {
   updateVolumeTarget();
   markSettingsDirty();
   char t[24];
-  snprintf(t, sizeof(t), uiText(UI_VOLUME_FMT), volumePercent);
+  snprintf(t, sizeof(t), "VOLUME %d%%", volumePercent);
   showToast(t);
   redrawCurrent();
 }
@@ -2248,10 +1945,10 @@ void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
   g.setTextColor(C_RED);
   g.drawString("MP3 PLAYER", 8, 2);
 
-  applyUiFont(g, true);
+  g.setFont(&fonts::Font0);
   if (batteryPercent >= 0 && batteryPercent <= 100) {
     char b[12];
-    snprintf(b, sizeof(b), uiText(UI_BATTERY_FMT), batteryPercent);
+    snprintf(b, sizeof(b), "BAT %d%%", batteryPercent);
     g.setTextColor(batteryPercent <= 15 ? C_RED : C_GREY);
     g.drawString(b, 66, 6);
   }
@@ -2308,106 +2005,68 @@ void drawBrowser() {
   drawGrid(g);
 
   char title[NAME_SIZE];
-  if (browseDir[1] == '\0')
-    safeCopy(title, sizeof(title), storageKind == STORAGE_SD ? uiText(UI_STORAGE_SD) : uiText(UI_STORAGE_INTERNAL));
+  if (browseDir[1] == '\0') safeCopy(title, sizeof(title), storageKind == STORAGE_SD ? "SD CARD" : "MEMORIA INTERNA");
   else {
     const char *base = strrchr(browseDir, '/');
     toAscii(base ? base + 1 : browseDir, title, sizeof(title));
   }
   drawHeader(g, title, C_CYAN);
-  applyUiFont(g);
+
+  g.setFont(&fonts::Font2);
   g.setTextSize(1);
-  constexpr int ROW_H = 34, Y0 = 23;
+  constexpr int ROW_H = 17, Y0 = 24;
 
   if (!storageReady()) {
     g.setTextColor(C_RED);
-    g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 10, 38);
+    g.drawString(storageKind == STORAGE_SD ? "MICROSD NAO ENCONTRADO" : "MEMORIA INTERNA INDISPONIVEL", 14, 40);
+    g.setFont(&fonts::Font0);
     g.setTextColor(C_GREY);
-    g.drawString(uiText(UI_STORAGE_KEYS), 10, 58);
+    g.drawString("M TROCA ARMAZENAMENTO | R ATUALIZA", 14, 62);
   } else if (scanning) {
     g.setTextColor(C_GREY);
-    char status[48];
-    snprintf(status, sizeof(status), validatingDirs ? uiText(UI_FILTERING) : uiText(UI_READING), (int)entryCount);
-    g.drawString(status, 10, 42);
+    char s[32];
+    snprintf(s, sizeof(s), validatingDirs ? "FILTRANDO PASTAS %d" : "LENDO PASTA... %d", (int)entryCount);
+    g.drawString(s, 14, 44);
   } else if (!entryCount) {
     g.setTextColor(C_GREY);
-    g.drawString(uiText(UI_EMPTY), 10, 42);
+    g.drawString("PASTA VAZIA (SEM AUDIO)", 14, 44);
   }
 
   if (!scanning) {
-    for (int row = 0; row < ROWS; ++row) {
-      const int idx = firstVisible + row;
+    for (int r = 0; r < ROWS; ++r) {
+      const int idx = firstVisible + r;
       if (idx >= (int)entryCount) break;
-      const int y = Y0 + row * ROW_H;
-      const Entry &entry = entries[idx];
-      const bool active = idx == selected;
+      const int y = Y0 + r * ROW_H;
+      const bool active = (idx == selected);
+      const Entry &e = entries[idx];
       if (active) {
-        g.fillRoundRect(6, y, 226, 32, 4, C_PANEL);
-        g.fillRect(6, y + 4, 3, 24, C_RED);
+        g.fillRoundRect(6, y, 224, 16, 3, C_PANEL);
+        g.fillRect(6, y + 2, 3, 12, C_RED);
+      }
+      const uint16_t ic = e.isDir ? C_YELLOW : C_CYAN;
+      if (e.isDir) {
+        g.fillRect(13, y + 4, 6, 2, ic);
+        g.fillRect(13, y + 6, 13, 8, ic);
       } else {
-        g.drawRoundRect(6, y, 226, 32, 4, C_DIM);
+        g.fillCircle(16, y + 11, 3, ic);
+        g.drawFastVLine(18, y + 3, 9, ic);
+        g.drawLine(18, y + 3, 22, y + 6, ic);
       }
-
-      char path[PATH_SIZE];
-      const bool pathOk = buildPath(path, sizeof(path), browseDir, entry.name);
-      const ThumbnailCache &cache = thumbnailCache[row];
-      const bool cacheMatch = pathOk && cache.loaded &&
-                              cache.mediaEpoch == sdMediaEpoch &&
-                              strcmp(cache.path, path) == 0;
-      const bool cachedImage = cacheMatch && cache.hasImage && thumbCanvasReady[row];
-      if (cachedImage) {
-        thumbCanvases[row]->pushSprite(11, y + 1);
-      } else {
-        g.fillRoundRect(11, y + 1, THUMB_PX + 2, THUMB_PX + 2, 3, C_PANEL2);
-        if (entry.isDir) {
-          g.fillRect(18, y + 12, 10, 3, C_YELLOW);
-          g.fillRect(18, y + 15, 19, 12, C_YELLOW);
-          g.fillRect(20, y + 10, 8, 3, C_YELLOW);
-        } else if (entry.isImage) {
-          g.drawRect(17, y + 7, 21, 19, C_CYAN);
-          g.drawLine(19, y + 24, 25, y + 17, C_CYAN);
-          g.drawLine(25, y + 17, 30, y + 22, C_CYAN);
-          g.fillCircle(32, y + 12, 2, C_YELLOW);
-        } else {
-          g.fillCircle(24, y + 17, 7, C_CYAN);
-          g.drawFastVLine(27, y + 7, 14, C_CYAN);
-          g.drawLine(27, y + 7, 34, y + 12, C_CYAN);
-        }
-      }
-
-      char name[NAME_SIZE], shown[NAME_SIZE], fit[NAME_SIZE];
-      if (cacheMatch && cache.title[0]) safeCopy(shown, sizeof(shown), cache.title);
-      else {
-        toAscii(entry.name, name, sizeof(name));
-        if (!entry.isDir) stripExt(name);
-        safeCopy(shown, sizeof(shown), name);
-      }
+      char shown[NAME_SIZE], fit[NAME_SIZE];
+      toAscii(e.name, shown, sizeof(shown));
+      if (!e.isDir) stripExt(shown);
       g.setFont(&fonts::Font2);
-      fitText(g, shown, 174, fit, sizeof(fit));
+      fitText(g, shown, 192, fit, sizeof(fit));
       g.setTextColor(active ? C_WHITE : C_GREY);
-      g.drawString(fit, 50, y + 5);
-
-      if (cacheMatch && cache.detail[0]) {
-        g.setFont(&fonts::Font0);
-        g.setTextColor(active ? C_CYAN : C_GREY);
-        char detail[48];
-        fitText(g, cache.detail, 174, detail, sizeof(detail));
-        g.drawString(detail, 50, y + 21);
-      } else if (entry.isImage) {
-        g.setFont(&fonts::Font0);
-        g.setTextColor(C_GREY);
-        g.drawString(uiText(UI_IMAGE_VIEW), 50, y + 21);
-      }
+      g.drawString(fit, 32, y);
     }
-
     if ((int)entryCount > ROWS) {
-      const int trackH = ROWS * ROW_H - 3;
-      g.fillRect(235, Y0, 3, trackH, C_DIM);
+      const int trackH = ROWS * ROW_H;
+      g.fillRect(234, Y0, 3, trackH, C_DIM);
       int thumbH = trackH * ROWS / (int)entryCount;
-      if (thumbH < 7) thumbH = 7;
-      const int maxStart = max(1, (int)entryCount - ROWS);
-      const int thumbY = Y0 + (trackH - thumbH) * firstVisible / maxStart;
-      g.fillRect(235, thumbY, 3, thumbH, C_RED);
+      if (thumbH < 8) thumbH = 8;
+      const int thumbY = Y0 + (trackH - thumbH) * firstVisible / ((int)entryCount - ROWS);
+      g.fillRect(234, thumbY, 3, thumbH, C_RED);
     }
   }
 
@@ -2424,207 +2083,32 @@ void drawBrowser() {
     g.setFont(&fonts::Font0);
     char t[12], d[12], line[32];
     formatTime(t, sizeof(t), elapsedSec());
-    if (meta.durationSec) {
-      formatTime(d, sizeof(d), meta.durationSec);
-      snprintf(line, sizeof(line), "%s / %s", t, d);
-    } else safeCopy(line, sizeof(line), t);
+    if (meta.durationSec) { formatTime(d, sizeof(d), meta.durationSec); snprintf(line, sizeof(line), "%s / %s", t, d); }
+    else safeCopy(line, sizeof(line), t);
     g.setTextColor(C_CYAN);
     g.drawString(line, 8, 125);
-    const char *state = (paused || fadeAction == FA_PAUSE) ? uiText(UI_PAUSED) : uiText(UI_PLAYING);
+    const char *st = (paused || fadeAction == FA_PAUSE) ? "PAUSADO" : "TOCANDO";
     g.setTextColor((paused || fadeAction == FA_PAUSE) ? C_YELLOW : C_GREY);
-    g.drawString(state, 232 - g.textWidth(state), 125);
+    g.drawString(st, 232 - g.textWidth(st), 125);
   } else {
     g.setFont(&fonts::Font0);
     g.setTextColor(C_GREY);
-    g.drawString(uiText(UI_BROWSER_KEYS1), 8, 101);
-    g.drawString(uiText(UI_BROWSER_KEYS2), 8, 113);
+    g.drawString("ENTER ABRE/TOCA   DEL PASTA ACIMA", 8, 101);
+    g.drawString("S AJUSTES  E EQ  R ATUALIZA  H AJUDA", 8, 113);
     if (entryCount) {
-      char count[20];
-      snprintf(count, sizeof(count), "%d/%d", selected + 1, (int)entryCount);
+      char c[20];
+      snprintf(c, sizeof(c), "%d/%d", selected + 1, (int)entryCount);
       g.setTextColor(C_CYAN);
-      g.drawString(count, 232 - g.textWidth(count), 125);
+      g.drawString(c, 232 - g.textWidth(c), 125);
     }
   }
   if (toastActive && millis() < toastUntil) {
     g.fillRect(0, 122, 240, 13, C_PANEL2);
     g.setFont(&fonts::Font0);
     g.setTextColor(C_YELLOW);
-    char toast[80];
-    fitText(g, toastText, 224, toast, sizeof(toast));
-    g.drawString(toast, 8, 125);
+    g.drawString(toastText, 8, 125);
   }
   ui.pushSprite(0, 0);
-}
-
-void invalidateThumbnails() {
-  thumbnailWindow = -1;
-  thumbnailNextSlot = 0;
-  for (int i = 0; i < ROWS; ++i) {
-    thumbnailCache[i] = ThumbnailCache();
-    if (thumbCanvasReady[i]) thumbCanvases[i]->fillSprite(C_PANEL2);
-  }
-}
-
-void thumbnailStep() {
-  if (screenOff || screen != SCR_BROWSER || scanning || playing || !storageReady()) return;
-  if (thumbnailWindow != firstVisible) {
-    thumbnailWindow = firstVisible;
-    thumbnailNextSlot = 0;
-    for (int i = 0; i < ROWS; ++i) thumbnailCache[i] = ThumbnailCache();
-  }
-  if (thumbnailNextSlot >= ROWS) return;
-  const uint32_t now = millis();
-  if (now - lastThumbnailStep < 90) return;
-  lastThumbnailStep = now;
-
-  const int slot = thumbnailNextSlot++;
-  const int index = firstVisible + slot;
-  if (index >= (int)entryCount) return;
-  const Entry &entry = entries[index];
-  if (entry.isDir || !thumbCanvasReady[slot]) return;
-
-  char path[PATH_SIZE];
-  if (!buildPath(path, sizeof(path), browseDir, entry.name)) return;
-  ThumbnailCache &cache = thumbnailCache[slot];
-  safeCopy(cache.path, sizeof(cache.path), path);
-  cache.mediaEpoch = sdMediaEpoch;
-  cache.loaded = false;
-  cache.hasImage = false;
-  cache.title[0] = '\0';
-  cache.detail[0] = '\0';
-
-  CoverRef image;
-  if (entry.isImage) {
-    File file = activeFS().open(path, FILE_READ);
-    if (file) {
-      safeCopy(gProbePath, sizeof(gProbePath), path);
-      const uint32_t size = (uint32_t)file.size();
-      inspectImage(file, 0, size, image, IMAGE_MAX_BYTES);
-      file.close();
-    }
-    safeCopy(cache.title, sizeof(cache.title), entry.name);
-    stripExt(cache.title);
-    safeCopy(cache.detail, sizeof(cache.detail), image.valid ? (image.png ? uiText(UI_IMAGE_PNG) : uiText(UI_IMAGE_JPEG)) : uiText(UI_IMAGE_UNSUPPORTED));
-  } else {
-    Meta preview;
-    // A busca de miniaturas nunca pode substituir a capa da faixa que ja esta tocando.
-    const CoverRef savedCover = coverRef;
-    char savedProbePath[PATH_SIZE];
-    safeCopy(savedProbePath, sizeof(savedProbePath), gProbePath);
-    probeMeta(path, formatOf(entry.name), preview);
-    image = coverRef;
-    coverRef = savedCover;
-    safeCopy(gProbePath, sizeof(gProbePath), savedProbePath);
-    if (preview.title[0]) safeCopy(cache.title, sizeof(cache.title), preview.title);
-    else {
-      safeCopy(cache.title, sizeof(cache.title), entry.name);
-      stripExt(cache.title);
-    }
-    if (preview.artist[0]) safeCopy(cache.detail, sizeof(cache.detail), preview.artist);
-    else {
-      const Fmt format = formatOf(entry.name);
-      safeCopy(cache.detail, sizeof(cache.detail), format == FMT_WAV ? uiText(UI_FORMAT_WAV) :
-               format == FMT_FLAC ? uiText(UI_FORMAT_FLAC) :
-               format == FMT_AAC ? uiText(UI_FORMAT_AAC) : uiText(UI_FORMAT_MP3));
-    }
-  }
-  if (image.valid) cache.hasImage = drawImageRef(*thumbCanvases[slot], image, THUMB_PX, THUMB_PX);
-  if (!cache.hasImage) thumbCanvases[slot]->fillSprite(C_PANEL2);
-  cache.loaded = true;
-  if (screen == SCR_BROWSER) drawBrowser();
-}
-
-void drawImageViewer() {
-  screen = SCR_IMAGE;
-  if (screenOff) return;
-  auto &g = ui;
-  g.fillSprite(C_BG);
-  drawGrid(g);
-  char title[NAME_SIZE];
-  safeCopy(title, sizeof(title), imageViewerPath);
-  const char *base = strrchr(title, '/');
-  if (base) memmove(title, base + 1, strlen(base + 1) + 1);
-  stripExt(title);
-  drawHeader(g, title, C_CYAN);
-
-  bool ok = false;
-  if (imageViewerRef.valid) {
-    CoverStream stream;
-    if (stream.open(imageViewerRef)) {
-      constexpr int VIEW_W = 236, VIEW_H = 87, VIEW_Y = 23;
-      const float sx = (float)VIEW_W / (float)imageViewerRef.w;
-      const float sy = (float)VIEW_H / (float)imageViewerRef.h;
-      float scale = sx < sy ? sx : sy;
-      if (scale > 1.0f) scale = 1.0f;
-      const int dw = max(1, (int)(imageViewerRef.w * scale));
-      const int dh = max(1, (int)(imageViewerRef.h * scale));
-      const int x = (240 - dw) / 2;
-      const int y = VIEW_Y + (VIEW_H - dh) / 2;
-      ok = imageViewerRef.png
-          ? g.drawPng(&stream, x, y, dw, dh, 0, 0, scale, scale)
-          : g.drawJpg(&stream, x, y, dw, dh, 0, 0, scale, scale);
-    }
-  }
-  g.fillRect(0, 113, 240, 22, C_PANEL2);
-  applyUiFont(g, true);
-  g.setTextColor(ok ? C_GREY : C_RED);
-  g.drawString(ok ? uiText(UI_IMAGE_KEYS) : uiText(UI_IMAGE_UNSUPPORTED), 6, 120);
-  if (imageViewerIndex >= 0 && entryCount) {
-    char count[20];
-    snprintf(count, sizeof(count), "%d/%d", imageViewerIndex + 1, (int)entryCount);
-    g.setTextColor(C_CYAN);
-    g.drawString(count, 232 - g.textWidth(count), 130);
-  }
-  ui.pushSprite(0, 0);
-}
-
-bool openImageViewer(int entryIndex) {
-  if (entryIndex < 0 || entryIndex >= (int)entryCount) return false;
-  const Entry &entry = entries[entryIndex];
-  if (!entry.isImage) return false;
-  char path[PATH_SIZE];
-  if (!buildPath(path, sizeof(path), browseDir, entry.name)) {
-    showToast(uiText(UI_INVALID_PATH));
-    return false;
-  }
-  File file = activeFS().open(path, FILE_READ);
-  if (!file) {
-    showToast(uiText(UI_OPEN_FILE_ERROR));
-    return false;
-  }
-  safeCopy(gProbePath, sizeof(gProbePath), path);
-  CoverRef ref;
-  const uint32_t size = (uint32_t)file.size();
-  const bool valid = inspectImage(file, 0, size, ref, IMAGE_MAX_BYTES);
-  file.close();
-  if (!valid) {
-    showToast(uiText(UI_IMAGE_UNSUPPORTED));
-    return false;
-  }
-  imageViewerRef = ref;
-  safeCopy(imageViewerPath, sizeof(imageViewerPath), path);
-  imageViewerIndex = entryIndex;
-  drawImageViewer();
-  return true;
-}
-
-void imageViewerKey(int key) {
-  if (key == K_TAB || key == K_DEL || key == '`') {
-    drawBrowser();
-    return;
-  }
-  int dir = 0;
-  if (key == ',' || key == ';') dir = -1;
-  else if (key == '/' || key == '.') dir = +1;
-  if (!dir || !entryCount) return;
-  int index = imageViewerIndex;
-  for (size_t tries = 0; tries < entryCount; ++tries) {
-    index += dir;
-    if (index < 0) index = (int)entryCount - 1;
-    if (index >= (int)entryCount) index = 0;
-    if (entries[index].isImage && openImageViewer(index)) return;
-  }
-  showToast(uiText(UI_IMAGE_UNSUPPORTED));
 }
 
 void drawLive() {
@@ -2655,23 +2139,23 @@ void drawLive() {
   } else {
     g.setTextColor(C_GREY);
     char sub[24];
-    snprintf(sub, sizeof(sub), uiText(UI_TRACK_FMT), (int)orderPos + 1, (int)queueCount);
+    snprintf(sub, sizeof(sub), "FAIXA %d/%d", (int)orderPos + 1, (int)queueCount);
     g.drawString(sub, 8, 18);
     char flags[16] = "";
-    if (opt.shuffle) strcat(flags, uiText(UI_SHUFFLE));
-    if (opt.repeat == 1) strcat(flags, uiText(UI_REPEAT));
-    else if (opt.repeat == 2) strcat(flags, "1x");
+    if (opt.shuffle) strcat(flags, "SHUF ");
+    if (opt.repeat == 1) strcat(flags, "REP");
+    else if (opt.repeat == 2) strcat(flags, "REP1");
     g.setTextColor(C_YELLOW);
     g.drawString(flags, 80, 18);
     if (sleepDeadline) {
       const int32_t rem = (int32_t)(sleepDeadline - millis());
       char z[12];
-      snprintf(z, sizeof(z), uiText(UI_SLEEP_FMT), (int)(rem > 0 ? rem / 60000 + 1 : 0));
+      snprintf(z, sizeof(z), "ZZ %dM", (int)(rem > 0 ? rem / 60000 + 1 : 0));
       g.setTextColor(C_ORANGE);
       g.drawString(z, 138, 18);
     }
     char rate[20];
-    snprintf(rate, sizeof(rate), "%s %.1fk %.2fx", FMT_NAMES[meta.fmt <= FMT_NONE ? meta.fmt : FMT_NONE], gSrcRate / 1000.0f, playbackSpeed);
+    snprintf(rate, sizeof(rate), "%s %.1f", FMT_NAMES[meta.fmt <= FMT_NONE ? meta.fmt : FMT_NONE], gSrcRate / 1000.0f);
     g.setTextColor(C_GREY);
     g.drawString(rate, 232 - g.textWidth(rate), 18);
   }
@@ -2701,7 +2185,7 @@ void drawLive() {
     if (!coverLoaded) {
       g.setFont(&fonts::Font0);
       g.setTextColor(C_GREY);
-      const char *msg = coverPending ? "..." : uiText(UI_NO_COVER);
+      const char *msg = coverPending ? "..." : "SEM CAPA";
       g.drawString(msg, 119 - g.textWidth(msg) / 2, 46);
     }
   } else if (opt.visual == 2) {
@@ -2772,12 +2256,12 @@ void drawPlayer() {
   g.fillSprite(C_BG);
   drawGrid(g);
   const bool p = paused || fadeAction == FA_PAUSE;
-  drawHeader(g, p ? uiText(UI_PLAYER_PAUSED) : uiText(UI_PLAYER_PLAYING), p ? C_YELLOW : C_CYAN);
+  drawHeader(g, p ? "PAUSADO" : "TOCANDO", p ? C_YELLOW : C_CYAN);
 
-  applyUiFont(g);
+  g.setFont(&fonts::Font0);
   g.setTextSize(1);
   g.setTextColor(C_GREY);
-  g.drawString(outMode ? uiText(UI_OUTPUT_HEADPHONE) : uiText(UI_OUTPUT_SPEAKER), 8, 117);
+  g.drawString(outMode ? "FON" : "ALT", 8, 117);
   g.drawRect(32, 116, 102, 9, C_GREY);
   g.fillRect(33, 117, volumePercent, 7, C_RED);
   char v[8];
@@ -2791,7 +2275,7 @@ void drawPlayer() {
   g.drawString(e, 232 - g.textWidth(e), 117);
 
   g.setTextColor(C_GREY);
-  g.drawString(uiText(UI_PLAYER_KEYS), 8, 127);
+  g.drawString("SPC PAUSA N/P FAIXA ,/ BUSCA TAB EQ", 8, 127);
 
   ui.pushSprite(0, 0);
   drawLive();
@@ -2803,7 +2287,7 @@ void drawEq() {
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
-  drawHeader(g, uiText(UI_EQ_TITLE), C_CYAN);
+  drawHeader(g, "EQUALIZADOR", C_CYAN);
 
   constexpr int CENTER_Y = 66, HALF = 26;
   for (int i = 0; i < EQ_BANDS; ++i) {
@@ -2811,7 +2295,7 @@ void drawEq() {
     const bool sel = (i == eqSelected);
     if (sel) g.drawRoundRect(cx - 20, 24, 40, 92, 4, C_RED);
 
-    applyUiFont(g);
+    g.setFont(&fonts::Font0);
     g.setTextColor(sel ? C_WHITE : C_GREY);
     g.drawString(EQ_LABELS[i], cx - g.textWidth(EQ_LABELS[i]) / 2, 29);
 
@@ -2831,97 +2315,37 @@ void drawEq() {
 
   g.setFont(&fonts::Font0);
   g.setTextColor(C_GREY);
-  g.drawString(uiText(UI_EQ_PRESET), 8, 119);
+  g.drawString("PRESET", 8, 119);
   g.setTextColor(C_CYAN);
   g.drawString(currentPresetName(), 50, 119);
   g.setTextColor(C_GREY);
-  g.drawString(uiText(UI_EQ_KEYS), 8, 127);
+  g.drawString("1-6 PRESET  0 ZERA  TAB VOLTA", 8, 127);
   ui.pushSprite(0, 0);
 }
 
-constexpr int SETTINGS_COUNT = 11;
-const char *const LANGUAGE_NAMES[9] = {
-  "ENGLISH", "PORTUGUES (BR)", "ESPANOL", "中文", "日本語",
-  "FRANCAIS", "DEUTSCH", "РУССКИЙ", "ITALIANO"
+constexpr int SETTINGS_COUNT = 10;
+const char *SETTING_LABELS[SETTINGS_COUNT] = {
+  "BRILHO", "TELA APAGA", "TIMER DE SONO", "AGITAR = PROXIMA",
+  "REPETIR", "ALEATORIO", "VISUALIZADOR", "TEMA", "REALCE DE SOM", "RESTAURAR PADROES"
 };
-const char *const SETTING_LABELS[9][SETTINGS_COUNT] = {
-  {"BRIGHTNESS","SCREEN TIMEOUT","SLEEP TIMER","SHAKE TO SKIP","REPEAT","SHUFFLE","VISUALIZER","THEME","SOUND ENHANCEMENT","LANGUAGE","RESTORE DEFAULTS"},
-  {"BRILHO","TELA APAGA","TIMER DE SONO","AGITAR = PROXIMA","REPETIR","ALEATORIO","VISUALIZADOR","TEMA","REALCE DE SOM","IDIOMA","RESTAURAR PADROES"},
-  {"BRILLO","APAGADO DE PANTALLA","TEMPORIZADOR","AGITAR PARA AVANZAR","REPETIR","ALEATORIO","VISUALIZADOR","TEMA","MEJORA DE SONIDO","IDIOMA","VALORES INICIALES"},
-  {"亮度","屏幕超时","睡眠定时器","摇动切歌","循环","随机播放","可视化","主题","声音增强","语言","恢复默认"},
-  {"明るさ","画面オフ","スリープタイマー","振って次の曲","リピート","シャッフル","ビジュアライザー","テーマ","サウンド強化","言語","初期設定に戻す"},
-  {"LUMINOSITE","VEILLE ECRAN","MINUTERIE","SECOUER POUR SUIVANT","REPETITION","ALEATOIRE","VISUALISEUR","THEME","AMPLIFICATION","LANGUE","REINITIALISER"},
-  {"HELLIGKEIT","BILDSCHIRM AUS","SLEEP-TIMER","SCHUETTELN = WEITER","WIEDERHOLEN","ZUFALL","VISUALISIERUNG","THEMA","KLANGVERBESSERUNG","SPRACHE","ZURUECKSETZEN"},
-  {"ЯРКОСТЬ","ТАЙМ-АУТ ЭКРАНА","ТАЙМЕР СНА","ВСТРЯХНУТЬ = ДАЛЕЕ","ПОВТОР","ПЕРЕМЕШАТЬ","ВИЗУАЛИЗАТОР","ТЕМА","УЛУЧШЕНИЕ ЗВУКА","ЯЗЫК","СБРОСИТЬ"},
-  {"LUMINOSITA","SPEGNIMENTO SCHERMO","SPEGNIMENTO MUSICA","SCUOTI PER AVANTI","RIPETI","CASUALE","VISUALIZZATORE","TEMA","MIGLIORIA AUDIO","LINGUA","RIPRISTINA"}
-};
-
-const char *uiLanguageName() { return LANGUAGE_NAMES[constrain(uiLanguage, 0, 8)]; }
-
-void applyUiFont(LovyanGFX &g, bool small) {
-  (void)small;
-  if (uiLanguage == 3) g.setFont(&fonts::efontCN_10);
-  else if (uiLanguage == 4) g.setFont(&fonts::efontJA_10);
-  else if (uiLanguage == 7) g.setFont(&fonts::DejaVu9);
-  else g.setFont(&fonts::Font0);
-}
-
-
-const char *localizedOn() {
-  static const char *v[9] = {"ON","LIGADO","ACTIVADO","开启","オン","ACTIVE","EIN","ВКЛ","ATTIVO"};
-  return v[constrain(uiLanguage, 0, 8)];
-}
-const char *localizedOff() {
-  static const char *v[9] = {"OFF","DESLIGADO","DESACTIVADO","关闭","オフ","DESACTIVE","AUS","ВЫКЛ","DISATTIVO"};
-  return v[constrain(uiLanguage, 0, 8)];
-}
-const char *localizedNever() {
-  static const char *v[9] = {"NEVER","NUNCA","NUNCA","永不","なし","JAMAIS","NIE","НИКОГДА","MAI"};
-  return v[constrain(uiLanguage, 0, 8)];
-}
-const char *localizedRepeat(int v) {
-  static const char *names[9][3] = {
-    {"OFF","ALL","ONE"},{"DESLIGADO","TODAS","UMA"},{"DESACTIVADO","TODAS","UNA"},
-    {"关闭","全部","单曲"},{"オフ","全曲","1曲"},{"DESACTIVE","TOUT","UN"},
-    {"AUS","ALLE","EINZELN"},{"ВЫКЛ","ВСЕ","ОДИН"},{"DISATTIVO","TUTTE","UNA"}
-  };
-  return names[constrain(uiLanguage,0,8)][constrain(v,0,2)];
-}
-const char *localizedVisual(int v) {
-  static const char *names[9][4] = {
-    {"BARS","MIRROR","WAVE","COVER"},{"BARRAS","ESPELHO","ONDA","CAPA"},{"BARRAS","ESPEJO","ONDA","PORTADA"},
-    {"柱状","镜像","波形","封面"},{"バー","ミラー","波形","カバー"},{"BARRES","MIROIR","ONDE","POCHETTE"},
-    {"BALKEN","SPIEGEL","WELLE","COVER"},{"СТОЛБЦЫ","ЗЕРКАЛО","ВОЛНА","ОБЛОЖКА"},{"BARRE","SPECCHIO","ONDA","COPERTINA"}
-  };
-  return names[constrain(uiLanguage,0,8)][constrain(v,0,3)];
-}
-const char *localizedEnhance(int v) {
-  static const char *names[9][3] = {
-    {"OFF","SOFT","STRONG"},{"DESLIGADO","SUAVE","FORTE"},{"DESACTIVADO","SUAVE","FUERTE"},
-    {"关闭","柔和","强劲"},{"オフ","弱","強"},{"DESACTIVE","DOUX","FORT"},
-    {"AUS","SANFT","STARK"},{"ВЫКЛ","МЯГКО","СИЛЬНО"},{"DISATTIVO","MORBIDO","FORTE"}
-  };
-  return names[constrain(uiLanguage,0,8)][constrain(v,0,2)];
-}
 
 void settingValue(int i, char *out, size_t n) {
   switch (i) {
     case 0: snprintf(out, n, "%d%%", opt.brightness); break;
     case 1:
       if (SCREEN_OFF_SEC[opt.screenOffIdx]) snprintf(out, n, "%ds", SCREEN_OFF_SEC[opt.screenOffIdx]);
-      else safeCopy(out, n, localizedNever());
+      else safeCopy(out, n, "NUNCA");
       break;
     case 2:
       if (SLEEP_MIN[sleepIdx]) snprintf(out, n, "%d MIN", SLEEP_MIN[sleepIdx]);
-      else safeCopy(out, n, localizedOff());
+      else safeCopy(out, n, "DESLIGADO");
       break;
-    case 3: safeCopy(out, n, imuOk ? (opt.shake ? localizedOn() : localizedOff()) : "N/A"); break;
-    case 4: safeCopy(out, n, localizedRepeat(opt.repeat)); break;
-    case 5: safeCopy(out, n, opt.shuffle ? localizedOn() : localizedOff()); break;
-    case 6: safeCopy(out, n, localizedVisual(opt.visual)); break;
-    case 7: safeCopy(out, n, localizedThemeName(themeIndex)); break;
-    case 8: safeCopy(out, n, localizedEnhance(opt.enhance)); break;
-    case 9: safeCopy(out, n, uiLanguageName()); break;
+    case 3: safeCopy(out, n, imuOk ? (opt.shake ? "LIGADO" : "DESLIGADO") : "N/D"); break;
+    case 4: safeCopy(out, n, REPEAT_NAMES[opt.repeat]); break;
+    case 5: safeCopy(out, n, opt.shuffle ? "LIGADO" : "DESLIGADO"); break;
+    case 6: safeCopy(out, n, VISUAL_NAMES[opt.visual]); break;
+    case 7: safeCopy(out, n, THEMES[themeIndex].name); break;
+    case 8: safeCopy(out, n, ENHANCE_NAMES[opt.enhance]); break;
     default: safeCopy(out, n, "ENTER"); break;
   }
 }
@@ -2932,53 +2356,83 @@ void drawSettings() {
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
-  drawHeader(g, SETTING_LABELS[constrain(uiLanguage, 0, 8)][9], C_CYAN);
-  applyUiFont(g, true);
+  drawHeader(g, "AJUSTES", C_CYAN);
+  g.setFont(&fonts::Font0);
   g.setTextSize(1);
   for (int i = 0; i < SETTINGS_COUNT; ++i) {
-    const int y = 22 + i * 9;
+    const int y = 25 + i * 10;
     const bool sel = (i == settingsSel);
-    if (sel) g.fillRoundRect(6, y - 1, 228, 10, 3, C_PANEL);
+    if (sel) g.fillRoundRect(6, y - 2, 228, 11, 3, C_PANEL);
     g.setTextColor(sel ? C_WHITE : C_GREY);
-    char label[28];
-    fitText(g, SETTING_LABELS[constrain(uiLanguage, 0, 8)][i], 128, label, sizeof(label));
-    g.drawString(label, 12, y);
+    g.drawString(SETTING_LABELS[i], 12, y);
     char v[24], shown[32];
     settingValue(i, v, sizeof(v));
     if (sel && i < SETTINGS_COUNT - 1) snprintf(shown, sizeof(shown), "< %s >", v);
     else safeCopy(shown, sizeof(shown), v);
     g.setTextColor(sel ? C_CYAN : C_GREY);
-    char valueFit[24];
-    fitText(g, shown, 82, valueFit, sizeof(valueFit));
-    g.drawString(valueFit, 228 - g.textWidth(valueFit), y);
+    g.drawString(shown, 228 - g.textWidth(shown), y);
   }
   g.setTextColor(C_GREY);
-  g.drawString(uiText(UI_SETTINGS_KEYS), 8, 127);
+  g.drawString("; . ESCOLHE   , / MUDA   ESC VOLTA", 8, 127);
   ui.pushSprite(0, 0);
 }
 
 void drawHelp() {
   screen = SCR_HELP;
   if (screenOff) return;
-
+  static const char *const pages[3][10] = {
+    {
+      "BIBLIOTECA / GERAL",
+      ";/. move item   ,// pagina",
+      "ENTER pasta ou comeca a fila",
+      "DEL sobe pasta  TAB abre player",
+      "SPACE pausa  N/P muda faixa",
+      "- / = volume  1-6 preset EQ",
+      "S ajustes  E equalizador",
+      "R atualiza SD  X para audio",
+      "G realce de som (off/suave/forte)",
+      "Formatos: MP3 WAV FLAC AAC",
+    },
+    {
+      "PLAYER",
+      "SPACE pausa | N proxima",
+      "P anterior / reinicia (>3s)",
+      ", / / busca -10s / +10s (MP3)",
+      "; / . volume +/- 5%",
+      "S aleatorio | R off/todas/uma",
+      "V barras/espelho/onda/capa",
+      "T timer sono | O alto-falante/fone",
+      "TAB/E equalizador | G realce",
+      "DEL ou ` volta a lista; X para",
+    },
+    {
+      "EQ / AJUSTES",
+      "EQ: , / troca banda",
+      "EQ: ; / . ganho +/-",
+      "EQ: 0 FLAT | 1-6 presets",
+      "AJUSTES: ; / . escolhe item",
+      "AJUSTES: , / / muda valor",
+      "ENTER muda / restaura padroes",
+      "TAB/DEL/` volta a tela anterior",
+      "Tela apagada: qualquer tecla acorda",
+      "H reinicia | TAB/DEL fecha ajuda",
+    },
+  };
 
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
   char title[24];
-  snprintf(title, sizeof(title), uiText(UI_HELP_PAGE_FMT), helpPage + 1, 3);
+  snprintf(title, sizeof(title), "TUTORIAL %d/3", helpPage + 1);
   drawHeader(g, title, C_CYAN);
-  applyUiFont(g, true);
+  g.setFont(&fonts::Font0);
   g.setTextSize(1);
   for (int i = 0; i < 10; ++i) {
     g.setTextColor(i == 0 ? C_RED : C_GREY);
-    const UiTextId id = (UiTextId)(UI_HELP_00 + helpPage * 10 + i);
-    char line[56];
-    fitText(g, uiText(id), 222, line, sizeof(line));
-    g.drawString(line, i == 0 ? 8 : 12, 26 + i * 10);
+    g.drawString(pages[helpPage][i], i == 0 ? 8 : 12, 26 + i * 10);
   }
   g.setTextColor(C_CYAN);
-  g.drawString(uiText(UI_HELP_FOOTER), 8, 127);
+  g.drawString("H PROXIMA  TAB/DEL/` FECHA", 8, 127);
   ui.pushSprite(0, 0);
 }
 
@@ -2989,11 +2443,14 @@ void redrawCurrent() {
     case SCR_EQ: drawEq(); break;
     case SCR_SETTINGS: drawSettings(); break;
     case SCR_HELP: drawHelp(); break;
-    case SCR_IMAGE: drawImageViewer(); break;
   }
 }
 
 // ============================================================ entrada
+constexpr int K_ENTER = 256;
+constexpr int K_TAB = 257;
+constexpr int K_DEL = 258;
+
 void stopAll() {
   stopPlayback(true);
   if (screen == SCR_PLAYER) screen = SCR_BROWSER;
@@ -3012,7 +2469,7 @@ bool mediaKey(int k) {
       configureDsp();
       markSettingsDirty();
       char t[28];
-      snprintf(t, sizeof(t), uiText(UI_SOUND_FMT), localizedEnhance(opt.enhance));
+      snprintf(t, sizeof(t), "REALCE: %s", ENHANCE_NAMES[opt.enhance]);
       showToast(t);
       redrawCurrent();
       return true;
@@ -3024,7 +2481,7 @@ bool mediaKey(int k) {
       updateVolumeTarget();
       markSettingsDirty();
       char t[28];
-      snprintf(t, sizeof(t), "%s %d%%", outMode ? uiText(UI_OUTPUT_HEADPHONE) : uiText(UI_OUTPUT_SPEAKER), volumePercent);
+      snprintf(t, sizeof(t), "%s %d%%", outMode ? "SAIDA: FONE" : "SAIDA: ALTO-FALANTE", volumePercent);
       showToast(t);
       redrawCurrent();
       return true;
@@ -3040,88 +2497,28 @@ bool mediaKey(int k) {
   return false;
 }
 
-// Reinicia o controlador SPI dedicado ao microSD antes de cada tentativa.
-void resetSdBus() {
-  SD.end();
-  sdSPI.end();
+bool mountSD() {
   pinMode(SD_CS, OUTPUT);
   digitalWrite(SD_CS, HIGH);
-  pinMode(SD_SCK, INPUT_PULLUP);
-  pinMode(SD_MISO, INPUT_PULLUP);
-  pinMode(SD_MOSI, INPUT_PULLUP);
-  delay(20);
-  digitalWrite(SD_CS, HIGH);
   sdSPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  delay(20);
-}
-
-bool mountSD() {
-  const uint32_t freqs[] = {400000, 800000, 1600000, 4000000};
+  const uint32_t freqs[] = {4000000, 2000000, 1000000};
   for (uint32_t f : freqs) {
-    resetSdBus();
     if (SD.begin(SD_CS, sdSPI, f, "/sd", 8, false)) {
-      File root = SD.open("/");
-      const bool usable = root && root.isDirectory() && SD.cardSize() > 0;
-      if (root) root.close();
-      if (usable) {
-        Serial.printf("SD montado: freq=%lu Hz, tipo=%u, bytes=%llu\\n", (unsigned long)f, (unsigned)SD.cardType(), (unsigned long long)SD.cardSize());
-        return true;
-      }
-      Serial.printf("SD montou mas nao passou na verificacao em %lu Hz\\n", (unsigned long)f);
-    } else {
-      Serial.printf("Falha SD.begin em %lu Hz\\n", (unsigned long)f);
+      Serial.printf("SD montado: freq=%lu Hz, tipo=%u, bytes=%llu\n", (unsigned long)f, (unsigned)SD.cardType(), (unsigned long long)SD.cardSize());
+      return true;
     }
+    Serial.printf("Falha SD.begin em %lu Hz\n", (unsigned long)f);
     SD.end();
-    delay(80);
+    delay(50);
   }
   return false;
 }
 
-// Procura o cartao continuamente sem interromper musica ou varredura.
-void sdAutoDetectStep() {
-  const uint32_t now = millis();
-  if (playing || scanning || now - lastSdProbeAt < SD_AUTO_PROBE_INTERVAL_MS) return;
-  lastSdProbeAt = now;
-
-  if (sdReady) {
-    File root = SD.open("/");
-    const bool healthy = root && root.isDirectory();
-    if (root) root.close();
-    if (healthy) return;
-
-    Serial.println("SD deixou de responder; reiniciando controlador");
-    sdReady = false;
-    SD.end();
-    sdSPI.end();
-    if (internalReady) {
-      storageKind = STORAGE_INTERNAL;
-      safeCopy(browseDir, sizeof(browseDir), "/");
-      beginScan(browseDir);
-    }
-    showToast(uiText(UI_SD_SEARCHING));
-    return;
-  }
-
-  Serial.println("Busca automatica pelo cartao SD...");
-  if (!mountSD()) {
-    if (storageKind == STORAGE_SD && internalReady) storageKind = STORAGE_INTERNAL;
-    return;
-  }
-
-  sdReady = true;
-  storageKind = STORAGE_SD;
-  safeCopy(browseDir, sizeof(browseDir), SD.exists("/music") ? "/music" : "/");
-  selected = 0;
-  firstVisible = 0;
-  showToast(uiText(UI_SD_RECONNECTED));
-  beginScan(browseDir);
-}
-
 void refreshBrowser() {
-  if (!playing && storageKind == STORAGE_SD) {
+  if (!playing && storageKind == STORAGE_SD) {  // remonta o cartao apenas se nada esta tocando
     abortScan();
+    SD.end();
     sdReady = mountSD();
-    if (!sdReady && internalReady) storageKind = STORAGE_INTERNAL;
   }
   char dir[DIR_SIZE];
   safeCopy(dir, sizeof(dir), browseDir);
@@ -3141,7 +2538,6 @@ void leaveToReturn() {
 
 void activateSelection() {
   if (!entryCount || selected < 0 || selected >= (int)entryCount) return;
-  if (entries[selected].isImage) { openImageViewer(selected); return; }
   if (entries[selected].isDir) {
     char name[NAME_SIZE];
     safeCopy(name, sizeof(name), entries[selected].name);
@@ -3155,7 +2551,6 @@ void activateSelection() {
 }
 
 void resetDefaults() {
-  uiLanguage = 0;
   opt = Options();
   themeIndex = 3;
   applyTheme();
@@ -3168,7 +2563,7 @@ void resetDefaults() {
   sleepDeadline = 0;
   applyShuffleChange();
   markSettingsDirty();
-  showToast(uiText(UI_DEFAULTS_RESTORED));
+  showToast("PADROES RESTAURADOS");
   drawSettings();
 }
 
@@ -3183,7 +2578,6 @@ void changeSetting(int item, int dir) {
     case 6: opt.visual = (opt.visual + dir + 4) % 4; break;
     case 7: themeIndex = (themeIndex + dir + THEME_COUNT) % THEME_COUNT; applyTheme(); break;
     case 8: opt.enhance = (opt.enhance + dir + 3) % 3; configureDsp(); break;
-    case 9: uiLanguage = (uiLanguage + dir + 9) % 9; break;
     default: break;
   }
   markSettingsDirty();
@@ -3198,26 +2592,26 @@ void browserKey(int k) {
     case 'e': returnScreen = SCR_BROWSER; drawEq(); return;
     case 'r': refreshBrowser(); return;
     case 'm':
-      if (playing) { showToast(uiText(UI_STOP_MUSIC_TO_SWITCH)); return; }
+      if (playing) { showToast("PARE A MUSICA PARA TROCAR"); return; }
       abortScan(); storageKind = (storageKind == STORAGE_SD) ? STORAGE_INTERNAL : STORAGE_SD;
       safeCopy(browseDir, sizeof(browseDir), "/"); selected = firstVisible = 0;
-      showToast(storageReady() ? (storageKind == STORAGE_SD ? uiText(UI_STORAGE_SWITCH_SD) : uiText(UI_STORAGE_SWITCH_INTERNAL)) : uiText(UI_STORAGE_UNAVAILABLE));
+      showToast(storageReady() ? (storageKind == STORAGE_SD ? "ARMAZENAMENTO: SD" : "ARMAZENAMENTO: INTERNO") : "ARMAZENAMENTO INDISPONIVEL");
       beginScan("/"); return;
     case 'c': {
-      if (storageKind != STORAGE_SD || !sdReady || !internalReady || entryCount == 0 || entries[selected].isDir) { showToast(uiText(UI_SELECT_FILE_SD)); return; }
+      if (storageKind != STORAGE_SD || !sdReady || !internalReady || entryCount == 0 || entries[selected].isDir) { showToast("SELECIONE ARQUIVO NO SD"); return; }
       char src[PATH_SIZE], dst[PATH_SIZE];
-      if (!buildPath(src, sizeof(src), browseDir, entries[selected].name)) { showToast(uiText(UI_INVALID_PATH)); return; }
+      if (!buildPath(src, sizeof(src), browseDir, entries[selected].name)) { showToast("CAMINHO INVALIDO"); return; }
       safeCopy(dst, sizeof(dst), src);
       char parent[PATH_SIZE]; safeCopy(parent, sizeof(parent), dst);
       for (char *q = parent + 1; *q; ++q) {
         if (*q == '/') { *q = 0; LittleFS.mkdir(parent); *q = '/'; }
       }
       File in = SD.open(src, FILE_READ); if (LittleFS.exists(dst)) LittleFS.remove(dst); File out = LittleFS.open(dst, FILE_WRITE);
-      if (!in || !out) { if (in) in.close(); if (out) out.close(); showToast(uiText(UI_COPY_FAILED)); return; }
+      if (!in || !out) { if (in) in.close(); if (out) out.close(); showToast("FALHA AO COPIAR"); return; }
       uint8_t buf[1024]; bool ok = true;
       while (in.available()) { size_t n = in.read(buf, sizeof(buf)); if (!n || out.write(buf, n) != n) { ok = false; break; } yield(); }
       in.close(); out.close();
-      showToast(uiText(ok ? UI_COPIED_INTERNAL : UI_COPY_ERROR)); return;
+      showToast(ok ? "COPIADO PARA MEMORIA INTERNA" : "ERRO NA COPIA"); return;
     }
     default: break;
   }
@@ -3231,16 +2625,16 @@ void browserKey(int k) {
 }
 
 void setPlaybackSpeed(float speed) {
-  updateMediaClock();
-  playbackSpeed = constrain(speed, 0.75f, 1.75f);
-  // Mantem a posicao/fase do fluxo e transiciona a taxa em 83 ms.
-  // O filtro anti-aliasing tambem muda por crossfade entre duas tabelas FIR.
-  configureResampler(rsSourceRate, playbackSpeed, false);
-  UiTextId modeId = UI_SPEED_NORMAL;
-  if (fabsf(playbackSpeed - 0.75f) < 0.001f) modeId = UI_SPEED_SLOWED;
-  else if (fabsf(playbackSpeed - 1.25f) < 0.001f) modeId = UI_SPEED_FAST;
-  else if (fabsf(playbackSpeed - 1.75f) < 0.001f) modeId = UI_SPEED_NIGHTCORE;
-  showToast(uiText(modeId));
+  playbackSpeed = constrain(speed, 0.75f, 1.50f);
+  // Reconfigura apenas a etapa do reamostrador. Nao reinicia decoder,
+  // arquivo ou fila do speaker; evita corte ao mudar velocidade.
+  rsActive = (fabsf(gSrcRate - (float)OUT_RATE) > 0.5f) ||
+             (fabsf(playbackSpeed - 1.0f) > 0.001f);
+  rsStep = (gSrcRate / (float)OUT_RATE) * playbackSpeed;
+  rsPhase = 0.0f;
+  char msg[28];
+  snprintf(msg, sizeof(msg), "VELOCIDADE: %.2fx", playbackSpeed);
+  showToast(msg);
 }
 
 void playerKey(int k) {
@@ -3253,7 +2647,7 @@ void playerKey(int k) {
     case '`': drawBrowser(); break;
     case '7': setPlaybackSpeed(0.75f); break;
     case '8': setPlaybackSpeed(1.25f); break;
-    case '9': setPlaybackSpeed(1.75f); break;
+    case '9': setPlaybackSpeed(1.50f); break;
     case '0': setPlaybackSpeed(1.00f); break;
     case ',': seekBy(-10); break;
     case '/': seekBy(+10); break;
@@ -3263,27 +2657,27 @@ void playerKey(int k) {
       opt.shuffle = !opt.shuffle;
       applyShuffleChange();
       markSettingsDirty();
-      showToast(uiText(opt.shuffle ? UI_SHUFFLE_ON : UI_SHUFFLE_OFF));
+      showToast(opt.shuffle ? "ALEATORIO: LIGADO" : "ALEATORIO: DESLIGADO");
       drawPlayer();
       break;
     case 'r':
       opt.repeat = (opt.repeat + 1) % 3;
       markSettingsDirty();
-      snprintf(t, sizeof(t), uiText(UI_REPEAT_FMT), localizedRepeat(opt.repeat));
+      snprintf(t, sizeof(t), "REPETIR: %s", REPEAT_NAMES[opt.repeat]);
       showToast(t);
       drawPlayer();
       break;
     case 'v':
       opt.visual = (opt.visual + 1) % 4;
       markSettingsDirty();
-      snprintf(t, sizeof(t), uiText(UI_VISUAL_FMT), localizedVisual(opt.visual));
+      snprintf(t, sizeof(t), "VISUAL: %s", VISUAL_NAMES[opt.visual]);
       showToast(t);
       break;
     case 't':
       sleepIdx = (sleepIdx + 1) % 5;
       setSleepTimer();
-      if (SLEEP_MIN[sleepIdx]) snprintf(t, sizeof(t), uiText(UI_SLEEP_FMT), SLEEP_MIN[sleepIdx]);
-      else safeCopy(t, sizeof(t), uiText(UI_SLEEP_OFF));
+      if (SLEEP_MIN[sleepIdx]) snprintf(t, sizeof(t), "SONO: %d MIN", SLEEP_MIN[sleepIdx]);
+      else safeCopy(t, sizeof(t), "SONO: DESLIGADO");
       showToast(t);
       break;
     default: break;
@@ -3324,7 +2718,6 @@ void settingsKey(int k) {
 void onKey(int k) {
   if (k >= 'A' && k <= 'Z') k += 32;
 
-  if (screen == SCR_IMAGE) { imageViewerKey(k); return; }
   if (screen == SCR_HELP) {
     if (k == 'h') {
       helpPage = (helpPage + 1) % 3;
@@ -3421,16 +2814,7 @@ void pollShake() {
 void decodeStep() {
   if (!playing || paused || !decoder) return;
   if (!trackEndPending) decodeSlice(8);  // fatia curta: UI e teclado nunca ficam presos
-  if (trackEndPending) {
-    trackEndPending = false;
-    if (source && source->readFailed()) {
-      showToast(uiText(UI_READ_ERROR));
-      advance(+1, true);
-      return;
-    }
-    onTrackEnded();
-    return;
-  }
+  if (trackEndPending) { trackEndPending = false; onTrackEnded(); return; }
   if (audioOutput && audioOutput->isFull()) delay(2);
 
   // anti-travamento: sem progresso = arquivo ruim/SD com problema
@@ -3442,10 +2826,10 @@ void decodeStep() {
     lastProgress = millis();
     if (stallRetries == 0 && canSeek()) {  // 1a tentativa: reabre no mesmo ponto
       stallRetries = 1;
-      showToast(uiText(UI_RECOVERING));
+      showToast("RECUPERANDO...");
       if (startTrack(order[orderPos], elapsedSec(), false, false)) { redrawCurrent(); return; }
     }
-    showToast(uiText(UI_READ_ERROR));
+    showToast("ERRO DE LEITURA");
     advance(+1, true);
   }
 }
@@ -3530,9 +2914,6 @@ void housekeeping() {
     if (storageReady()) beginScan(browseDir);
   }
 
-  // Busca o cartao em segundo plano e volta para SD quando ele reaparecer.
-  sdAutoDetectStep();
-
   if (sleepDeadline && (int32_t)(now - sleepDeadline) >= 0) {
     sleepDeadline = 0;
     sleepIdx = 0;
@@ -3582,10 +2963,6 @@ void setup() {
   if (!live.createSprite(240, 90)) Serial.println("ERRO: sprite live sem memoria");
   coverCanvas.setColorDepth(16);
   coverCanvasReady = coverCanvas.createSprite(COVER_PX, COVER_PX);
-  for (int i = 0; i < ROWS; ++i) {
-    thumbCanvases[i]->setColorDepth(16);
-    thumbCanvasReady[i] = thumbCanvases[i]->createSprite(THUMB_PX, THUMB_PX);
-  }
   if (!coverCanvasReady) Serial.println("AVISO: capa indisponivel (sem memoria)");
 
   // Speaker: 44.1 kHz nativo, mais DMA, tarefa de audio no core 0
@@ -3608,7 +2985,6 @@ void setup() {
   batteryPercent = M5Cardputer.Power.getBatteryLevel();
   lastActivity = millis();
 
-  allocateAudioBuffer();
   internalReady = LittleFS.begin(false);
   sdReady = mountSD();
   storageKind = sdReady ? STORAGE_SD : STORAGE_INTERNAL;
@@ -3630,7 +3006,6 @@ void loop() {
   scanStep(4);
   handleKeyboard();
   coverStep();
-  thumbnailStep();
   pollShake();
   housekeeping();
   ledUpdate();
