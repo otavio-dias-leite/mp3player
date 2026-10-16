@@ -113,4 +113,5 @@ enum UiTextId {
   UI_HELP_29, UI_TEXT_COUNT
 };
 const char *uiText(UiTextId id);
-void applyUiFont(LovyanGFX &g, bool small = false);
+void applyUiFont(LovyanGFX &g, bool small);
+inline void applyUiFont(LovyanGFX &g) { applyUiFont(g, false); }
