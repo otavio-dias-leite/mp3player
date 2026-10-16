@@ -176,13 +176,9 @@ struct Options {
 
 const int SCREEN_OFF_SEC[4] = {0, 15, 30, 60};
 const int SLEEP_MIN[5] = {0, 15, 30, 60, 90};
-const char *REPEAT_NAMES[3] = {"OFF", "ALL", "ONE"};
-const char *VISUAL_NAMES[4] = {"BARS", "MIRROR", "WAVE", "COVER"};
-const char *ENHANCE_NAMES[3] = {"OFF", "SOFT", "STRONG"};
 
 const char *EQ_LABELS[EQ_BANDS] = {"60", "250", "1K", "4K", "12K"};
 const float EQ_FREQS[EQ_BANDS] = {60.0f, 250.0f, 1000.0f, 4000.0f, 12000.0f};
-const char *PRESET_NAMES[NUM_PRESETS] = {"BALANCE", "FLAT", "BASS", "ROCK", "VOCAL", "ELETRO"};
 const int8_t PRESETS[NUM_PRESETS][EQ_BANDS] = {
   { 3,  1,  0,  2,  3},
   { 0,  0,  0,  0,  0},
@@ -2217,7 +2213,7 @@ void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
   g.setTextColor(C_RED);
   g.drawString("MP3 PLAYER", 8, 2);
 
-  g.setFont(&fonts::Font0);
+  applyUiFont(g, true);
   if (batteryPercent >= 0 && batteryPercent <= 100) {
     char b[12];
     snprintf(b, sizeof(b), uiText(UI_BATTERY_FMT), batteryPercent);
@@ -2931,7 +2927,7 @@ void drawHelp() {
   char title[24];
   snprintf(title, sizeof(title), uiText(UI_HELP_PAGE_FMT), helpPage + 1, 3);
   drawHeader(g, title, C_CYAN);
-  g.setFont(&fonts::Font0);
+  applyUiFont(g, true);
   g.setTextSize(1);
   for (int i = 0; i < 10; ++i) {
     g.setTextColor(i == 0 ? C_RED : C_GREY);
