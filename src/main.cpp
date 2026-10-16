@@ -147,6 +147,7 @@ bool sdReady = false;
 bool internalReady = false;
 enum StorageKind : uint8_t { STORAGE_SD, STORAGE_INTERNAL };
 StorageKind storageKind = STORAGE_SD;
+uint32_t sdMediaEpoch = 1;
 fs::FS &activeFS() { return storageKind == STORAGE_SD ? (fs::FS &)SD : (fs::FS &)LittleFS; }
 bool storageReady() { return storageKind == STORAGE_SD ? sdReady : internalReady; }
 bool playing = false;   // decoder ativo (inclui pausado)
@@ -1223,8 +1224,13 @@ void findFolderCover(const char *path) {
   if (sl == dir) dir[1] = '\0'; else *sl = '\0';
   static char cachedDir[PATH_SIZE] = "\x01";
   static CoverRef cached;
-  if (strcmp(cachedDir, dir) == 0) { coverRef = cached; return; }
+  static uint32_t cachedEpoch = 0;
+  static StorageKind cachedStorage = STORAGE_INTERNAL;
+  if (strcmp(cachedDir, dir) == 0 && cachedEpoch == sdMediaEpoch &&
+      cachedStorage == storageKind) { coverRef = cached; return; }
   safeCopy(cachedDir, sizeof(cachedDir), dir);
+  cachedEpoch = sdMediaEpoch;
+  cachedStorage = storageKind;
   cached = CoverRef();
   static const char *const NAMES[] = {"cover", "folder", "front", "album", "albumart"};
   static const char *const EXTS[] = {"jpg", "jpeg", "png"};
@@ -1347,7 +1353,6 @@ bool scanFolderLimit = false;
 bool needRescan = false;
 uint32_t lastRemountAt = 0;
 uint32_t lastSdProbeAt = 0;
-uint32_t sdMediaEpoch = 1;
 constexpr uint32_t SD_AUTO_PROBE_INTERVAL_MS = 2500;
 File scanHandle;
 
