@@ -1,6 +1,6 @@
 /*
- * JOHNNY 3.0 - MP3 player para M5Stack Cardputer ADV
- * Versao 3.0 do projeto JOHNNY
+ * MP3 PLAYER - MP3 player para M5Stack Cardputer ADV
+ * Versao 5.0
  *
  * v5.0: filtra pastas sem MP3 (busca recursiva em fatias), mostra capa JPEG
  * embutida em ID3 APIC no modo CAPA, corrige verificacao de caminho e colore
@@ -8,7 +8,7 @@
  *
  * Dependencias: M5Cardputer (M5Unified/M5GFX) e ESP8266Audio (earlephilhower)
  * Codec nesta versao: MP3 (inclui VBR); capas ID3 APIC JPEG/PNG ate 24 KB.
- * Pasta do sketch: johnny_mp3/johnny_mp3.ino
+ * Pasta do sketch: MP3_Player/MP3_Player.ino
  *
  * RECURSOS
  *  - Navegador de pastas: exibe apenas diretorios com MP3 (inclusive em
@@ -51,7 +51,7 @@
 #include <AudioFileSourceBuffer.h>
 #include <AudioGeneratorMP3.h>
 
-#define JOHNNY_VERSION "3.0"
+#define MP3PLAYER_VERSION "5.0"
 
 namespace {
 
@@ -65,15 +65,15 @@ constexpr int SD_MOSI = 14;
 constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
   return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
-constexpr uint16_t C_BG      = rgb(8, 6, 10);
-constexpr uint16_t C_RED     = rgb(255, 40, 60);
-constexpr uint16_t C_DARKRED = rgb(60, 8, 18);
-constexpr uint16_t C_PANEL   = rgb(40, 12, 20);
-constexpr uint16_t C_PANEL2  = rgb(18, 8, 12);
-constexpr uint16_t C_DIM     = rgb(34, 22, 28);
+uint16_t C_BG = rgb(8, 6, 10);
+uint16_t C_RED = rgb(255, 40, 60);
+uint16_t C_DARKRED = rgb(60, 8, 18);
+uint16_t C_PANEL = rgb(40, 12, 20);
+uint16_t C_PANEL2 = rgb(18, 8, 12);
+uint16_t C_DIM = rgb(34, 22, 28);
 constexpr uint16_t C_WHITE   = rgb(255, 255, 255);
 constexpr uint16_t C_GREY    = rgb(150, 150, 160);
-constexpr uint16_t C_CYAN    = rgb(0, 230, 255);
+uint16_t C_CYAN = rgb(255, 40, 60);
 constexpr uint16_t C_BLUE    = rgb(70, 120, 255);
 constexpr uint16_t C_MAGENTA = rgb(255, 70, 190);
 constexpr uint16_t C_ORANGE  = rgb(255, 140, 0);
@@ -155,6 +155,33 @@ uint32_t lastBatteryRead = 0;
 bool settingsDirty = false;
 uint32_t settingsChangedAt = 0;
 Preferences prefs;
+
+struct ThemePalette {
+  const char *name;
+  uint8_t r, g, b;
+  uint8_t darkR, darkG, darkB;
+  uint8_t panelR, panelG, panelB;
+  uint8_t panel2R, panel2G, panel2B;
+  uint8_t dimR, dimG, dimB;
+};
+const ThemePalette THEMES[] = {
+  {"DARK RED",   255, 45, 65,  60, 8, 18,  40, 12, 20,  18, 8, 12,  34, 22, 28},
+  {"MATRIX",      55, 255, 105,  4, 48, 18,  8, 34, 16,  3, 16, 8,  15, 48, 25},
+  {"CYBERPUNK",  205, 75, 255,  48, 12, 72,  38, 13, 58,  18, 7, 28,  48, 28, 62},
+  {"ICE BLUE",     0, 215, 255,  5, 32, 62,  8, 28, 48,  5, 15, 28,  20, 45, 65},
+  {"AMBER",      255, 165, 45,  62, 32, 5,  48, 27, 8,  20, 13, 5,  52, 38, 20}
+};
+constexpr int THEME_COUNT = sizeof(THEMES) / sizeof(THEMES[0]);
+int themeIndex = 0;
+
+void applyTheme() {
+  const ThemePalette &t = THEMES[constrain(themeIndex, 0, THEME_COUNT - 1)];
+  C_RED = C_CYAN = rgb(t.r, t.g, t.b);
+  C_DARKRED = rgb(t.darkR, t.darkG, t.darkB);
+  C_PANEL = rgb(t.panelR, t.panelG, t.panelB);
+  C_PANEL2 = rgb(t.panel2R, t.panel2G, t.panel2B);
+  C_DIM = rgb(t.dimR, t.dimG, t.dimB);
+}
 
 bool screenOff = false;
 uint32_t lastActivity = 0;
@@ -418,7 +445,7 @@ bool submitBlock() {
   return true;
 }
 
-class JohnnyAudioOutput final : public AudioOutput {
+class Mp3AudioOutput final : public AudioOutput {
 public:
   bool begin() override {
     gFill = 0;
@@ -489,7 +516,7 @@ private:
 AudioFileSourceSD *source = nullptr;
 AudioFileSourceBuffer *bufferedSource = nullptr;
 AudioGeneratorMP3 *decoder = nullptr;
-JohnnyAudioOutput *audioOutput = nullptr;
+Mp3AudioOutput *audioOutput = nullptr;
 
 // ============================================================ configuracoes
 void applyBrightness() {
@@ -502,7 +529,7 @@ void markSettingsDirty() {
 }
 
 void loadSettings() {
-  prefs.begin("johnny4", true);
+  prefs.begin("mp3player", true);
   volByMode[0] = constrain(prefs.getInt("vs", 80), 0, 100);
   volByMode[1] = constrain(prefs.getInt("vp", 30), 0, 100);
   outMode = constrain(prefs.getInt("om", 0), 0, 1);
@@ -513,15 +540,17 @@ void loadSettings() {
   opt.repeat = constrain(prefs.getInt("rp", 0), 0, 2);
   opt.shuffle = constrain(prefs.getInt("sf", 0), 0, 1);
   opt.visual = constrain(prefs.getInt("vz", 0), 0, 3);
-  for (int i = 0; i < EQ_BANDS; ++i) {
+  themeIndex = constrain(prefs.getInt("th", 0), 0, THEME_COUNT - 1);
+  for (int i = i < EQ_BANDS; ++i) {
     char key[3] = {'g', (char)('0' + i), 0};
     eqGain[i] = constrain(prefs.getInt(key, eqGain[i]), -EQ_LIMIT, EQ_LIMIT);
   }
   prefs.end();
+  applyTheme();
 }
 
 void saveSettings() {
-  prefs.begin("johnny4", false);
+  prefs.begin("mp3player", false);
   volByMode[outMode] = volumePercent;
   prefs.putInt("vs", volByMode[0]);
   prefs.putInt("vp", volByMode[1]);
@@ -532,6 +561,7 @@ void saveSettings() {
   prefs.putInt("rp", opt.repeat);
   prefs.putInt("sf", opt.shuffle);
   prefs.putInt("vz", opt.visual);
+  prefs.putInt("th", themeIndex);
   for (int i = 0; i < EQ_BANDS; ++i) {
     char key[3] = {'g', (char)('0' + i), 0};
     prefs.putInt(key, eqGain[i]);
@@ -1158,7 +1188,7 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   if (startByte > 0) source->seek((int32_t)startByte, SEEK_SET);
 
   bufferedSource = new (std::nothrow) AudioFileSourceBuffer(source, sdAudioBuffer, sizeof(sdAudioBuffer));
-  audioOutput = new (std::nothrow) JohnnyAudioOutput();
+  audioOutput = new (std::nothrow) Mp3AudioOutput();
   decoder = new (std::nothrow) AudioGeneratorMP3();
   if (!bufferedSource || !audioOutput || !decoder) { stopPlayback(true); return false; }
 
@@ -1285,7 +1315,7 @@ void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
   g.setTextSize(1);
   g.setFont(&fonts::Font2);
   g.setTextColor(C_RED);
-  g.drawString("JOHNNY", 8, 2);
+  g.drawString("MP3 PLAYER", 8, 2);
 
   g.setFont(&fonts::Font0);
   if (batteryPercent >= 0 && batteryPercent <= 100) {
@@ -1306,17 +1336,15 @@ void drawSplash() {
   d.setFont(&fonts::Font2);
   d.setTextSize(2);
   d.setTextColor(C_RED);
-  const char *l1 = "WAKE FUCK UP";
-  const char *l2 = "SAMURAI";
-  d.drawString(l1, (240 - d.textWidth(l1)) / 2, 22);
-  d.drawString(l2, (240 - d.textWidth(l2)) / 2, 58);
+  const char *l1 = "MP3 PLAYER";
+  d.drawString(l1, (240 - d.textWidth(l1)) / 2, 35);
   d.setTextSize(1);
-  d.drawFastHLine(18, 100, 204, C_RED);
+  d.drawFastHLine(18, 82, 204, C_RED);
   d.setFont(&fonts::Font0);
   d.setTextColor(C_GREY);
   char v[28];
-  snprintf(v, sizeof(v), "JOHNNY MP3 ADV %s", JOHNNY_VERSION);
-  d.drawString(v, (240 - d.textWidth(v)) / 2, 110);
+  snprintf(v, sizeof(v), "CARDPUTER ADV  |  %s", MP3PLAYER_VERSION);
+  d.drawString(v, (240 - d.textWidth(v)) / 2, 94);
 }
 
 void formatTime(char *out, size_t n, uint32_t secs) {
@@ -1654,10 +1682,10 @@ void drawEq() {
   ui.pushSprite(0, 0);
 }
 
-constexpr int SETTINGS_COUNT = 8;
+constexpr int SETTINGS_COUNT = 9;
 const char *SETTING_LABELS[SETTINGS_COUNT] = {
   "BRILHO", "TELA APAGA", "TIMER DE SONO", "AGITAR = PROXIMA",
-  "REPETIR", "ALEATORIO", "VISUALIZADOR", "RESTAURAR PADROES"
+  "REPETIR", "ALEATORIO", "VISUALIZADOR", "TEMA", "RESTAURAR PADROES"
 };
 
 void settingValue(int i, char *out, size_t n) {
@@ -1675,6 +1703,7 @@ void settingValue(int i, char *out, size_t n) {
     case 4: safeCopy(out, n, REPEAT_NAMES[opt.repeat]); break;
     case 5: safeCopy(out, n, opt.shuffle ? "LIGADO" : "DESLIGADO"); break;
     case 6: safeCopy(out, n, VISUAL_NAMES[opt.visual]); break;
+    case 7: safeCopy(out, n, THEMES[themeIndex].name); break;
     default: safeCopy(out, n, "ENTER"); break;
   }
 }
@@ -1688,9 +1717,9 @@ void drawSettings() {
   g.setFont(&fonts::Font0);
   g.setTextSize(1);
   for (int i = 0; i < SETTINGS_COUNT; ++i) {
-    const int y = 26 + i * 12;
+    const int y = 24 + i * 11;
     const bool sel = (i == settingsSel);
-    if (sel) g.fillRoundRect(6, y - 2, 228, 12, 3, C_PANEL);
+    if (sel) g.fillRoundRect(6, y - 2, 228, 11, 3, C_PANEL);
     g.setTextColor(sel ? C_WHITE : C_GREY);
     g.drawString(SETTING_LABELS[i], 12, y);
     char v[24], shown[32];
@@ -1863,6 +1892,8 @@ void activateSelection() {
 
 void resetDefaults() {
   opt = Options();
+  themeIndex = 0;
+  applyTheme();
   volByMode[0] = 80; volByMode[1] = 30; outMode = 0;
   volumePercent = 80;
   updateVolumeTarget();
@@ -1885,6 +1916,7 @@ void changeSetting(int item, int dir) {
     case 4: opt.repeat = (opt.repeat + dir + 3) % 3; break;
     case 5: opt.shuffle = !opt.shuffle; applyShuffleChange(); break;
     case 6: opt.visual = (opt.visual + dir + 4) % 4; break;
+    case 7: themeIndex = (themeIndex + dir + THEME_COUNT) % THEME_COUNT; applyTheme(); break;
     default: break;
   }
   markSettingsDirty();
@@ -2123,21 +2155,25 @@ void fadeStep() {
 // LED RGB do ADV (GPIO21): vermelho pulsando com os graves.
 void ledUpdate() {
   static uint32_t last = 0;
-  static float lvl = 0;
-  static int lastR = -1;
+  static int lastR = -1, lastG = -1, lastB = -1;
+  static float level = 0.10f;
   const uint32_t now = millis();
   if (now - last < 40) return;
   last = now;
-  const float target = (playing && !paused) ? (gBand[0] + gBand[1] + gBand[2]) / 3.0f : 0.0f;
-  lvl = target > lvl ? target : lvl * 0.75f;
-  float v = lvl * 1.3f;
-  v *= v;
-  if (v > 1.0f) v = 1.0f;
-  const int r = (int)(v * 255.0f);
-  if (r != lastR) {
-    lastR = r;
+  const ThemePalette &theme = THEMES[themeIndex];
+  const float audio = (playing && !paused)
+      ? (gBand[0] + gBand[1] + gBand[2]) / 3.0f : 0.0f;
+  const float target = (playing && !paused)
+      ? constrain(0.10f + audio * 1.15f, 0.10f, 1.0f)
+      : (paused ? 0.055f : 0.12f);
+  level = target > level ? target : level * 0.78f;
+  const int r = (int)(theme.r * level);
+  const int g = (int)(theme.g * level);
+  const int b = (int)(theme.b * level);
+  if (r != lastR || g != lastG || b != lastB) {
+    lastR = r; lastG = g; lastB = b;
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
-    neopixelWrite(21, (uint8_t)r, 0, 0);
+    neopixelWrite(21, (uint8_t)r, (uint8_t)g, (uint8_t)b);
 #endif
   }
 }
@@ -2242,7 +2278,7 @@ void setup() {
   while (millis() - splashStart < 900) delay(10);
   beginScan((sdReady && SD.exists("/music")) ? "/music" : "/");
 
-  Serial.printf("JOHNNY %s | SD=%s | IMU=%s | heap=%u\n", JOHNNY_VERSION,
+  Serial.printf("MP3 PLAYER %s | SD=%s | IMU=%s | heap=%u\n", MP3PLAYER_VERSION,
                 sdReady ? "OK" : "FAIL", imuOk ? "OK" : "N/D",
                 (unsigned)ESP.getFreeHeap());
 }
