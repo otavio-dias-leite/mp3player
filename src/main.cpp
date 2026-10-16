@@ -445,6 +445,7 @@ float gFadeGain = 0.0f;
 float gFadeTarget = 1.0f;
 float gFadeStep = 1.0f / (0.03f * 44100.0f);
 uint32_t gSamplesSubmitted = 0;
+double gMediaTimeSamples = 0.0;
 
 // realce de som
 bool gCompOn = false;
@@ -724,6 +725,8 @@ inline void pushResampled(float input) {
     }
     const float y = y0 + (y1 - y0) * rsFilterMix;
     gRing[gCur][gFill++] = processSample(y);
+    // Tempo de conteudo: avanca pela razao real atual, inclusive durante o ramp de velocidade.
+    gMediaTimeSamples += (double)rsStep * (double)OUT_RATE / (double)rsSourceRate;
 
     if (rsFilterMix < 1.0f) {
       rsFilterMix += rsFilterMixStep;
@@ -1918,7 +1921,7 @@ int pendingSkip = 0;
 uint32_t skipDue = 0;
 
 uint32_t elapsedSec() {
-  return startOffsetSec + (uint32_t)(gSamplesSubmitted / OUT_RATE);
+  return (uint32_t)(gMediaTimeSamples / (double)OUT_RATE);
 }
 
 bool canSeek() { return meta.fmt == FMT_MP3 && meta.durationSec >= 3; }
@@ -2030,6 +2033,7 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
   gFadeGain = natural ? 1.0f : 0.0f;  // fade-in curto, exceto na troca gapless
   if (!natural) { resetDsp(); gVolCur = gVolTarget; }
   gSamplesSubmitted = 0;
+  gMediaTimeSamples = (double)startedAt * (double)OUT_RATE;
 
   if (!decoder->begin(bufferedSource, audioOutput)) { stopPlayback(true); return false; }
 
@@ -2631,7 +2635,7 @@ void drawLive() {
       g.drawString(z, 138, 18);
     }
     char rate[20];
-    snprintf(rate, sizeof(rate), "%s %.1f", FMT_NAMES[meta.fmt <= FMT_NONE ? meta.fmt : FMT_NONE], gSrcRate / 1000.0f);
+    snprintf(rate, sizeof(rate), "%s %.1fk %.2fx", FMT_NAMES[meta.fmt <= FMT_NONE ? meta.fmt : FMT_NONE], gSrcRate / 1000.0f, playbackSpeed);
     g.setTextColor(C_GREY);
     g.drawString(rate, 232 - g.textWidth(rate), 18);
   }
