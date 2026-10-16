@@ -51,7 +51,7 @@
 #include <AudioFileSourceBuffer.h>
 #include <AudioGeneratorMP3.h>
 
-#define MP3_PLAYER_VERSION "1.0.0-alpha.2"
+#define MP3_PLAYER_VERSION "1.0.0-alpha.3"
 
 namespace {
 
