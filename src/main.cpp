@@ -1141,7 +1141,7 @@ bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, boo
   uint32_t p = off + 2;
   const uint32_t end = off + len;
   uint8_t b[9];
-  for (int g = 0; g < 48 && p + 4 < end; ++g) {
+  for (int g = 0; g < 128 && p + 4 < end; ++g) {
     if (!f.seek(p) || f.read(b, 4) != 4) return false;
     if (b[0] != 0xFF) return false;
     const uint8_t m = b[1];
@@ -1170,7 +1170,7 @@ bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c,
   if (b[0] == 0xFF && b[1] == 0xD8) {
     bool prog = false;
     uint16_t w = 0, h = 0;
-    if (!jpegInfo(f, off, len, w, h, prog) || prog) return false;
+    if (!jpegInfo(f, off, len, w, h, prog) || prog || (uint64_t)w * h > 2400000ULL) return false;
     c.png = false; c.w = w; c.h = h;
   } else if (!memcmp(b, "\x89PNG\r\n\x1a\n", 8)) {
     const uint32_t w = be32(b + 16), h = be32(b + 20);
