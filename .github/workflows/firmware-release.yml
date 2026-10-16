@@ -1,4 +1,4 @@
-name: Build and publish JOHNNY firmware
+name: Build and publish MP3 PLAYER firmware
 
 on:
   push:
@@ -45,17 +45,17 @@ jobs:
           cp "$BUILD/partitions.bin" "$OUT/partitions.bin"
           cp "$BOOT_APP0" "$OUT/boot_app0.bin"
           python "$ESPTOOL" --chip esp32s3 merge_bin \
-            -o "$OUT/johnny-cardputer-adv-full.bin" \
+            -o "$OUT/mp3-player-cardputer-adv-full.bin" \
             --flash_mode dio --flash_freq 80m --flash_size 8MB \
             0x0 "$OUT/bootloader.bin" \
             0x8000 "$OUT/partitions.bin" \
             0xe000 "$OUT/boot_app0.bin" \
             0x10000 "$OUT/firmware.bin"
           cat > "$OUT/LEIA-PRIMEIRO.txt" <<EOF
-          JOHNNY v${VERSION} — M5STACK CARDPUTER ADV (ESP32-S3)
+          MP3 PLAYER v${VERSION} — M5STACK CARDPUTER ADV (ESP32-S3)
 
           firmware.bin: atualização OTA.
-          johnny-cardputer-adv-full.bin: instalação completa por USB.
+          mp3-player-cardputer-adv-full.bin: instalação completa por USB.
 
           MÉTODO RECOMENDADO:
           1. Abra https://otavio-dias-leite.github.io/johnny/ no Chrome ou Edge.
@@ -68,7 +68,7 @@ jobs:
           2. Entre no modo de gravação segurando G0 ao conectar USB.
           3. Identifique a porta: ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
           4. Grave a imagem completa (substitua a porta):
-             esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0x0 johnny-cardputer-adv-full.bin
+             esptool --chip esp32s3 --port /dev/ttyACM0 --baud 460800 write-flash 0x0 mp3-player-cardputer-adv-full.bin
 
           Se houver erro de permissão na porta serial, adicione seu usuário ao grupo uucp
           e entre novamente na sessão. Não remova o cartão durante operações.
@@ -76,7 +76,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: johnny-cardputer-adv-${{ github.sha }}
+          name: mp3-player-cardputer-adv-${{ github.sha }}
           path: release/*
           if-no-files-found: error
       - name: Validate release tag matches VERSION
@@ -91,10 +91,10 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.value }}
           target_commitish: main
-          name: JOHNNY v${{ steps.version.outputs.value }}
+          name: MP3 PLAYER v${{ steps.version.outputs.value }}
           files: |
             release/firmware.bin
-            release/johnny-cardputer-adv-full.bin
+            release/mp3-player-cardputer-adv-full.bin
             release/LEIA-PRIMEIRO.txt
             release/bootloader.bin
             release/partitions.bin
