@@ -1,71 +1,53 @@
-# JOHNNY — Cardputer ADV
+# MP3 Player — M5Stack Cardputer ADV
 
-**Version 1.0.0-alpha.7 · ESP32-S3 · 8 MB Flash · no PSRAM**
+**Firmware for playing MP3 music on the M5Stack Cardputer ADV (ESP32-S3).**
 
-JOHNNY is a multi-tool firmware for the M5Stack Cardputer ADV. Its interface uses a black/crimson visual system, compact screens, a horizontal category launcher and managed audio workers.
+MP3 Player is a dedicated music-player firmware. It reads MP3 files from a microSD card and provides a compact library browser and playback interface designed for the Cardputer ADV hardware.
 
-## Music
+## Features
 
-- Synth: eight timbres, chromatic keyboard input, sharps/flats and seven sample pads.
-- Tuner: guitar, bass and ukulele presets with nearest-note and cents guidance.
-- Music player: local microSD library, metadata/cover support, playback controls, shuffle and repeat.
-- Web radio: station presets and custom HTTP stream URL.
-- Five-band DSP equalizer with presets and per-band adjustment.
-- Microphone recorder and WAV sample/pad recording to microSD.
-- Radio stream recording to WAV on microSD.
+- Browse microSD folders containing MP3 files, including nested folders.
+- Build a playback queue from the selected folder.
+- Play, pause, stop, next/previous track and automatic track advance.
+- Shuffle and repeat modes.
+- Seek backward and forward, track duration and progress.
+- ID3 title/artist metadata and embedded JPEG/PNG album art.
+- Five-band equalizer with six presets and per-band adjustment.
+- Audio visualizers: bars, mirror, waveform and album cover.
+- Sleep timer, screen timeout, brightness and optional shake-to-skip.
+- Settings saved to device preferences.
+- Five selectable themes: Dark Red, Matrix, Cyberpunk, Ice Blue and Amber.
+- Cardputer ADV RGB LED follows the selected theme and pulses with music.
 
-## System
+## Hardware
 
-- Files browser and microSD operations.
-- USB transfer mode / local web interface.
-- Wi-Fi scan, network connection and connection details.
-- Firmware update over Wi-Fi from published release.
-- Device status, battery and storage diagnostics.
-- Bluetooth LE device scanner.
-- Clock with NTP synchronization and configurable alarms; MP3 alarm source supported.
-- Disk manager with Flash/SD capacity information.
-- Process/runtime monitor for JOHNNY-managed tasks.
-- Six themes including the new JOHNNY RED default.
+- M5Stack Cardputer ADV / ESP32-S3
+- microSD card containing .mp3 files
+- Built-in speaker or headphones
 
-## Games
+microSD SPI pins: CS GPIO12, SCK GPIO40, MISO GPIO39, MOSI GPIO14. The RGB LED is driven on GPIO21.
 
-- Conway's Game of Life with editable grid, pause, step, speed and SD persistence.
+## Build
 
-## HACK Lab
+Install PlatformIO with `python -m pip install --user platformio`, then run `pio run -e cardputer-adv` from the repository directory.
 
-- Passive Wi-Fi reconnaissance and BLE scanning.
-- Single-target TCP connectivity test, DNS lookup and HTTP status check.
-- Network/radio information and local web status/screen view.
-- Offline visual effects.
-- HTTP security audit and device security audit.
+USB upload: `pio run -e cardputer-adv -t upload`.
 
-## Stability design
+Dependencies are managed by PlatformIO: M5Stack M5Cardputer and ESP8266Audio.
 
-- One foreground module at a time; audio and recorder work run in managed tasks.
-- Cooperative stop and teardown for audio, radio recording, microphone and BLE scanning.
-- Fixed-size decoder, DSP and recording buffers sized for the 8 MB / no-PSRAM target.
-- Wi-Fi is not started at cold boot; it starts when a network feature is opened.
-- The microphone and speaker are switched explicitly because they share audio resources.
+## Keyboard
 
-## Build on Arch Linux
+- `;` / `.`: move through the library or adjust volume
+- `,` / `/`: page through the library or seek
+- `ENTER`: open folder / play selected track
+- `SPACE`: pause or resume
+- `N` / `P`: next / previous track
+- `TAB`: open player or switch player/equalizer
+- `S`: settings
+- `E`: equalizer
+- `X`: stop playback
+- `1`–`6`: equalizer presets
 
-```bash
-python -m pip install --user platformio
-cd ~/johnny
-pio run -e cardputer-adv
-```
+## Stability notes
 
-USB upload:
-
-```bash
-pio run -e cardputer-adv -t upload
-```
-
-## Important limitations
-
-- Web radio depends on Wi-Fi quality and the selected station; buffering reduces short dropouts but cannot guarantee uninterrupted streaming.
-- NTP time must be synchronized again after complete power loss unless a supported RTC is added.
-- Preferences, including saved Wi-Fi credentials and alarms, use the current Preferences/NVS implementation. The planned encrypted AES-GCM SD vault and secure migration are not implemented; do not describe current credential storage as an encrypted vault.
-- Disk manager and process monitor are informational/limited; arbitrary FreeRTOS tasks are not force-terminated.
-- External SPI display and full GPIO manager are not part of this build.
-- CI compilation and image assembly do not prove hardware stability. Test cold boot, SD, MP3, radio, synth, pads, mic, tuner, Wi-Fi, BLE, OTA, alarms and repeated app open/close cycles on the physical Cardputer ADV.
+The MP3 decoder is advanced in short cooperative slices so the UI can continue processing input. Audio output uses fixed-size buffers and a bounded queue. Playback should still be validated on the physical Cardputer ADV with the target microSD card, speaker and headphones; a successful CI build alone does not prove hardware stability.
