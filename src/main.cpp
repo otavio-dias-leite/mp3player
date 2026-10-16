@@ -1651,7 +1651,7 @@ void sdRemount() {
   if (sdReady) storageKind = STORAGE_SD;
   else if (internalReady) storageKind = STORAGE_INTERNAL;
   needRescan = true;
-  showToast(sdReady ? "SD RECUPERADO" : "SD DESCONECTADO");
+  showToast(sdReady ? uiText(UI_SD_RECOVERED) : uiText(UI_SD_DISCONNECTED));
 }
 
 bool startDirValidation(size_t index) {
@@ -3176,7 +3176,7 @@ void browserKey(int k) {
       uint8_t buf[1024]; bool ok = true;
       while (in.available()) { size_t n = in.read(buf, sizeof(buf)); if (!n || out.write(buf, n) != n) { ok = false; break; } yield(); }
       in.close(); out.close();
-      showToast(ok ? "COPIADO PARA MEMORIA INTERNA" : "ERRO NA COPIA"); return;
+      showToast(uiText(ok ? UI_COPIED_INTERNAL : UI_COPY_ERROR)); return;
     }
     default: break;
   }
@@ -3240,8 +3240,8 @@ void playerKey(int k) {
     case 't':
       sleepIdx = (sleepIdx + 1) % 5;
       setSleepTimer();
-      if (SLEEP_MIN[sleepIdx]) snprintf(t, sizeof(t), "SONO: %d MIN", SLEEP_MIN[sleepIdx]);
-      else safeCopy(t, sizeof(t), "SONO: DESLIGADO");
+      if (SLEEP_MIN[sleepIdx]) snprintf(t, sizeof(t), uiText(UI_SLEEP_FMT), SLEEP_MIN[sleepIdx]);
+      else safeCopy(t, sizeof(t), uiText(UI_SLEEP_OFF));
       showToast(t);
       break;
     default: break;
