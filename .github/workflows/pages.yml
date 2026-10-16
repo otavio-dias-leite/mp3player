@@ -1,6 +1,13 @@
 name: Deploy MP3 PLAYER website
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "index.html"
+      - "style.css"
+      - "firmware/manifest.json"
+      - ".github/workflows/pages.yml"
   workflow_run:
     workflows: ["Build and publish MP3 PLAYER firmware"]
     types: [completed]
@@ -18,7 +25,7 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -27,7 +34,7 @@ jobs:
       - name: Checkout latest main branch
         uses: actions/checkout@v4
 
-      - name: Locate release produced by firmware build
+      - name: Locate latest available firmware release
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -37,24 +44,29 @@ jobs:
           VERSION="$(tr -d '\r\n' < VERSION)"
           TAG="v$VERSION"
           API="https://api.github.com/repos/otavio-dias-leite/mp3player/releases/tags/$TAG"
-          curl --fail --silent --show-error --retry 5 --retry-delay 3 \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "$API" -o /tmp/release.json
+          HEADERS=(-H "Accept: application/vnd.github+json"
+                   -H "Authorization: Bearer $GH_TOKEN"
+                   -H "X-GitHub-Api-Version: 2022-11-28")
+          if ! curl --fail --silent --show-error --retry 3 --retry-delay 2 "${HEADERS[@]}" "$API" -o /tmp/release.json; then
+            echo "Release $TAG is not published yet; using the latest published firmware."
+            curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+              "${HEADERS[@]}" \
+              "https://api.github.com/repos/otavio-dias-leite/mp3player/releases/latest" \
+              -o /tmp/release.json
+          fi
           python - <<'PY'
           import json, os
           from pathlib import Path
           release = json.loads(Path("/tmp/release.json").read_text())
           asset = next((a for a in release.get("assets", [])
                         if a.get("name") == "mp3-player-cardputer-adv-full.bin"), None)
-          assert asset and asset.get("browser_download_url"), "Full MP3 Player firmware is missing from release"
+          assert asset and asset.get("browser_download_url"), "Full MP3 Player firmware is missing from published release"
           with open(os.environ["GITHUB_OUTPUT"], "a") as out:
-              out.write("version=" + release["tag_name"] + "\n")
-              out.write("asset_url=" + asset["browser_download_url"] + "\n")
+              out.write("version=" + release["tag_name"] + "\\n")
+              out.write("asset_url=" + asset["browser_download_url"] + "\\n")
           PY
 
-      - name: Assemble website with the exact firmware release
+      - name: Assemble website with an actually published firmware release
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_ASSET_URL: ${{ steps.release.outputs.asset_url }}
@@ -77,7 +89,7 @@ jobs:
           data = json.loads(manifest.read_text())
           data["version"] = version
           data["builds"][0]["parts"] = [{"path": "mp3-player-cardputer-adv-full.bin", "offset": 0}]
-          manifest.write_text(json.dumps(data, indent=2) + "\n")
+          manifest.write_text(json.dumps(data, indent=2) + "\\n")
           PY
           touch _site/.nojekyll
           test -s _site/index.html
