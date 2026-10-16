@@ -343,6 +343,12 @@ Fmt formatOf(const char *name) {
   return FMT_NONE;
 }
 bool isAudioFile(const char *name) { return formatOf(name) != FMT_NONE; }
+bool isImageFile(const char *name) {
+  const char *dot = name ? strrchr(name, '.') : nullptr;
+  return dot && (!strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg") ||
+                 !strcasecmp(dot, ".png"));
+}
+bool isBrowserMedia(const char *name) { return isAudioFile(name) || isImageFile(name); }
 
 void fitText(LovyanGFX &g, const char *src, int maxW, char *out, size_t n) {
   safeCopy(out, n, src);
@@ -1317,6 +1323,7 @@ void prepareCoverState() {
 struct Entry {
   char name[NAME_SIZE];
   bool isDir;
+  bool isImage;
 };
 Entry entries[MAX_ENTRIES];
 size_t entryCount = 0;
@@ -1370,18 +1377,16 @@ void addEntry(File &e) {
   const char *base = slash ? slash + 1 : raw;
   if (!base[0] || base[0] == '.') return;
   const bool dir = e.isDirectory();
-  if (!dir && !isAudioFile(base)) return;
+  const bool image = !dir && isImageFile(base);
+  if (!dir && !isAudioFile(base) && !image) return;
   if (dir && strcasecmp(base, "System Volume Information") == 0) return;
   if (strlen(base) >= NAME_SIZE) return;
 
   Entry tmp;
   safeCopy(tmp.name, NAME_SIZE, base);
   tmp.isDir = dir;
-  size_t pos = entryCount;
-  while (pos > 0 && cmpEntry(entries[pos - 1], tmp) > 0) --pos;
-  memmove(&entries[pos + 1], &entries[pos], (entryCount - pos) * sizeof(Entry));
-  entries[pos] = tmp;
-  ++entryCount;
+  tmp.isImage = image;
+  entries[entryCount++] = tmp;
 }
 
 void closeWalkStack() {
@@ -1452,7 +1457,7 @@ void walkDirectoryStep() {
   if (!base || !base[0] || base[0] == '.') { child.close(); return; }
 
   if (!child.isDirectory()) {
-    const bool found = isAudioFile(base);
+    const bool found = isBrowserMedia(base);
     child.close();
     if (found) {
       walkFoundSong = true;
@@ -1484,8 +1489,13 @@ void walkDirectoryStep() {
   ++walkDepth;
 }
 
+int compareEntryQsort(const void *a, const void *b) {
+  return cmpEntry(*static_cast<const Entry *>(a), *static_cast<const Entry *>(b));
+}
+
 void finishScan() {
   if (scanHandle) scanHandle.close();
+  if (entryCount > 1) qsort(entries, entryCount, sizeof(Entry), compareEntryQsort);
   closeWalkStack();
   scanning = false;
   validatingDirs = false;
@@ -1647,7 +1657,7 @@ int buildQueueFromBrowser(int entryIdx) {
   queueCount = 0;
   int chosen = -1;
   for (size_t i = 0; i < entryCount && queueCount < MAX_ENTRIES; ++i) {
-    if (entries[i].isDir) continue;
+    if (entries[i].isDir || entries[i].isImage) continue;
     if ((int)i == entryIdx) chosen = (int)queueCount;
     safeCopy(queueNames[queueCount], NAME_SIZE, entries[i].name);
     ++queueCount;
