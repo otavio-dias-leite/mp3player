@@ -15,7 +15,8 @@ MP3 Player is a dedicated music-player firmware. It reads MP3 files from a micro
 - Five-band equalizer with six presets and per-band adjustment.
 - Audio visualizers: bars, mirror, waveform and album cover.
 - Sleep timer, screen timeout, brightness and optional shake-to-skip.
-- Settings saved to device preferences.
+- Settings saved to device preferences, including the selected interface language.
+- Multilingual interface: English (default), Brazilian Portuguese, Spanish, Simplified Chinese, Japanese, French, German, Russian and Italian. Select the language in Settings.
 - Five selectable themes: Ice Blue (default), Dark Red, Matrix, Cyberpunk and Amber. The interface uses a subtle blue grid over a deep navy background.
 - Cardputer ADV RGB LED follows the selected theme and pulses with music.
 
