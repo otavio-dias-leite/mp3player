@@ -33,7 +33,7 @@ footer{display:flex;justify-content:space-between;gap:12px;padding:20px 0 28px;b
 /* Published firmware version */
 .firmware-version{display:flex;align-items:center;gap:12px;flex-wrap:wrap;width:min(440px,100%);margin:22px 0 0;padding:13px 15px;border:1px solid var(--line);background:linear-gradient(110deg,#1b1010,#100909);font-family:"Space Mono",monospace}.firmware-version span{color:var(--muted);font-size:9px;letter-spacing:.1em}.firmware-version strong{color:var(--pink);font-size:14px;text-shadow:0 0 12px #ff343466}.firmware-version small{flex-basis:100%;color:#888888;font-size:8px;letter-spacing:.08em}
 
-/* JOHNNY / refined crimson glass + restrained neon */
+/* MP3 PLAYER / refined crimson glass + restrained neon */
 :root{--bg:#050506;--panel:#0d0d10;--purple:#e11d35;--pink:#ff334d;--lav:#ff8793;--muted:#929096;--line:#35151b;--red-hot:#ff3048;--red-deep:#790d20;--glass:rgba(18,10,13,.78)}
 body{background:radial-gradient(ellipse at 50% -12%,rgba(126,9,31,.24),transparent 48%),radial-gradient(ellipse at 90% 44%,rgba(75,8,20,.10),transparent 34%),linear-gradient(180deg,#080809 0%,#050506 58%,#030304 100%)}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:-1;opacity:.18;background-image:linear-gradient(rgba(255,50,75,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,50,75,.025) 1px,transparent 1px);background-size:42px 42px;mask-image:linear-gradient(to bottom,black,transparent 78%)}
