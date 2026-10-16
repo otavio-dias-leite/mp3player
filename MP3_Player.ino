@@ -1343,7 +1343,7 @@ void drawSplash() {
   d.setFont(&fonts::Font0);
   d.setTextColor(C_GREY);
   char v[28];
-  snprintf(v, sizeof(v), "CARDPUTER ADV  |  %s", MP3PLAYER_VERSION);
+  snprintf(v, sizeof(v), "CARDPUTER ADV  |  %s", MP3_PLAYER_VERSION);
   d.drawString(v, (240 - d.textWidth(v)) / 2, 94);
 }
 
@@ -2152,7 +2152,7 @@ void fadeStep() {
   }
 }
 
-// LED RGB do ADV (GPIO21): vermelho pulsando com os graves.
+// RGB LED do ADV (GPIO21): segue o tema e reage ao audio.
 void ledUpdate() {
   static uint32_t last = 0;
   static int lastR = -1, lastG = -1, lastB = -1;
@@ -2278,7 +2278,7 @@ void setup() {
   while (millis() - splashStart < 900) delay(10);
   beginScan((sdReady && SD.exists("/music")) ? "/music" : "/");
 
-  Serial.printf("MP3 PLAYER %s | SD=%s | IMU=%s | heap=%u\n", MP3PLAYER_VERSION,
+  Serial.printf("MP3 PLAYER %s | SD=%s | IMU=%s | heap=%u\n", MP3_PLAYER_VERSION,
                 sdReady ? "OK" : "FAIL", imuOk ? "OK" : "N/D",
                 (unsigned)ESP.getFreeHeap());
 }
