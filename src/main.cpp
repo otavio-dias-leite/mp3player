@@ -1346,6 +1346,27 @@ size_t entryCount = 0;
 char browseDir[DIR_SIZE] = "/";
 int selected = 0;
 int firstVisible = 0;
+
+struct ThumbnailCache {
+  char path[PATH_SIZE];
+  char title[NAME_SIZE];
+  char detail[48];
+  uint32_t mediaEpoch = 0;
+  bool hasImage = false;
+};
+ThumbnailCache thumbnailCache[ROWS];
+int thumbnailWindow = -1;
+int thumbnailNextSlot = 0;
+uint32_t lastThumbnailStep = 0;
+
+CoverRef imageViewerRef;
+char imageViewerPath[PATH_SIZE] = {0};
+int imageViewerIndex = -1;
+
+void invalidateThumbnails();
+void thumbnailStep();
+bool openImageViewer(int entryIndex);
+void imageViewerKey(int key);
 bool scanning = false;
 bool validatingDirs = false;
 bool scanOverflow = false;
