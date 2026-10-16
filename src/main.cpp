@@ -2410,13 +2410,17 @@ void drawSettings() {
     const bool sel = (i == settingsSel);
     if (sel) g.fillRoundRect(6, y - 1, 228, 10, 3, C_PANEL);
     g.setTextColor(sel ? C_WHITE : C_GREY);
-    char label[28];\n    fitText(g, SETTING_LABELS[constrain(uiLanguage, 0, 8)][i], 128, label, sizeof(label));\n    g.drawString(label, 12, y);
+    char label[28];
+    fitText(g, SETTING_LABELS[constrain(uiLanguage, 0, 8)][i], 128, label, sizeof(label));
+    g.drawString(label, 12, y);
     char v[24], shown[32];
     settingValue(i, v, sizeof(v));
     if (sel && i < SETTINGS_COUNT - 1) snprintf(shown, sizeof(shown), "< %s >", v);
     else safeCopy(shown, sizeof(shown), v);
     g.setTextColor(sel ? C_CYAN : C_GREY);
-    char valueFit[24];\n    fitText(g, shown, 82, valueFit, sizeof(valueFit));\n    g.drawString(valueFit, 228 - g.textWidth(valueFit), y);
+    char valueFit[24];
+    fitText(g, shown, 82, valueFit, sizeof(valueFit));
+    g.drawString(valueFit, 228 - g.textWidth(valueFit), y);
   }
   g.setTextColor(C_GREY);
   g.drawString(uiLanguage == 1 ? "; . ESCOLHE  , / MUDA  ESC VOLTA" : uiLanguage == 2 ? "; . ELEGIR  , / CAMBIAR  ESC VOLVER" : uiLanguage == 3 ? "; . 选择  , / 更改  ESC 返回" : uiLanguage == 4 ? "; . 選択  , / 変更  ESC 戻る" : uiLanguage == 5 ? "; . CHOISIR  , / MODIFIER  ESC RETOUR" : uiLanguage == 6 ? "; . WAEHLEN  , / AENDERN  ESC ZURUECK" : uiLanguage == 7 ? "; . ВЫБРАТЬ  , / ИЗМЕНИТЬ  ESC НАЗАД" : uiLanguage == 8 ? "; . SCEGLI  , / CAMBIA  ESC INDIETRO" : "; . SELECT  , / CHANGE  ESC BACK", 8, 127);
@@ -2437,7 +2441,7 @@ void drawHelp() {
       "S settings  E equalizer",
       "R refresh SD  X stop audio",
       "G sound enhancement (off/soft/strong)",
-      "Formatos: MP3 WAV FLAC AAC",
+      "Formats: MP3 WAV FLAC AAC",
     },
     {
       "PLAYER",
