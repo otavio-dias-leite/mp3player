@@ -1,6 +1,8 @@
 name: Deploy MP3 PLAYER website
 
 on:
+  push:
+    branches: [main]
   workflow_run:
     workflows: ["Firmware build"]
     types: [completed]
@@ -95,7 +97,7 @@ jobs:
           version = os.environ["RELEASE_VERSION"]
           for name in ("index.html",):
               page = Path("_site") / name
-              page.write_text(page.read_text().replace("@MP3 PLAYER_VERSION@", version))
+              page.write_text(page.read_text().replace("@MP3_PLAYER_VERSION@", version))
           manifest = Path("_site/firmware/manifest.json")
           data = json.loads(manifest.read_text())
           data["version"] = version
