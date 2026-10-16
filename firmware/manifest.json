@@ -7,7 +7,7 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "https://github.com/otavio-dias-leite/johnny/releases/latest/download/mp3-player-cardputer-adv-full.bin",
+          "path": "https://github.com/otavio-dias-leite/mp3player/releases/latest/download/mp3-player-cardputer-adv-full.bin",
           "offset": 0
         }
       ]
