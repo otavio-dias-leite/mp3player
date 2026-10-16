@@ -2021,18 +2021,18 @@ void drawBrowser() {
 
   if (!storageReady()) {
     g.setTextColor(C_RED);
-    g.drawString(storageKind == STORAGE_SD ? "MICROSD NAO ENCONTRADO" : "MEMORIA INTERNA INDISPONIVEL", 14, 40);
+    g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 14, 40);
     g.setFont(&fonts::Font0);
     g.setTextColor(C_GREY);
-    g.drawString("M TROCA ARMAZENAMENTO | R ATUALIZA", 14, 62);
+    g.drawString(uiText(UI_STORAGE_KEYS), 14, 62);
   } else if (scanning) {
     g.setTextColor(C_GREY);
     char s[32];
-    snprintf(s, sizeof(s), validatingDirs ? "FILTRANDO PASTAS %d" : "LENDO PASTA... %d", (int)entryCount);
+    snprintf(s, sizeof(s), validatingDirs ? uiText(UI_FILTERING) : uiText(UI_READING), (int)entryCount);
     g.drawString(s, 14, 44);
   } else if (!entryCount) {
     g.setTextColor(C_GREY);
-    g.drawString("PASTA VAZIA (SEM AUDIO)", 14, 44);
+    g.drawString(uiText(UI_EMPTY), 14, 44);
   }
 
   if (!scanning) {
@@ -2090,14 +2090,14 @@ void drawBrowser() {
     else safeCopy(line, sizeof(line), t);
     g.setTextColor(C_CYAN);
     g.drawString(line, 8, 125);
-    const char *st = (paused || fadeAction == FA_PAUSE) ? "PAUSADO" : "TOCANDO";
+    const char *st = (paused || fadeAction == FA_PAUSE) ? uiText(UI_PAUSED) : uiText(UI_PLAYING);
     g.setTextColor((paused || fadeAction == FA_PAUSE) ? C_YELLOW : C_GREY);
     g.drawString(st, 232 - g.textWidth(st), 125);
   } else {
     g.setFont(&fonts::Font0);
     g.setTextColor(C_GREY);
-    g.drawString("ENTER ABRE/TOCA   DEL PASTA ACIMA", 8, 101);
-    g.drawString("S AJUSTES  E EQ  R ATUALIZA  H AJUDA", 8, 113);
+    g.drawString(uiText(UI_BROWSER_KEYS1), 8, 101);
+    g.drawString(uiText(UI_BROWSER_KEYS2), 8, 113);
     if (entryCount) {
       char c[20];
       snprintf(c, sizeof(c), "%d/%d", selected + 1, (int)entryCount);
@@ -2259,12 +2259,12 @@ void drawPlayer() {
   g.fillSprite(C_BG);
   drawGrid(g);
   const bool p = paused || fadeAction == FA_PAUSE;
-  drawHeader(g, p ? "PAUSADO" : "TOCANDO", p ? C_YELLOW : C_CYAN);
+  drawHeader(g, p ? uiText(UI_PLAYER_PAUSED) : uiText(UI_PLAYER_PLAYING), p ? C_YELLOW : C_CYAN);
 
   g.setFont(&fonts::Font0);
   g.setTextSize(1);
   g.setTextColor(C_GREY);
-  g.drawString(outMode ? "FON" : "ALT", 8, 117);
+  g.drawString(outMode ? uiText(UI_OUTPUT_HEADPHONE) : uiText(UI_OUTPUT_SPEAKER), 8, 117);
   g.drawRect(32, 116, 102, 9, C_GREY);
   g.fillRect(33, 117, volumePercent, 7, C_RED);
   char v[8];
@@ -2278,7 +2278,7 @@ void drawPlayer() {
   g.drawString(e, 232 - g.textWidth(e), 117);
 
   g.setTextColor(C_GREY);
-  g.drawString("SPC PAUSA N/P FAIXA ,/ BUSCA TAB EQ", 8, 127);
+  g.drawString(uiText(UI_PLAYER_KEYS), 8, 127);
 
   ui.pushSprite(0, 0);
   drawLive();
@@ -2290,7 +2290,7 @@ void drawEq() {
   auto &g = ui;
   g.fillSprite(C_BG);
   drawGrid(g);
-  drawHeader(g, "EQUALIZADOR", C_CYAN);
+  drawHeader(g, uiText(UI_EQ_TITLE), C_CYAN);
 
   constexpr int CENTER_Y = 66, HALF = 26;
   for (int i = 0; i < EQ_BANDS; ++i) {
@@ -2318,11 +2318,11 @@ void drawEq() {
 
   g.setFont(&fonts::Font0);
   g.setTextColor(C_GREY);
-  g.drawString("PRESET", 8, 119);
+  g.drawString(uiText(UI_EQ_PRESET), 8, 119);
   g.setTextColor(C_CYAN);
   g.drawString(currentPresetName(), 50, 119);
   g.setTextColor(C_GREY);
-  g.drawString("1-6 PRESET  0 ZERA  TAB VOLTA", 8, 127);
+  g.drawString(uiText(UI_EQ_KEYS), 8, 127);
   ui.pushSprite(0, 0);
 }
 
@@ -2344,6 +2344,28 @@ const char *const SETTING_LABELS[9][SETTINGS_COUNT] = {
 };
 
 const char *uiLanguageName() { return LANGUAGE_NAMES[constrain(uiLanguage, 0, 8)]; }
+// Compact on-device UI dictionary. Audio, filesystem and decoder paths are not affected.
+enum UiTextId {
+  UI_SD_MISSING, UI_FLASH_MISSING, UI_STORAGE_KEYS, UI_FILTERING, UI_READING,
+  UI_EMPTY, UI_PAUSED, UI_PLAYING, UI_BROWSER_KEYS1, UI_BROWSER_KEYS2,
+  UI_PLAYER_PAUSED, UI_PLAYER_PLAYING, UI_OUTPUT_HEADPHONE, UI_OUTPUT_SPEAKER,
+  UI_PLAYER_KEYS, UI_EQ_TITLE, UI_EQ_PRESET, UI_EQ_KEYS, UI_TEXT_COUNT
+};
+const char *const UI_TEXT[9][UI_TEXT_COUNT] = {
+  {"microSD card not found","Internal storage unavailable","M: storage  |  R: refresh","Filtering folders %d","Reading folder... %d","Empty folder (no audio)","PAUSED","PLAYING","ENTER open/play  DEL parent","S settings  E EQ  R refresh  H help","PAUSED","PLAYING","HEADPHONES","SPEAKER","SPACE pause  N/P track  ,/ seek  TAB EQ","EQUALIZER","PRESET","1-6 presets  0 reset  TAB back"},
+  {"Cartao microSD nao encontrado","Memoria interna indisponivel","M: armazenamento  |  R: atualizar","Filtrando pastas %d","Lendo pasta... %d","Pasta vazia (sem audio)","PAUSADO","TOCANDO","ENTER abre/toca  DEL pasta acima","S ajustes  E EQ  R atualizar  H ajuda","PAUSADO","TOCANDO","FONE","ALTO-FALANTE","SPACE pausa  N/P faixa  ,/ busca  TAB EQ","EQUALIZADOR","PRESET","1-6 presets  0 zera  TAB voltar"},
+  {"Tarjeta microSD no encontrada","Almacenamiento interno no disponible","M: almacenamiento  |  R: actualizar","Filtrando carpetas %d","Leyendo carpeta... %d","Carpeta vacia (sin audio)","PAUSADO","REPRODUCIENDO","ENTER abrir/reproducir  DEL subir","S ajustes  E EQ  R actualizar  H ayuda","PAUSADO","REPRODUCIENDO","AURICULARES","ALTAVOZ","SPACE pausa  N/P pista  ,/ buscar  TAB EQ","ECUALIZADOR","PREAJUSTE","1-6 presets  0 reiniciar  TAB volver"},
+  {"未找到 microSD 卡","内部存储不可用","M：存储  |  R：刷新","正在筛选文件夹 %d","正在读取文件夹... %d","文件夹为空（无音频）","已暂停","正在播放","ENTER 打开/播放  DEL 返回上级","S 设置  E 均衡器  R 刷新  H 帮助","已暂停","正在播放","耳机","扬声器","SPACE 暂停  N/P 切歌  ,/ 搜索  TAB 均衡器","均衡器","预设","1-6 预设  0 重置  TAB 返回"},
+  {"microSDカードが見つかりません","内部ストレージを利用できません","M: ストレージ  |  R: 更新","フォルダーを確認中 %d","フォルダーを読み込み中... %d","フォルダーは空です","一時停止","再生中","ENTER 開く/再生  DEL 上へ","S 設定  E EQ  R 更新  H ヘルプ","一時停止","再生中","ヘッドホン","スピーカー","SPACE 一時停止  N/P 曲  ,/ 検索  TAB EQ","イコライザー","プリセット","1-6 プリセット  0 リセット  TAB 戻る"},
+  {"Carte microSD introuvable","Stockage interne indisponible","M : stockage  |  R : actualiser","Filtrage des dossiers %d","Lecture du dossier... %d","Dossier vide (aucun audio)","EN PAUSE","LECTURE","ENTER ouvrir/lire  DEL dossier parent","S reglages  E EQ  R actualiser  H aide","EN PAUSE","LECTURE","CASQUE","HAUT-PARLEUR","SPACE pause  N/P piste  ,/ recherche  TAB EQ","EGALISEUR","PRESELECTION","1-6 presets  0 reset  TAB retour"},
+  {"microSD-Karte nicht gefunden","Interner Speicher nicht verfuegbar","M: Speicher  |  R: aktualisieren","Ordner werden gefiltert %d","Lese Ordner... %d","Ordner leer (keine Audiodateien)","PAUSE","WIEDERGABE","ENTER oeffnen/abspielen  DEL zurueck","S Einstellungen  E EQ  R aktualisieren  H Hilfe","PAUSE","WIEDERGABE","KOPFHOERER","LAUTSPRECHER","SPACE Pause  N/P Titel  ,/ Suche  TAB EQ","EQUALIZER","VOREINSTELLUNG","1-6 Presets  0 reset  TAB zurueck"},
+  {"Карта microSD не найдена","Внутренняя память недоступна","M: память  |  R: обновить","Фильтрация папок %d","Чтение папки... %d","Папка пуста (нет аудио)","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","ENTER открыть/играть  DEL выше","S настройки  E EQ  R обновить  H помощь","ПАУЗА","ВОСПРОИЗВЕДЕНИЕ","НАУШНИКИ","ДИНАМИК","SPACE пауза  N/P трек  ,/ поиск  TAB EQ","ЭКВАЛАЙЗЕР","ПРЕСЕТ","1-6 пресеты  0 сброс  TAB назад"},
+  {"Scheda microSD non trovata","Memoria interna non disponibile","M: memoria  |  R: aggiorna","Filtro cartelle %d","Lettura cartella... %d","Cartella vuota (nessun audio)","IN PAUSA","IN RIPRODUZIONE","ENTER apri/riproduci  DEL indietro","S impostazioni  E EQ  R aggiorna  H aiuto","IN PAUSA","IN RIPRODUZIONE","CUFFIE","ALTOPARLANTE","SPACE pausa  N/P brano  ,/ cerca  TAB EQ","EQUALIZZATORE","PRESET","1-6 preset  0 reset  TAB indietro"}
+};
+const char *uiText(UiTextId id) {
+  return UI_TEXT[constrain(uiLanguage, 0, 8)][id];
+}
+
 void applyUiFont(LovyanGFX &g, bool small = false) {
   (void)small;
   if (uiLanguage == 3) g.setFont(&fonts::efontCN_10);
