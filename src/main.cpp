@@ -2,7 +2,7 @@
  * MP3 PLAYER - player de audio para M5Stack Cardputer ADV
  * Versao 6.0
  *
- * Base consolidada v7.0 (v6.0 + compatibilidade/fluxo da v5.0)\n * Controle de velocidade: 7=0.75x, 8=1.25x, 9=1.50x, 0=1.00x.\n * NOVIDADES DA v6.0
+ * Base consolidada v7.0 (v6.0 + compatibilidade/fluxo da v5.0)\n * Playback modes: 7=SLOWED (0.75x), 8=SPED UP (1.25x), 9=Nightcore (1.75x), 0=NORMAL.\n * NOVIDADES DA v6.0
  *  SOM
  *   - Saida fixa em 44.1 kHz com reamostrador cubico (Catmull-Rom) proprio:
  *     arquivos 48k/32k/22k tocam limpos e na velocidade certa.
@@ -44,7 +44,7 @@
  *  PLAYER  ESPACO pausa  N proxima  P anterior/reinicia  , / busca 10 s
  *          ; . volume    - = volume  1-6 preset  TAB equalizador  G realce
  *          S aleatorio   R repetir   V visual    T timer de sono
- *          7 0.75x  8 1.25x  9 1.50x  0 normal
+ *          7 SLOWED  8 SPED UP  9 Nightcore  0 NORMAL
  *          X para        DEL/` volta a lista (musica continua)
  *  EQ      , / banda     ; . ganho   0 zera      TAB/DEL/` volta
  */
@@ -440,7 +440,7 @@ uint32_t gRng = 0x1234ABCDu;
 bool rsActive = false;
 float rsStep = 1.0f, rsPhase = 0.0f;
 float rsH[4] = {0, 0, 0, 0};
-float playbackSpeed = 1.0f;  // 0.75x, 1.00x, 1.25x, 1.50x
+float playbackSpeed = 1.0f;  // SLOWED 0.75x, NORMAL 1.00x, SPED UP 1.25x, Nightcore 1.75x
 
 float gBand[SPEC_BANDS] = {0};
 int16_t gScope[128] = {0};
@@ -2714,15 +2714,19 @@ void browserKey(int k) {
 }
 
 void setPlaybackSpeed(float speed) {
-  playbackSpeed = constrain(speed, 0.75f, 1.50f);
+  playbackSpeed = constrain(speed, 0.75f, 1.75f);
   // Reconfigura apenas a etapa do reamostrador. Nao reinicia decoder,
   // arquivo ou fila do speaker; evita corte ao mudar velocidade.
   rsActive = (fabsf(gSrcRate - (float)OUT_RATE) > 0.5f) ||
              (fabsf(playbackSpeed - 1.0f) > 0.001f);
   rsStep = (gSrcRate / (float)OUT_RATE) * playbackSpeed;
   rsPhase = 0.0f;
+  const char *mode = "NORMAL";
+  if (fabsf(playbackSpeed - 0.75f) < 0.001f) mode = "SLOWED";
+  else if (fabsf(playbackSpeed - 1.25f) < 0.001f) mode = "SPED UP";
+  else if (fabsf(playbackSpeed - 1.75f) < 0.001f) mode = "Nightcore";
   char msg[28];
-  snprintf(msg, sizeof(msg), "VELOCIDADE: %.2fx", playbackSpeed);
+  snprintf(msg, sizeof(msg), "%s", mode);
   showToast(msg);
 }
 
@@ -2736,7 +2740,7 @@ void playerKey(int k) {
     case '`': drawBrowser(); break;
     case '7': setPlaybackSpeed(0.75f); break;
     case '8': setPlaybackSpeed(1.25f); break;
-    case '9': setPlaybackSpeed(1.50f); break;
+    case '9': setPlaybackSpeed(1.75f); break;
     case '0': setPlaybackSpeed(1.00f); break;
     case ',': seekBy(-10); break;
     case '/': seekBy(+10); break;
