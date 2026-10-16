@@ -944,6 +944,7 @@ bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, boo
     if (m == 0xFF) { ++p; continue; }
     if (m == 0xD8 || (m >= 0xD0 && m <= 0xD7) || m == 0x01) { p += 2; continue; }
     const uint32_t seg = ((uint32_t)b[2] << 8) | b[3];
+    if (seg < 2 || p + 2 + seg > end) return false;
     if (m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC) {
       if (f.read(b, 5) != 5) return false;
       h = (uint16_t)((b[1] << 8) | b[2]);
@@ -956,8 +957,10 @@ bool jpegInfo(File &f, uint32_t off, uint32_t len, uint16_t &w, uint16_t &h, boo
   return false;
 }
 
-bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c) {
-  if (len < 32 || len > COVER_MAX_BYTES) return false;
+bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c,
+                  uint32_t maxBytes = COVER_MAX_BYTES) {
+  const uint32_t fileSize = (uint32_t)f.size();
+  if (len < 32 || len > maxBytes || off > fileSize || len > fileSize - off) return false;
   uint8_t b[24];
   if (!f.seek(off) || f.read(b, 24) != 24) return false;
   if (b[0] == 0xFF && b[1] == 0xD8) {
@@ -967,7 +970,7 @@ bool inspectImage(File &f, uint32_t off, uint32_t len, CoverRef &c) {
     c.png = false; c.w = w; c.h = h;
   } else if (!memcmp(b, "\x89PNG\r\n\x1a\n", 8)) {
     const uint32_t w = be32(b + 16), h = be32(b + 20);
-    if (!w || !h || w > 2048 || h > 2048 || len > 400UL * 1024UL) return false;
+    if (!w || !h || w > 2048 || h > 2048 || (uint64_t)w * h > 2400000ULL) return false;
     c.png = true; c.w = (uint16_t)w; c.h = (uint16_t)h;
   } else {
     return false;
@@ -1297,20 +1300,27 @@ private:
   uint32_t off_ = 0, len_ = 0, pos_ = 0;
 };
 
+bool drawImageRef(M5Canvas &canvas, const CoverRef &ref, int targetW, int targetH,
+                  uint16_t background = C_PANEL2) {
+  if (!ref.valid || !ref.w || !ref.h || targetW <= 0 || targetH <= 0) return false;
+  canvas.fillSprite(background);
+  CoverStream stream;
+  if (!stream.open(ref)) return false;
+  const float sx = (float)targetW / (float)ref.w;
+  const float sy = (float)targetH / (float)ref.h;
+  float scale = sx < sy ? sx : sy;
+  if (scale > 1.0f) scale = 1.0f;
+  const int drawW = max(1, (int)(ref.w * scale));
+  const int drawH = max(1, (int)(ref.h * scale));
+  const int x = (targetW - drawW) / 2;
+  const int y = (targetH - drawH) / 2;
+  if (ref.png) return canvas.drawPng(&stream, x, y, drawW, drawH, 0, 0, scale, scale);
+  return canvas.drawJpg(&stream, x, y, drawW, drawH, 0, 0, scale, scale);
+}
+
 bool decodeCover() {
   if (!coverCanvasReady || !coverRef.valid) return false;
-  coverCanvas.fillSprite(C_PANEL2);
-  CoverStream cs;
-  if (!cs.open(coverRef)) return false;
-  const int big = coverRef.w > coverRef.h ? coverRef.w : coverRef.h;
-  float sc = (float)COVER_PX / (float)big;
-  if (sc > 1.0f) sc = 1.0f;
-  const int dw = (int)(coverRef.w * sc), dh = (int)(coverRef.h * sc);
-  const int x = (COVER_PX - dw) / 2, y = (COVER_PX - dh) / 2;
-  bool ok;
-  if (coverRef.png) ok = coverCanvas.drawPng(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
-  else ok = coverCanvas.drawJpg(&cs, x, y, COVER_PX - x, COVER_PX - y, 0, 0, sc, sc);
-  return ok;
+  return drawImageRef(coverCanvas, coverRef, COVER_PX, COVER_PX, C_PANEL2);
 }
 
 void prepareCoverState() {
@@ -1337,6 +1347,7 @@ bool scanFolderLimit = false;
 bool needRescan = false;
 uint32_t lastRemountAt = 0;
 uint32_t lastSdProbeAt = 0;
+uint32_t sdMediaEpoch = 1;
 constexpr uint32_t SD_AUTO_PROBE_INTERVAL_MS = 2500;
 File scanHandle;
 
