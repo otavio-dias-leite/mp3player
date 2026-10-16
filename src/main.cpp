@@ -2071,68 +2071,105 @@ void drawBrowser() {
   drawGrid(g);
 
   char title[NAME_SIZE];
-  if (browseDir[1] == '\0') safeCopy(title, sizeof(title), storageKind == STORAGE_SD ? "SD CARD" : "MEMORIA INTERNA");
+  if (browseDir[1] == '\0')
+    safeCopy(title, sizeof(title), storageKind == STORAGE_SD ? uiText(UI_STORAGE_SD) : uiText(UI_STORAGE_INTERNAL));
   else {
     const char *base = strrchr(browseDir, '/');
     toAscii(base ? base + 1 : browseDir, title, sizeof(title));
   }
   drawHeader(g, title, C_CYAN);
-
   applyUiFont(g);
   g.setTextSize(1);
-  constexpr int ROW_H = 17, Y0 = 24;
+  constexpr int ROW_H = 34, Y0 = 23;
 
   if (!storageReady()) {
     g.setTextColor(C_RED);
-    g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 14, 40);
-    applyUiFont(g);
+    g.drawString(storageKind == STORAGE_SD ? uiText(UI_SD_MISSING) : uiText(UI_FLASH_MISSING), 10, 38);
     g.setTextColor(C_GREY);
-    g.drawString(uiText(UI_STORAGE_KEYS), 14, 62);
+    g.drawString(uiText(UI_STORAGE_KEYS), 10, 58);
   } else if (scanning) {
     g.setTextColor(C_GREY);
-    char s[32];
-    snprintf(s, sizeof(s), validatingDirs ? uiText(UI_FILTERING) : uiText(UI_READING), (int)entryCount);
-    g.drawString(s, 14, 44);
+    char status[48];
+    snprintf(status, sizeof(status), validatingDirs ? uiText(UI_FILTERING) : uiText(UI_READING), (int)entryCount);
+    g.drawString(status, 10, 42);
   } else if (!entryCount) {
     g.setTextColor(C_GREY);
-    g.drawString(uiText(UI_EMPTY), 14, 44);
+    g.drawString(uiText(UI_EMPTY), 10, 42);
   }
 
   if (!scanning) {
-    for (int r = 0; r < ROWS; ++r) {
-      const int idx = firstVisible + r;
+    for (int row = 0; row < ROWS; ++row) {
+      const int idx = firstVisible + row;
       if (idx >= (int)entryCount) break;
-      const int y = Y0 + r * ROW_H;
-      const bool active = (idx == selected);
-      const Entry &e = entries[idx];
+      const int y = Y0 + row * ROW_H;
+      const Entry &entry = entries[idx];
+      const bool active = idx == selected;
       if (active) {
-        g.fillRoundRect(6, y, 224, 16, 3, C_PANEL);
-        g.fillRect(6, y + 2, 3, 12, C_RED);
-      }
-      const uint16_t ic = e.isDir ? C_YELLOW : C_CYAN;
-      if (e.isDir) {
-        g.fillRect(13, y + 4, 6, 2, ic);
-        g.fillRect(13, y + 6, 13, 8, ic);
+        g.fillRoundRect(6, y, 226, 32, 4, C_PANEL);
+        g.fillRect(6, y + 4, 3, 24, C_RED);
       } else {
-        g.fillCircle(16, y + 11, 3, ic);
-        g.drawFastVLine(18, y + 3, 9, ic);
-        g.drawLine(18, y + 3, 22, y + 6, ic);
+        g.drawRoundRect(6, y, 226, 32, 4, C_DIM);
       }
-      char shown[NAME_SIZE], fit[NAME_SIZE];
-      toAscii(e.name, shown, sizeof(shown));
-      if (!e.isDir) stripExt(shown);
+
+      char path[PATH_SIZE];
+      const bool pathOk = buildPath(path, sizeof(path), browseDir, entry.name);
+      const ThumbnailCache &cache = thumbnailCache[row];
+      const bool cached = pathOk && cache.hasImage &&
+                          cache.mediaEpoch == sdMediaEpoch &&
+                          strcmp(cache.path, path) == 0 && thumbCanvasReady[row];
+      if (cached) {
+        thumbCanvases[row]->pushSprite(11, y + 1);
+      } else {
+        g.fillRoundRect(11, y + 1, THUMB_PX + 2, THUMB_PX + 2, 3, C_PANEL2);
+        if (entry.isDir) {
+          g.fillRect(18, y + 12, 10, 3, C_YELLOW);
+          g.fillRect(18, y + 15, 19, 12, C_YELLOW);
+          g.fillRect(20, y + 10, 8, 3, C_YELLOW);
+        } else if (entry.isImage) {
+          g.drawRect(17, y + 7, 21, 19, C_CYAN);
+          g.drawLine(19, y + 24, 25, y + 17, C_CYAN);
+          g.drawLine(25, y + 17, 30, y + 22, C_CYAN);
+          g.fillCircle(32, y + 12, 2, C_YELLOW);
+        } else {
+          g.fillCircle(24, y + 17, 7, C_CYAN);
+          g.drawFastVLine(27, y + 7, 14, C_CYAN);
+          g.drawLine(27, y + 7, 34, y + 12, C_CYAN);
+        }
+      }
+
+      char name[NAME_SIZE], shown[NAME_SIZE], fit[NAME_SIZE];
+      if (cached && cache.title[0]) safeCopy(shown, sizeof(shown), cache.title);
+      else {
+        toAscii(entry.name, name, sizeof(name));
+        if (!entry.isDir) stripExt(name);
+        safeCopy(shown, sizeof(shown), name);
+      }
       g.setFont(&fonts::Font2);
-      fitText(g, shown, 192, fit, sizeof(fit));
+      fitText(g, shown, 174, fit, sizeof(fit));
       g.setTextColor(active ? C_WHITE : C_GREY);
-      g.drawString(fit, 32, y);
+      g.drawString(fit, 50, y + 5);
+
+      if (cached && cache.detail[0]) {
+        g.setFont(&fonts::Font0);
+        g.setTextColor(active ? C_CYAN : C_GREY);
+        char detail[48];
+        fitText(g, cache.detail, 174, detail, sizeof(detail));
+        g.drawString(detail, 50, y + 21);
+      } else if (entry.isImage) {
+        g.setFont(&fonts::Font0);
+        g.setTextColor(C_GREY);
+        g.drawString(uiText(UI_IMAGE_VIEW), 50, y + 21);
+      }
     }
+
     if ((int)entryCount > ROWS) {
-      const int trackH = ROWS * ROW_H;
-      g.fillRect(234, Y0, 3, trackH, C_DIM);
+      const int trackH = ROWS * ROW_H - 3;
+      g.fillRect(235, Y0, 3, trackH, C_DIM);
       int thumbH = trackH * ROWS / (int)entryCount;
-      if (thumbH < 8) thumbH = 8;
-      const int thumbY = Y0 + (trackH - thumbH) * firstVisible / ((int)entryCount - ROWS);
-      g.fillRect(234, thumbY, 3, thumbH, C_RED);
+      if (thumbH < 7) thumbH = 7;
+      const int maxStart = max(1, (int)entryCount - ROWS);
+      const int thumbY = Y0 + (trackH - thumbH) * firstVisible / maxStart;
+      g.fillRect(235, thumbY, 3, thumbH, C_RED);
     }
   }
 
@@ -2149,30 +2186,148 @@ void drawBrowser() {
     g.setFont(&fonts::Font0);
     char t[12], d[12], line[32];
     formatTime(t, sizeof(t), elapsedSec());
-    if (meta.durationSec) { formatTime(d, sizeof(d), meta.durationSec); snprintf(line, sizeof(line), "%s / %s", t, d); }
-    else safeCopy(line, sizeof(line), t);
+    if (meta.durationSec) {
+      formatTime(d, sizeof(d), meta.durationSec);
+      snprintf(line, sizeof(line), "%s / %s", t, d);
+    } else safeCopy(line, sizeof(line), t);
     g.setTextColor(C_CYAN);
     g.drawString(line, 8, 125);
-    const char *st = (paused || fadeAction == FA_PAUSE) ? uiText(UI_PAUSED) : uiText(UI_PLAYING);
+    const char *state = (paused || fadeAction == FA_PAUSE) ? uiText(UI_PAUSED) : uiText(UI_PLAYING);
     g.setTextColor((paused || fadeAction == FA_PAUSE) ? C_YELLOW : C_GREY);
-    g.drawString(st, 232 - g.textWidth(st), 125);
+    g.drawString(state, 232 - g.textWidth(state), 125);
   } else {
     g.setFont(&fonts::Font0);
     g.setTextColor(C_GREY);
     g.drawString(uiText(UI_BROWSER_KEYS1), 8, 101);
     g.drawString(uiText(UI_BROWSER_KEYS2), 8, 113);
     if (entryCount) {
-      char c[20];
-      snprintf(c, sizeof(c), "%d/%d", selected + 1, (int)entryCount);
+      char count[20];
+      snprintf(count, sizeof(count), "%d/%d", selected + 1, (int)entryCount);
       g.setTextColor(C_CYAN);
-      g.drawString(c, 232 - g.textWidth(c), 125);
+      g.drawString(count, 232 - g.textWidth(count), 125);
     }
   }
   if (toastActive && millis() < toastUntil) {
     g.fillRect(0, 122, 240, 13, C_PANEL2);
     g.setFont(&fonts::Font0);
     g.setTextColor(C_YELLOW);
-    g.drawString(toastText, 8, 125);
+    char toast[80];
+    fitText(g, toastText, 224, toast, sizeof(toast));
+    g.drawString(toast, 8, 125);
+  }
+  ui.pushSprite(0, 0);
+}
+
+void invalidateThumbnails() {
+  thumbnailWindow = -1;
+  thumbnailNextSlot = 0;
+  for (int i = 0; i < ROWS; ++i) {
+    thumbnailCache[i] = ThumbnailCache();
+    if (thumbCanvasReady[i]) thumbCanvases[i]->fillSprite(C_PANEL2);
+  }
+}
+
+void thumbnailStep() {
+  if (screen != SCR_BROWSER || scanning || playing || !storageReady()) return;
+  if (thumbnailWindow != firstVisible) {
+    thumbnailWindow = firstVisible;
+    thumbnailNextSlot = 0;
+    for (int i = 0; i < ROWS; ++i) thumbnailCache[i] = ThumbnailCache();
+  }
+  if (thumbnailNextSlot >= ROWS) return;
+  const uint32_t now = millis();
+  if (now - lastThumbnailStep < 90) return;
+  lastThumbnailStep = now;
+
+  const int slot = thumbnailNextSlot++;
+  const int index = firstVisible + slot;
+  if (index >= (int)entryCount) return;
+  const Entry &entry = entries[index];
+  if (entry.isDir || !thumbCanvasReady[slot]) return;
+
+  char path[PATH_SIZE];
+  if (!buildPath(path, sizeof(path), browseDir, entry.name)) return;
+  ThumbnailCache &cache = thumbnailCache[slot];
+  safeCopy(cache.path, sizeof(cache.path), path);
+  cache.mediaEpoch = sdMediaEpoch;
+  cache.hasImage = false;
+  cache.title[0] = '\0';
+  cache.detail[0] = '\0';
+
+  CoverRef image;
+  if (entry.isImage) {
+    File file = activeFS().open(path, FILE_READ);
+    if (file) {
+      safeCopy(gProbePath, sizeof(gProbePath), path);
+      const uint32_t size = (uint32_t)file.size();
+      inspectImage(file, 0, size, image, IMAGE_MAX_BYTES);
+      file.close();
+    }
+    safeCopy(cache.title, sizeof(cache.title), entry.name);
+    stripExt(cache.title);
+    safeCopy(cache.detail, sizeof(cache.detail), image.png ? uiText(UI_IMAGE_PNG) : uiText(UI_IMAGE_JPEG));
+  } else {
+    Meta preview;
+    probeMeta(path, formatOf(entry.name), preview);
+    image = coverRef;
+    if (preview.title[0]) safeCopy(cache.title, sizeof(cache.title), preview.title);
+    else {
+      safeCopy(cache.title, sizeof(cache.title), entry.name);
+      stripExt(cache.title);
+    }
+    if (preview.artist[0]) safeCopy(cache.detail, sizeof(cache.detail), preview.artist);
+    else {
+      const Fmt format = formatOf(entry.name);
+      safeCopy(cache.detail, sizeof(cache.detail), format == FMT_WAV ? uiText(UI_FORMAT_WAV) :
+               format == FMT_FLAC ? uiText(UI_FORMAT_FLAC) :
+               format == FMT_AAC ? uiText(UI_FORMAT_AAC) : uiText(UI_FORMAT_MP3));
+    }
+  }
+  if (image.valid) cache.hasImage = drawImageRef(*thumbCanvases[slot], image, THUMB_PX, THUMB_PX);
+  if (!cache.hasImage) thumbCanvases[slot]->fillSprite(C_PANEL2);
+  if (screen == SCR_BROWSER) drawBrowser();
+}
+
+void drawImageViewer() {
+  screen = SCR_IMAGE;
+  if (screenOff) return;
+  auto &g = ui;
+  g.fillSprite(C_BG);
+  drawGrid(g);
+  char title[NAME_SIZE];
+  safeCopy(title, sizeof(title), imageViewerPath);
+  const char *base = strrchr(title, '/');
+  if (base) memmove(title, base + 1, strlen(base + 1) + 1);
+  stripExt(title);
+  drawHeader(g, title, C_CYAN);
+
+  bool ok = false;
+  if (imageViewerRef.valid) {
+    CoverStream stream;
+    if (stream.open(imageViewerRef)) {
+      constexpr int VIEW_W = 236, VIEW_H = 87, VIEW_Y = 23;
+      const float sx = (float)VIEW_W / (float)imageViewerRef.w;
+      const float sy = (float)VIEW_H / (float)imageViewerRef.h;
+      float scale = sx < sy ? sx : sy;
+      if (scale > 1.0f) scale = 1.0f;
+      const int dw = max(1, (int)(imageViewerRef.w * scale));
+      const int dh = max(1, (int)(imageViewerRef.h * scale));
+      const int x = (240 - dw) / 2;
+      const int y = VIEW_Y + (VIEW_H - dh) / 2;
+      ok = imageViewerRef.png
+          ? g.drawPng(&stream, x, y, dw, dh, 0, 0, scale, scale)
+          : g.drawJpg(&stream, x, y, dw, dh, 0, 0, scale, scale);
+    }
+  }
+  g.fillRect(0, 113, 240, 22, C_PANEL2);
+  g.setFont(&fonts::Font0);
+  g.setTextColor(ok ? C_GREY : C_RED);
+  g.drawString(ok ? uiText(UI_IMAGE_KEYS) : uiText(UI_IMAGE_UNSUPPORTED), 6, 120);
+  if (imageViewerIndex >= 0 && entryCount) {
+    char count[20];
+    snprintf(count, sizeof(count), "%d/%d", imageViewerIndex + 1, (int)entryCount);
+    g.setTextColor(C_CYAN);
+    g.drawString(count, 232 - g.textWidth(count), 130);
   }
   ui.pushSprite(0, 0);
 }
