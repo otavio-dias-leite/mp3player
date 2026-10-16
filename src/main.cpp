@@ -792,6 +792,10 @@ bool mountSD();
 
 // Fonte de arquivo com recuperacao: se o SD falhar no meio da musica,
 // remonta o cartao, reabre o arquivo e retoma exatamente do mesmo byte.
+extern bool needRescan;
+extern uint32_t lastRemountAt;
+extern uint32_t lastSdProbeAt;
+
 class SdStreamSource final : public AudioFileSource {
 public:
   bool open(const char *path) override {
