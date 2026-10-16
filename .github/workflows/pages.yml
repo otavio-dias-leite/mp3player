@@ -1,10 +1,8 @@
 name: Deploy MP3 PLAYER website
 
 on:
-  push:
-    branches: [main]
   workflow_run:
-    workflows: ["Firmware build"]
+    workflows: ["Build and publish MP3 PLAYER firmware"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
@@ -20,64 +18,45 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout exact firmware source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Wait for the release built from this commit
+      - name: Locate release produced by firmware build
         id: release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED_SHA="$(git rev-parse HEAD)"
-          export EXPECTED_SHA
-          TAG="mp3-player-$(printf '%.12s' "$EXPECTED_SHA")"
+          VERSION="$(tr -d '\r\n' < VERSION)"
+          TAG="v$VERSION"
           API="https://api.github.com/repos/otavio-dias-leite/mp3player/releases/tags/$TAG"
-          for attempt in $(seq 1 36); do
-            curl --fail --silent --show-error \
-              -H "Accept: application/vnd.github+json" \
-              -H "Authorization: Bearer $GH_TOKEN" \
-              -H "X-GitHub-Api-Version: 2022-11-28" \
-              "$API" -o /tmp/mp3-player-release.json || true
-            if test -s /tmp/mp3-player-release.json && python - <<'PY'
-          import json, os
-          from pathlib import Path
-          try:
-              release = json.loads(Path("/tmp/mp3-player-release.json").read_text())
-              assets = {a.get("name") for a in release.get("assets", [])}
-              ok = (release.get("target_commitish") == os.environ["EXPECTED_SHA"]
-                    and "mp3-player-cardputer-adv-full.bin" in assets)
-              raise SystemExit(0 if ok else 1)
-          except Exception:
-              raise SystemExit(1)
-          PY
-            then
-              break
-            fi
-            rm -f /tmp/mp3-player-release.json
-            echo "Release for $EXPECTED_SHA is not ready (attempt $attempt/36)."
-            sleep 10
-          done
-          test -s /tmp/mp3-player-release.json
+          curl --fail --silent --show-error --retry 5 --retry-delay 3 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "$API" -o /tmp/release.json
           python - <<'PY'
           import json, os
           from pathlib import Path
-          release = json.loads(Path("/tmp/mp3-player-release.json").read_text())
-          assert release.get("target_commitish") == os.environ["EXPECTED_SHA"], "Latest release does not match this source commit"
-          asset = next((a for a in release.get("assets", []) if a.get("name") == "mp3-player-cardputer-adv-full.bin"), None)
-          assert asset and asset.get("browser_download_url"), "Full firmware image is missing from latest release"
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write("version=" + release["tag_name"] + "\n")
-              f.write("asset_url=" + asset["browser_download_url"] + "\n")
+          release = json.loads(Path("/tmp/release.json").read_text())
+          asset = next((a for a in release.get("assets", [])
+                        if a.get("name") == "mp3-player-cardputer-adv-full.bin"), None)
+          assert asset and asset.get("browser_download_url"), "Full MP3 Player firmware is missing from release"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("version=" + release["tag_name"] + "\n")
+              out.write("asset_url=" + asset["browser_download_url"] + "\n")
           PY
 
-      - name: Build website using the latest release
+      - name: Assemble website with the exact firmware release
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_ASSET_URL: ${{ steps.release.outputs.asset_url }}
@@ -86,8 +65,7 @@ jobs:
           set -euo pipefail
           mkdir -p _site/firmware
           cp index.html style.css _site/
-          echo "Downloading MP3 PLAYER $RELEASE_VERSION"
-          curl --fail --location --retry 3 --retry-delay 2 \
+          curl --fail --location --retry 5 --retry-delay 3 \
             "$RELEASE_ASSET_URL" -o _site/firmware/mp3-player-cardputer-adv-full.bin
           test "$(stat -c %s _site/firmware/mp3-player-cardputer-adv-full.bin)" -gt 100000
           cp firmware/manifest.json _site/firmware/manifest.json
@@ -95,19 +73,18 @@ jobs:
           import json, os
           from pathlib import Path
           version = os.environ["RELEASE_VERSION"]
-          for name in ("index.html",):
-              page = Path("_site") / name
-              page.write_text(page.read_text().replace("@MP3_PLAYER_VERSION@", version))
+          page = Path("_site/index.html")
+          page.write_text(page.read_text().replace("@MP3_PLAYER_VERSION@", version))
           manifest = Path("_site/firmware/manifest.json")
           data = json.loads(manifest.read_text())
           data["version"] = version
-          data["builds"][0]["parts"] = [{
-              "path": "mp3-player-cardputer-adv-full.bin",
-              "offset": 0
-          }]
+          data["builds"][0]["parts"] = [{"path": "mp3-player-cardputer-adv-full.bin", "offset": 0}]
           manifest.write_text(json.dumps(data, indent=2) + "\n")
           PY
           touch _site/.nojekyll
+          test -s _site/index.html
+          test -s _site/firmware/manifest.json
+          test -s _site/firmware/mp3-player-cardputer-adv-full.bin
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
