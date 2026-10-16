@@ -2452,6 +2452,55 @@ void drawImageViewer() {
   ui.pushSprite(0, 0);
 }
 
+bool openImageViewer(int entryIndex) {
+  if (entryIndex < 0 || entryIndex >= (int)entryCount) return false;
+  const Entry &entry = entries[entryIndex];
+  if (!entry.isImage) return false;
+  char path[PATH_SIZE];
+  if (!buildPath(path, sizeof(path), browseDir, entry.name)) {
+    showToast(uiText(UI_INVALID_PATH));
+    return false;
+  }
+  File file = activeFS().open(path, FILE_READ);
+  if (!file) {
+    showToast(uiText(UI_OPEN_FILE_ERROR));
+    return false;
+  }
+  safeCopy(gProbePath, sizeof(gProbePath), path);
+  CoverRef ref;
+  const uint32_t size = (uint32_t)file.size();
+  const bool valid = inspectImage(file, 0, size, ref, IMAGE_MAX_BYTES);
+  file.close();
+  if (!valid) {
+    showToast(uiText(UI_IMAGE_UNSUPPORTED));
+    return false;
+  }
+  imageViewerRef = ref;
+  safeCopy(imageViewerPath, sizeof(imageViewerPath), path);
+  imageViewerIndex = entryIndex;
+  drawImageViewer();
+  return true;
+}
+
+void imageViewerKey(int key) {
+  if (key == K_TAB || key == K_DEL || key == '`') {
+    drawBrowser();
+    return;
+  }
+  int dir = 0;
+  if (key == ',' || key == ';') dir = -1;
+  else if (key == '/' || key == '.') dir = +1;
+  if (!dir || !entryCount) return;
+  int index = imageViewerIndex;
+  for (size_t tries = 0; tries < entryCount; ++tries) {
+    index += dir;
+    if (index < 0) index = (int)entryCount - 1;
+    if (index >= (int)entryCount) index = 0;
+    if (entries[index].isImage && openImageViewer(index)) return;
+  }
+  showToast(uiText(UI_IMAGE_UNSUPPORTED));
+}
+
 void drawLive() {
   if (screenOff) return;
   auto &g = live;
@@ -2848,6 +2897,7 @@ void redrawCurrent() {
     case SCR_EQ: drawEq(); break;
     case SCR_SETTINGS: drawSettings(); break;
     case SCR_HELP: drawHelp(); break;
+    case SCR_IMAGE: drawImageViewer(); break;
   }
 }
 
@@ -3003,6 +3053,7 @@ void leaveToReturn() {
 
 void activateSelection() {
   if (!entryCount || selected < 0 || selected >= (int)entryCount) return;
+  if (entries[selected].isImage) { openImageViewer(selected); return; }
   if (entries[selected].isDir) {
     char name[NAME_SIZE];
     safeCopy(name, sizeof(name), entries[selected].name);
@@ -3184,6 +3235,7 @@ void settingsKey(int k) {
 void onKey(int k) {
   if (k >= 'A' && k <= 'Z') k += 32;
 
+  if (screen == SCR_IMAGE) { imageViewerKey(k); return; }
   if (screen == SCR_HELP) {
     if (k == 'h') {
       helpPage = (helpPage + 1) % 3;
@@ -3480,6 +3532,7 @@ void loop() {
   scanStep(4);
   handleKeyboard();
   coverStep();
+  thumbnailStep();
   pollShake();
   housekeeping();
   ledUpdate();
