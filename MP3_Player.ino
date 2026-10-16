@@ -65,15 +65,15 @@ constexpr int SD_MOSI = 14;
 constexpr uint16_t rgb(uint8_t r, uint8_t g, uint8_t b) {
   return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
-uint16_t C_BG = rgb(8, 6, 10);
-uint16_t C_RED = rgb(255, 40, 60);
-uint16_t C_DARKRED = rgb(60, 8, 18);
-uint16_t C_PANEL = rgb(40, 12, 20);
-uint16_t C_PANEL2 = rgb(18, 8, 12);
-uint16_t C_DIM = rgb(34, 22, 28);
+uint16_t C_BG = rgb(4, 8, 15);
+uint16_t C_RED = rgb(77, 163, 255);
+uint16_t C_DARKRED = rgb(8, 28, 52);
+uint16_t C_PANEL = rgb(10, 27, 46);
+uint16_t C_PANEL2 = rgb(5, 15, 27);
+uint16_t C_DIM = rgb(14, 35, 57);
 constexpr uint16_t C_WHITE   = rgb(255, 255, 255);
 constexpr uint16_t C_GREY    = rgb(150, 150, 160);
-uint16_t C_CYAN = rgb(255, 40, 60);
+uint16_t C_CYAN = rgb(0, 229, 255);
 constexpr uint16_t C_BLUE    = rgb(70, 120, 255);
 constexpr uint16_t C_MAGENTA = rgb(255, 70, 190);
 constexpr uint16_t C_ORANGE  = rgb(255, 140, 0);
@@ -172,7 +172,7 @@ const ThemePalette THEMES[] = {
   {"AMBER",      255, 165, 45,  62, 32, 5,  48, 27, 8,  20, 13, 5,  52, 38, 20}
 };
 constexpr int THEME_COUNT = sizeof(THEMES) / sizeof(THEMES[0]);
-int themeIndex = 0;
+int themeIndex = 3;
 
 void applyTheme() {
   const ThemePalette &t = THEMES[constrain(themeIndex, 0, THEME_COUNT - 1)];
@@ -540,12 +540,20 @@ void loadSettings() {
   opt.repeat = constrain(prefs.getInt("rp", 0), 0, 2);
   opt.shuffle = constrain(prefs.getInt("sf", 0), 0, 1);
   opt.visual = constrain(prefs.getInt("vz", 0), 0, 3);
-  themeIndex = constrain(prefs.getInt("th", 0), 0, THEME_COUNT - 1);
+  const int themeVersion = prefs.getInt("themeV", 0);
+  themeIndex = constrain(prefs.getInt("th", 3), 0, THEME_COUNT - 1);
+  if (themeVersion < 1) themeIndex = 3; // migrate legacy installs to blue
   for (int i = i < EQ_BANDS; ++i) {
     char key[3] = {'g', (char)('0' + i), 0};
     eqGain[i] = constrain(prefs.getInt(key, eqGain[i]), -EQ_LIMIT, EQ_LIMIT);
   }
   prefs.end();
+  if (themeVersion < 1) {
+    prefs.begin("mp3player", false);
+    prefs.putInt("th", 3);
+    prefs.putInt("themeV", 1);
+    prefs.end();
+  }
   applyTheme();
 }
 
@@ -1309,6 +1317,15 @@ void changeVolume(int delta) {
 }
 
 // ============================================================ desenho
+void drawGrid(LovyanGFX &g, int height = 135, int top = 20) {
+  const uint16_t minor = rgb(8, 17, 29);
+  const uint16_t major = rgb(12, 29, 49);
+  for (int x = 8; x < 240; x += 16)
+    g.drawFastVLine(x, top, height - top, (x % 32 == 8) ? major : minor);
+  for (int y = top + 4; y < height; y += 16)
+    g.drawFastHLine(0, y, 240, (y % 32 == 24) ? major : minor);
+}
+
 void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
   g.fillRect(0, 0, 240, 20, C_DARKRED);
   g.fillRect(0, 20, 240, 1, C_RED);
@@ -1333,6 +1350,12 @@ void drawHeader(LovyanGFX &g, const char *title, uint16_t titleColor) {
 void drawSplash() {
   auto &d = M5Cardputer.Display;
   d.fillScreen(C_BG);
+  const uint16_t gridMinor = rgb(8, 17, 29);
+  const uint16_t gridMajor = rgb(12, 29, 49);
+  for (int x = 8; x < 240; x += 16)
+    d.drawFastVLine(x, 0, 135, (x % 32 == 8) ? gridMajor : gridMinor);
+  for (int y = 8; y < 135; y += 16)
+    d.drawFastHLine(0, y, 240, (y % 32 == 8) ? gridMajor : gridMinor);
   d.setFont(&fonts::Font2);
   d.setTextSize(2);
   d.setTextColor(C_RED);
@@ -1368,6 +1391,7 @@ void drawBrowser() {
   if (screenOff) return;
   auto &g = ui;
   g.fillSprite(C_BG);
+  drawGrid(g);
 
   char title[NAME_SIZE];
   if (browseDir[1] == '\0') safeCopy(title, sizeof(title), "SD CARD");
@@ -1484,6 +1508,7 @@ void drawLive() {
   if (screenOff) return;
   auto &g = live;
   g.fillSprite(C_BG);
+  drawGrid(g, 90, 0);
 
   g.setFont(&fonts::Font2);
   g.setTextSize(1);
@@ -1615,6 +1640,7 @@ void drawPlayer() {
   if (screenOff) return;
   auto &g = ui;
   g.fillSprite(C_BG);
+  drawGrid(g);
   const bool p = paused || fadeAction == FA_PAUSE;
   drawHeader(g, p ? "PAUSADO" : "TOCANDO", p ? C_YELLOW : C_CYAN);
 
@@ -1646,6 +1672,7 @@ void drawEq() {
   if (screenOff) return;
   auto &g = ui;
   g.fillSprite(C_BG);
+  drawGrid(g);
   drawHeader(g, "EQUALIZADOR", C_CYAN);
 
   constexpr int CENTER_Y = 66, HALF = 26;
@@ -1713,6 +1740,7 @@ void drawSettings() {
   if (screenOff) return;
   auto &g = ui;
   g.fillSprite(C_BG);
+  drawGrid(g);
   drawHeader(g, "AJUSTES", C_CYAN);
   g.setFont(&fonts::Font0);
   g.setTextSize(1);
@@ -1778,6 +1806,7 @@ void drawHelp() {
 
   auto &g = ui;
   g.fillSprite(C_BG);
+  drawGrid(g);
   char title[24];
   snprintf(title, sizeof(title), "TUTORIAL %d/3", helpPage + 1);
   drawHeader(g, title, C_CYAN);
@@ -1892,7 +1921,7 @@ void activateSelection() {
 
 void resetDefaults() {
   opt = Options();
-  themeIndex = 0;
+  themeIndex = 3;
   applyTheme();
   volByMode[0] = 80; volByMode[1] = 30; outMode = 0;
   volumePercent = 80;
