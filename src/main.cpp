@@ -460,9 +460,9 @@ uint32_t gRng = 0x1234ABCDu;
 
 // Reamostrador polifasico FIR: 9 taps, 32 fases + interpolacao de fase.
 // A tabela e criada fora do caminho de audio; o loop de amostras so faz MACs.
-constexpr int RS_TAPS = 9;
-constexpr int RS_PHASES = 32;
-constexpr int RS_HISTORY = 16;
+constexpr int RS_TAPS = 16;
+constexpr int RS_PHASES = 64;
+constexpr int RS_HISTORY = 32;
 constexpr int RS_MAX_OUTPUTS_PER_INPUT = 16;
 float rsCoeff[2][RS_PHASES + 1][RS_TAPS] = {};
 float rsHistory[RS_HISTORY] = {};
@@ -646,12 +646,12 @@ float sincPi(float x) {
 
 void buildResampleTable(uint8_t table, float step) {
   const float cutoff = fminf(0.96f, 0.94f / fmaxf(step, 1.0f));
-  constexpr float radius = 4.5f;
+  constexpr float radius = 8.0f;
   for (int phase = 0; phase <= RS_PHASES; ++phase) {
     const float frac = (float)phase / (float)RS_PHASES;
     float sum = 0.0f;
     for (int tap = 0; tap < RS_TAPS; ++tap) {
-      const float distance = (float)(tap - 4) - frac;
+      const float distance = (float)(tap - 7) - frac;
       const float windowPos = distance / radius;
       float window = 0.0f;
       if (fabsf(windowPos) <= 1.0f) {
@@ -706,7 +706,7 @@ inline float resampleHistoryAt(int64_t index, int64_t newest) {
 inline void pushResampled(float input) {
   const int64_t newest = ++rsInputIndex;
   rsHistory[(uint64_t)newest & (RS_HISTORY - 1)] = input;
-  const double newestSafePosition = (double)newest - 4.0;
+  const double newestSafePosition = (double)newest - 8.0;
 
   while (rsNextPos <= newestSafePosition) {
     const int64_t base = (int64_t)rsNextPos;
@@ -716,22 +716,30 @@ inline void pushResampled(float input) {
     const int phase1 = phase0 + 1;
     const float phaseMix = phase - (float)phase0;
 
-    float y0 = 0.0f, y1 = 0.0f;
     const float *c00 = rsCoeff[rsFilterActive][phase0];
     const float *c01 = rsCoeff[rsFilterActive][phase1];
-    const float *c10 = rsCoeff[rsFilterTarget][phase0];
-    const float *c11 = rsCoeff[rsFilterTarget][phase1];
-    for (int tap = 0; tap < RS_TAPS; ++tap) {
-      const float sample = resampleHistoryAt(base + tap - 4, newest);
-      const float a = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
-      const float b = c10[tap] + (c11[tap] - c10[tap]) * phaseMix;
-      y0 += sample * a;
-      y1 += sample * b;
+    float y = 0.0f;
+    if (rsFilterMix >= 0.9999f || rsFilterActive == rsFilterTarget) {
+      for (int tap = 0; tap < RS_TAPS; ++tap) {
+        const float sample = resampleHistoryAt(base + tap - 7, newest);
+        const float coeff = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
+        y += sample * coeff;
+      }
+    } else {
+      const float *c10 = rsCoeff[rsFilterTarget][phase0];
+      const float *c11 = rsCoeff[rsFilterTarget][phase1];
+      float yNext = 0.0f;
+      for (int tap = 0; tap < RS_TAPS; ++tap) {
+        const float sample = resampleHistoryAt(base + tap - 7, newest);
+        const float a = c00[tap] + (c01[tap] - c00[tap]) * phaseMix;
+        const float b = c10[tap] + (c11[tap] - c10[tap]) * phaseMix;
+        y += sample * a;
+        yNext += sample * b;
+      }
+      y += (yNext - y) * rsFilterMix;
     }
-    const float y = y0 + (y1 - y0) * rsFilterMix;
     gRing[gCur][gFill++] = processSample(y);
     // Tempo de conteudo: avanca pela razao real atual, inclusive durante o ramp de velocidade.
-    gMediaTimeSamples += (double)rsStep * (double)OUT_RATE / (double)rsSourceRate;
 
     if (rsFilterMix < 1.0f) {
       rsFilterMix += rsFilterMixStep;
@@ -1032,7 +1040,7 @@ void allocateAudioBuffer() {
   sdAudioBufferSize = 0;
   const size_t freeHeap = ESP.getFreeHeap();
   const size_t maxBlock = ESP.getMaxAllocHeap();
-  const size_t candidates[] = {32 * 1024, 24 * 1024, 16 * 1024, 12 * 1024, 8 * 1024};
+  const size_t candidates[] = {48 * 1024, 40 * 1024, 32 * 1024, 24 * 1024, 16 * 1024, 12 * 1024, 8 * 1024};
   for (size_t candidate : candidates) {
     if (candidate > SD_AUDIO_BUFFER_TARGET || candidate > maxBlock) continue;
     if (freeHeap < candidate + 64 * 1024) continue;
@@ -2458,7 +2466,7 @@ void invalidateThumbnails() {
 }
 
 void thumbnailStep() {
-  if (screenOff || screen != SCR_BROWSER || scanning || !storageReady()) return;
+  if (screenOff || screen != SCR_BROWSER || scanning || playing || !storageReady()) return;
   if (thumbnailWindow != firstVisible) {
     thumbnailWindow = firstVisible;
     thumbnailNextSlot = 0;
