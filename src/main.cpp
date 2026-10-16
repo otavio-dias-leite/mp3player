@@ -192,7 +192,7 @@ const int8_t PRESETS[NUM_PRESETS][EQ_BANDS] = {
   { 6,  3, -1,  2,  5},
 };
 
-char toastText[40] = {0};
+char toastText[80] = {0};
 uint32_t toastUntil = 0;
 bool toastActive = false;
 
@@ -1749,8 +1749,8 @@ void finishScan() {
     reselectName[0] = '\0';
     ensureVisible();
   }
-  if (scanFolderLimit) showToast("PASTA GRANDE: FILTRO PARCIAL");
-  else if (scanOverflow) showToast("LIMITE: 200 ITENS");
+  if (scanFolderLimit) showToast(uiText(UI_SCAN_FOLDER_LIMIT));
+  else if (scanOverflow) showToast(uiText(UI_SCAN_OVERFLOW));
   if (screen == SCR_BROWSER) drawBrowser();
 }
 
@@ -1769,7 +1769,7 @@ void beginScan(const char *path, const char *reselect = nullptr) {
   scanHandle = activeFS().open(browseDir);
   if (!scanHandle || !scanHandle.isDirectory()) {
     if (scanHandle) scanHandle.close();
-    showToast("PASTA INVALIDA");
+    showToast(uiText(UI_INVALID_FOLDER));
     if (screen == SCR_BROWSER) drawBrowser();
     return;
   }
@@ -1826,7 +1826,7 @@ void scanStep(uint32_t budgetMs) {
 void enterDir(const char *name) {
   char path[PATH_SIZE];
   if (!buildPath(path, sizeof(path), browseDir, name) || strlen(path) >= sizeof(browseDir)) {
-    showToast("CAMINHO LONGO");
+    showToast(uiText(UI_PATH_TOO_LONG));
     drawBrowser();
     return;
   }
@@ -2045,7 +2045,7 @@ bool startTrack(size_t qIdx, uint32_t startSec, bool reprobe, bool natural) {
 
 void finishQueue() {
   stopPlayback(false);
-  showToast("FIM DA LISTA");
+  showToast(uiText(UI_QUEUE_END));
   if (screen == SCR_PLAYER) { screen = SCR_BROWSER; }
   redrawCurrent();
 }
@@ -2076,7 +2076,7 @@ bool advance(int dir, bool automatic, int steps = 1) {
     if (startTrack(order[orderPos], 0, true, automatic)) { redrawCurrent(); return true; }
   }
   stopPlayback(true);
-  showToast("ERRO AO ABRIR ARQUIVO");
+  showToast(uiText(UI_OPEN_FILE_ERROR));
   if (screen == SCR_PLAYER) screen = SCR_BROWSER;
   redrawCurrent();
   return false;
@@ -2094,7 +2094,7 @@ void requestSkip(int dir) {
   pendingSkip += dir;
   skipDue = millis() + 200;
   char t[24];
-  snprintf(t, sizeof(t), pendingSkip > 0 ? "PROXIMA +%d" : "ANTERIOR %d", pendingSkip);
+  snprintf(t, sizeof(t), pendingSkip > 0 ? uiText(UI_NEXT_FMT) : uiText(UI_PREVIOUS_FMT), pendingSkip);
   showToast(t);
 }
 
@@ -2122,7 +2122,7 @@ void seekBy(int delta) {
   pendingSeek += delta;
   seekDue = millis() + 280;
   char t[24];
-  snprintf(t, sizeof(t), "BUSCA %+ds", pendingSeek);
+  snprintf(t, sizeof(t), uiText(UI_SEEK_FMT), pendingSeek);
   showToast(t);
 }
 
@@ -2170,7 +2170,7 @@ void changeVolume(int delta) {
   updateVolumeTarget();
   markSettingsDirty();
   char t[24];
-  snprintf(t, sizeof(t), "VOLUME %d%%", volumePercent);
+  snprintf(t, sizeof(t), uiText(UI_VOLUME_FMT), volumePercent);
   showToast(t);
   redrawCurrent();
 }
@@ -2971,7 +2971,7 @@ bool mediaKey(int k) {
       configureDsp();
       markSettingsDirty();
       char t[28];
-      snprintf(t, sizeof(t), "REALCE: %s", ENHANCE_NAMES[opt.enhance]);
+      snprintf(t, sizeof(t), uiText(UI_SOUND_FMT), localizedEnhance(opt.enhance));
       showToast(t);
       redrawCurrent();
       return true;
@@ -2983,7 +2983,7 @@ bool mediaKey(int k) {
       updateVolumeTarget();
       markSettingsDirty();
       char t[28];
-      snprintf(t, sizeof(t), "%s %d%%", outMode ? "SAIDA: FONE" : "SAIDA: ALTO-FALANTE", volumePercent);
+      snprintf(t, sizeof(t), "%s %d%%", outMode ? uiText(UI_OUTPUT_HEADPHONE) : uiText(UI_OUTPUT_SPEAKER), volumePercent);
       showToast(t);
       redrawCurrent();
       return true;
@@ -3057,7 +3057,7 @@ void sdAutoDetectStep() {
       safeCopy(browseDir, sizeof(browseDir), "/");
       beginScan(browseDir);
     }
-    showToast("SD DESCONECTADO - BUSCANDO");
+    showToast(uiText(UI_SD_SEARCHING));
     return;
   }
 
@@ -3072,7 +3072,7 @@ void sdAutoDetectStep() {
   safeCopy(browseDir, sizeof(browseDir), SD.exists("/music") ? "/music" : "/");
   selected = 0;
   firstVisible = 0;
-  showToast("SD RECONECTADO");
+  showToast(uiText(UI_SD_RECONNECTED));
   beginScan(browseDir);
 }
 
@@ -3127,7 +3127,7 @@ void resetDefaults() {
   sleepDeadline = 0;
   applyShuffleChange();
   markSettingsDirty();
-  showToast("DEFAULTS RESTORED");
+  showToast(uiText(UI_DEFAULTS_RESTORED));
   drawSettings();
 }
 
@@ -3157,22 +3157,22 @@ void browserKey(int k) {
     case 'e': returnScreen = SCR_BROWSER; drawEq(); return;
     case 'r': refreshBrowser(); return;
     case 'm':
-      if (playing) { showToast("PARE A MUSICA PARA TROCAR"); return; }
+      if (playing) { showToast(uiText(UI_STOP_MUSIC_TO_SWITCH)); return; }
       abortScan(); storageKind = (storageKind == STORAGE_SD) ? STORAGE_INTERNAL : STORAGE_SD;
       safeCopy(browseDir, sizeof(browseDir), "/"); selected = firstVisible = 0;
-      showToast(storageReady() ? (storageKind == STORAGE_SD ? "ARMAZENAMENTO: SD" : "ARMAZENAMENTO: INTERNO") : "ARMAZENAMENTO INDISPONIVEL");
+      showToast(storageReady() ? (storageKind == STORAGE_SD ? uiText(UI_STORAGE_SWITCH_SD) : uiText(UI_STORAGE_SWITCH_INTERNAL)) : uiText(UI_STORAGE_UNAVAILABLE));
       beginScan("/"); return;
     case 'c': {
-      if (storageKind != STORAGE_SD || !sdReady || !internalReady || entryCount == 0 || entries[selected].isDir) { showToast("SELECIONE ARQUIVO NO SD"); return; }
+      if (storageKind != STORAGE_SD || !sdReady || !internalReady || entryCount == 0 || entries[selected].isDir) { showToast(uiText(UI_SELECT_FILE_SD)); return; }
       char src[PATH_SIZE], dst[PATH_SIZE];
-      if (!buildPath(src, sizeof(src), browseDir, entries[selected].name)) { showToast("CAMINHO INVALIDO"); return; }
+      if (!buildPath(src, sizeof(src), browseDir, entries[selected].name)) { showToast(uiText(UI_INVALID_PATH)); return; }
       safeCopy(dst, sizeof(dst), src);
       char parent[PATH_SIZE]; safeCopy(parent, sizeof(parent), dst);
       for (char *q = parent + 1; *q; ++q) {
         if (*q == '/') { *q = 0; LittleFS.mkdir(parent); *q = '/'; }
       }
       File in = SD.open(src, FILE_READ); if (LittleFS.exists(dst)) LittleFS.remove(dst); File out = LittleFS.open(dst, FILE_WRITE);
-      if (!in || !out) { if (in) in.close(); if (out) out.close(); showToast("FALHA AO COPIAR"); return; }
+      if (!in || !out) { if (in) in.close(); if (out) out.close(); showToast(uiText(UI_COPY_FAILED)); return; }
       uint8_t buf[1024]; bool ok = true;
       while (in.available()) { size_t n = in.read(buf, sizeof(buf)); if (!n || out.write(buf, n) != n) { ok = false; break; } yield(); }
       in.close(); out.close();
@@ -3221,20 +3221,20 @@ void playerKey(int k) {
       opt.shuffle = !opt.shuffle;
       applyShuffleChange();
       markSettingsDirty();
-      showToast(opt.shuffle ? "ALEATORIO: LIGADO" : "ALEATORIO: DESLIGADO");
+      showToast(uiText(opt.shuffle ? UI_SHUFFLE_ON : UI_SHUFFLE_OFF));
       drawPlayer();
       break;
     case 'r':
       opt.repeat = (opt.repeat + 1) % 3;
       markSettingsDirty();
-      snprintf(t, sizeof(t), "REPETIR: %s", REPEAT_NAMES[opt.repeat]);
+      snprintf(t, sizeof(t), uiText(UI_REPEAT_FMT), localizedRepeat(opt.repeat));
       showToast(t);
       drawPlayer();
       break;
     case 'v':
       opt.visual = (opt.visual + 1) % 4;
       markSettingsDirty();
-      snprintf(t, sizeof(t), "VISUAL: %s", VISUAL_NAMES[opt.visual]);
+      snprintf(t, sizeof(t), uiText(UI_VISUAL_FMT), localizedVisual(opt.visual));
       showToast(t);
       break;
     case 't':
@@ -3391,10 +3391,10 @@ void decodeStep() {
     lastProgress = millis();
     if (stallRetries == 0 && canSeek()) {  // 1a tentativa: reabre no mesmo ponto
       stallRetries = 1;
-      showToast("RECUPERANDO...");
+      showToast(uiText(UI_RECOVERING));
       if (startTrack(order[orderPos], elapsedSec(), false, false)) { redrawCurrent(); return; }
     }
-    showToast("ERRO DE LEITURA");
+    showToast(uiText(UI_READ_ERROR));
     advance(+1, true);
   }
 }
