@@ -3618,10 +3618,10 @@ void setup() {
   sdReady = mountSD();
   storageKind = sdReady ? STORAGE_SD : STORAGE_INTERNAL;
   screen = SCR_BROWSER;
-  while (millis() - splashStart < 1000) delay(10)
+  while (millis() - splashStart < 1000) delay(10);
   beginScan((storageReady() && activeFS().exists("/music")) ? "/music" : "/");
 
-  Serial.printf("MP3 PLAYER %s | SD=%s | INTERNAL=%s | IMU=%s | heap=%u maxblk=%u\n", MP3_PLAYER_VERSION,
+  Serial.printf("JOHNNY MP3 %s | SD=%s | INTERNAL=%s | IMU=%s | heap=%u maxblk=%u\n", MP3_PLAYER_VERSION,
                 sdReady ? "OK" : "FAIL", internalReady ? "OK" : "FAIL", imuOk ? "OK" : "N/D",
                 (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMaxAllocHeap());
 }
