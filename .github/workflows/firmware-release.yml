@@ -9,6 +9,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: mp3-player-firmware-release
+  cancel-in-progress: true
+
 jobs:
   firmware:
     runs-on: ubuntu-latest
