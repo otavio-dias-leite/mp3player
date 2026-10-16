@@ -58,7 +58,7 @@ jobs:
           mp3-player-cardputer-adv-full.bin: instalação completa por USB.
 
           MÉTODO RECOMENDADO:
-          1. Abra https://otavio-dias-leite.github.io/johnny/ no Chrome ou Edge.
+          1. Abra https://otavio-dias-leite.github.io/mp3player/ no Chrome ou Edge.
           2. Conecte o Cardputer por USB mantendo G0 pressionado para entrar em modo de gravação.
           3. Clique em FLASH FIRMWARE, selecione a porta serial e confirme.
           4. Aguarde a conclusão antes de desconectar.
