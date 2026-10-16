@@ -2,7 +2,7 @@ name: Build and publish MP3 PLAYER firmware
 
 on:
   push:
-    branches: [main]
+    branches: [main, firmware-v8-2-deep-stability]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: mp3-player-firmware-release
-  cancel-in-progress: true
+  group: mp3-player-firmware-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   firmware:
