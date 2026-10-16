@@ -1317,12 +1317,12 @@ void changeVolume(int delta) {
 }
 
 // ============================================================ desenho
-void drawGrid(LovyanGFX &g) {
+void drawGrid(LovyanGFX &g, int height = 135, int top = 20) {
   const uint16_t minor = rgb(8, 17, 29);
   const uint16_t major = rgb(12, 29, 49);
   for (int x = 8; x < 240; x += 16)
-    g.drawFastVLine(x, 20, 115, (x % 32 == 8) ? major : minor);
-  for (int y = 24; y < 135; y += 16)
+    g.drawFastVLine(x, top, height - top, (x % 32 == 8) ? major : minor);
+  for (int y = top + 4; y < height; y += 16)
     g.drawFastHLine(0, y, 240, (y % 32 == 24) ? major : minor);
 }
 
@@ -1508,7 +1508,7 @@ void drawLive() {
   if (screenOff) return;
   auto &g = live;
   g.fillSprite(C_BG);
-  drawGrid(g);
+  drawGrid(g, 90, 0);
 
   g.setFont(&fonts::Font2);
   g.setTextSize(1);
