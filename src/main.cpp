@@ -76,7 +76,7 @@
 #define HAVE_AAC 1
 #endif
 
-#define MP3_PLAYER_VERSION "7.0.0"
+#define MP3_PLAYER_VERSION "8.0.0"
 
 namespace {
 
