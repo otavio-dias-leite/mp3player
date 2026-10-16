@@ -785,7 +785,6 @@ public:
   }
 
 };
-};
 
 // ============================================================ SD resiliente
 bool mountSD();
@@ -1756,6 +1755,7 @@ void finishScan() {
 
 void beginScan(const char *path, const char *reselect = nullptr) {
   abortScan();
+  invalidateThumbnails();
   validationIndex = 0;
   entryCount = 0;
   selected = 0;
@@ -2429,7 +2429,7 @@ void invalidateThumbnails() {
 }
 
 void thumbnailStep() {
-  if (screen != SCR_BROWSER || scanning || playing || !storageReady()) return;
+  if (screenOff || screen != SCR_BROWSER || scanning || playing || !storageReady()) return;
   if (thumbnailWindow != firstVisible) {
     thumbnailWindow = firstVisible;
     thumbnailNextSlot = 0;
